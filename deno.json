@@ -40,7 +40,8 @@
     "coverage:lcov": "deno coverage coverage --lcov --exclude=test --output=coverage/lcov.info",
     "coverage:html": "deno coverage coverage --html",
     "coverage:check": "deno task test:coverage && deno task coverage:lcov && deno run --allow-read --allow-env devtools/coverage-threshold.ts",
-    "check:all": "deno fmt && deno fmt --check && deno lint && deno task check && deno task coverage:check"
+    "coverage:check:client": "deno task test:client:coverage && deno run --allow-read --allow-env devtools/client-coverage-threshold.ts",
+    "check:all": "deno fmt && deno fmt --check && deno lint && deno task check && deno task coverage:check && deno task coverage:check:client"
   },
   "lint": {
     "plugins": [
