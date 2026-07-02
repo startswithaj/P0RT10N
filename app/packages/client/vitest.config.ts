@@ -12,6 +12,9 @@ import solid from "vite-plugin-solid";
 // (proper reactivity + hydration warnings) under jsdom.
 export default defineConfig({
   plugins: [solid()],
+  // Mirror vite.config.ts's build-time inject: App's footer reads `__COMMIT__`,
+  // so it must be defined under the test runner too (a literal, not the git hash).
+  define: { __COMMIT__: JSON.stringify("test") },
   resolve: {
     conditions: ["development", "browser"],
     alias: {

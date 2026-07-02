@@ -572,7 +572,9 @@ function Dashboard(
 }
 
 // The "Add portion" flow: form → provisioning (runs friends.add) → bundle.
-function createAddFlow() {
+// Exported so the add-flow state machine (esp. the shown-once bundle clearing on
+// finishAdd) can be unit-tested without driving the whole App render tree.
+export function createAddFlow() {
   const [adding, setAdding] = createSignal(false);
   const [phase, setPhase] = createSignal<"form" | "provisioning" | "bundle">(
     "form",
@@ -587,6 +589,12 @@ function createAddFlow() {
   const finishAdd = () => {
     setAdding(false);
     setPhase("form");
+    // Zero-knowledge: the bundle is shown once. Drop the completed add's state so
+    // the S3 secret / Tailscale key held in `addState` isn't retained in memory
+    // after the hand-off screen closes (until now it lingered until the next add
+    // overwrote it). `pending` (name/quota — no secret) is cleared alongside it.
+    setAddState({ kind: "pending" });
+    setPending(null);
     invalidate();
   };
   // Subscribe to the real provisioning stream; the screen reflects each step as
