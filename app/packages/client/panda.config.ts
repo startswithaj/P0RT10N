@@ -79,6 +79,10 @@ export default defineConfig({
           spark: {
             value: { base: "{colors.magenta}", _dark: "{colors.magenta}" },
           },
+          // Deep-indigo ink for text sitting on the brand cyan accent fill (active
+          // segmented-toggle pill). Fixed in both themes — the cyan fill doesn't
+          // flip, so neither should its ink.
+          onAccent: { value: { base: "#160F2E", _dark: "#160F2E" } },
         },
       },
     },

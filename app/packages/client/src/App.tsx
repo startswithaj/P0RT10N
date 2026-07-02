@@ -4,7 +4,9 @@ import { createQuery } from "@tanstack/solid-query";
 import { css } from "styled-system/css";
 import * as Card from "./components/ui/card.tsx";
 import * as Menu from "./components/ui/menu.tsx";
+import * as Progress from "./components/ui/progress.tsx";
 import { Badge } from "./components/ui/badge.tsx";
+import { Button } from "./components/ui/button.tsx";
 import { Aperture, Wordmark } from "./components/brand.tsx";
 import {
   Activity,
@@ -90,40 +92,37 @@ const segWrap = css({
   rounded: "full",
   p: "0.5",
 });
+// Rendered on Park's Button (variant ghost). The compact pill look is restored by
+// overriding the recipe's md height (h:auto) and neutralising the ghost hover
+// background (bg:transparent), while active state keeps the cyan fill + onAccent
+// ink on hover so the ghost hover-bg never leaks over the active pill.
 const segBtn = css({
   fontFamily: "body",
   fontSize: "xs",
   letterSpacing: "0.06em",
+  h: "auto",
   px: "3",
   py: "1.5",
   rounded: "full",
   cursor: "pointer",
   bg: "transparent",
   color: "fg.muted",
-  _hover: { color: "fg.default" },
+  _hover: { color: "fg.default", bg: "transparent" },
   "&[data-active='true']": {
     bg: "brandcyan.9",
-    color: "#160F2E",
-    _hover: { color: "#160F2E" },
+    color: "onAccent",
+    _hover: { color: "onAccent", bg: "brandcyan.9" },
   },
 });
+// Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan) and the
+// nav's rounded-full pill + hover lift; the Button recipe supplies sizing, gap and
+// typography. _hover pins bg:spark so the recipe's cyan hover fill can't show.
 const sparkBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "2",
-  px: "5",
-  h: "10",
   rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
   bg: "spark",
   color: "white",
-  borderWidth: "1.5px",
-  borderColor: "spark",
-  cursor: "pointer",
   transition: "transform 0.12s ease",
-  _hover: { transform: "translateY(-1px)" },
+  _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
 
 const cardReset = css({
@@ -201,6 +200,7 @@ const usageRow = css({
   alignItems: "baseline",
   fontSize: "sm",
 });
+const barRoot = css({ w: "full" });
 const barTrack = css({
   h: "2",
   w: "full",
@@ -267,13 +267,15 @@ const badgeFailed = css({ color: "fg.error", borderColor: "border.error" });
 const badgeNeutral = css({ color: "fg.muted" });
 
 function UsageBar(props: { fraction: number }) {
+  // Park UI Progress (Ark) drives the Range width and sets aria-valuenow from the
+  // value, so the old dynamic inline width style is gone. value is the usage % (max
+  // defaults to 100); the warn colour still trips at >=90%.
   return (
-    <div class={barTrack}>
-      <div
-        class={props.fraction >= 0.9 ? barWarn : barOk}
-        style={{ width: `${pct(props.fraction)}%` }}
-      />
-    </div>
+    <Progress.Root value={pct(props.fraction)} class={barRoot}>
+      <Progress.Track class={barTrack}>
+        <Progress.Range class={props.fraction >= 0.9 ? barWarn : barOk} />
+      </Progress.Track>
+    </Progress.Root>
   );
 }
 
@@ -383,48 +385,47 @@ function NavBar(
       </div>
       <div class={actions}>
         <div class={tabs}>
-          <button
-            type="button"
+          <Button
+            variant="link"
             class={tabLink}
             data-active={props.view() === "portions" ? "true" : "false"}
             onClick={() => props.setView("portions")}
           >
             Portions
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="link"
             class={tabLink}
             data-active={props.view() === "status" ? "true" : "false"}
             onClick={() => props.setView("status")}
           >
             Status
-          </button>
+          </Button>
         </div>
         <div class={segWrap}>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             class={segBtn}
             data-active={theme() === "dark" ? "true" : "false"}
             onClick={() => setThemeValue("dark")}
           >
             Dark
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
             class={segBtn}
             data-active={theme() === "light" ? "true" : "false"}
             onClick={() => setThemeValue("light")}
           >
             Light
-          </button>
+          </Button>
         </div>
-        <button
-          type="button"
+        <Button
           class={sparkBtn}
           onClick={props.onAdd}
         >
           <Plus size={16} /> Add portion
-        </button>
+        </Button>
       </div>
     </nav>
   );
