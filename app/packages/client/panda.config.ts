@@ -83,6 +83,9 @@ export default defineConfig({
           // segmented-toggle pill). Fixed in both themes — the cyan fill doesn't
           // flip, so neither should its ink.
           onAccent: { value: { base: "#160F2E", _dark: "#160F2E" } },
+          // Amber "provisioning / near-quota" warning accent. Fixed in both
+          // themes — the gold reads on both the light and dark surfaces.
+          warning: { value: { base: "#E0A83E", _dark: "#E0A83E" } },
         },
       },
     },

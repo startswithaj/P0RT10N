@@ -122,12 +122,12 @@ const dotProv = css({
   w: "2",
   h: "2",
   rounded: "full",
-  bg: "#E0A83E",
+  bg: "warning",
   animation: "pulse 1.4s ease-in-out infinite",
 });
 const upText = css({ color: "brandcyan.11" });
 const downText = css({ color: "fg.error" });
-const provText = css({ color: "#E0A83E" });
+const provText = css({ color: "warning" });
 const errorBox = css({ color: "fg.muted", fontSize: "sm", mt: "8" });
 
 function stateColor(s: SvcState): string {

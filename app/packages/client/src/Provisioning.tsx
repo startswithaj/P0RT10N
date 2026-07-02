@@ -3,6 +3,7 @@ import { css } from "styled-system/css";
 import { Check, XCircle } from "lucide-solid";
 import { PROVISION_STEPS, type ProvisionStepKey } from "@p0rt1on/shared/steps";
 import { Wordmark } from "./components/brand.tsx";
+import { Button } from "./components/ui/button.tsx";
 import { StepChecklist, stepStatusFor } from "./components/StepChecklist.tsx";
 
 // Provisioning view. friends.addStream streams a `step` event as each real step
@@ -74,39 +75,18 @@ const actions = css({
   gap: "3",
   mt: "6",
 });
+// Primary CTA keeps the brand magenta spark + rounded-full pill + hover lift;
+// the Button recipe supplies sizing, gap and typography. _hover pins bg:spark so
+// the recipe's cyan solid hover fill can't show.
 const sparkBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  px: "6",
-  h: "11",
   rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
   bg: "spark",
   color: "white",
-  borderWidth: "1.5px",
-  borderColor: "spark",
-  cursor: "pointer",
   transition: "transform 0.12s ease",
-  _hover: { transform: "translateY(-1px)" },
+  _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
-const ghostBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  px: "5",
-  h: "11",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
-  color: "fg.muted",
-  bg: "transparent",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  cursor: "pointer",
-  _hover: { color: "fg.default", borderColor: "border.outline" },
-});
+// Secondary action: Park's outline variant, kept as a rounded-full pill to match.
+const pillOutline = css({ rounded: "full" });
 
 export function Provisioning(
   props: {
@@ -165,12 +145,16 @@ export function Provisioning(
             </p>
           </div>
           <div class={actions}>
-            <button type="button" class={ghostBtn} onClick={props.onDone}>
+            <Button
+              variant="outline"
+              class={pillOutline}
+              onClick={props.onDone}
+            >
               Back to portions
-            </button>
-            <button type="button" class={sparkBtn} onClick={props.onViewBundle}>
+            </Button>
+            <Button class={sparkBtn} onClick={props.onViewBundle}>
               View bundle
-            </button>
+            </Button>
           </div>
         </Show>
 
@@ -186,9 +170,13 @@ export function Provisioning(
             </p>
           </div>
           <div class={actions}>
-            <button type="button" class={ghostBtn} onClick={props.onDone}>
+            <Button
+              variant="outline"
+              class={pillOutline}
+              onClick={props.onDone}
+            >
               Back to portions
-            </button>
+            </Button>
           </div>
         </Show>
       </div>

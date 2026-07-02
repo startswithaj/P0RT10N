@@ -2,6 +2,8 @@ import { createSignal, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { Check, Copy, Eye, EyeOff, Mail, ShieldAlert } from "lucide-solid";
 import { Wordmark } from "./components/brand.tsx";
+import { Button } from "./components/ui/button.tsx";
+import { IconButton } from "./components/ui/icon-button.tsx";
 import { trpc } from "./trpc.ts";
 
 // The "shown once" credentials hand-off, rendered from the real FriendBundle
@@ -77,19 +79,6 @@ const fieldValue = css({
   wordBreak: "break-all",
 });
 const valueRow = css({ display: "flex", alignItems: "center", gap: "2" });
-const iconBtn = css({
-  display: "grid",
-  placeItems: "center",
-  w: "8",
-  h: "8",
-  flexShrink: "0",
-  rounded: "l2",
-  color: "fg.muted",
-  cursor: "pointer",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  _hover: { color: "fg.default", bg: "bg.muted" },
-});
 const copiedIcon = css({ color: "brandcyan.9" });
 
 const codeWrap = css({ position: "relative" });
@@ -133,40 +122,18 @@ const actions = css({
   gap: "3",
   mt: "8",
 });
+// Primary CTA keeps the brand magenta spark + rounded-full pill + hover lift;
+// the Button recipe supplies sizing, gap and typography. _hover pins bg:spark so
+// the recipe's cyan solid hover fill can't show.
 const sparkBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "2",
-  px: "6",
-  h: "11",
   rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
   bg: "spark",
   color: "white",
-  borderWidth: "1.5px",
-  borderColor: "spark",
-  cursor: "pointer",
   transition: "transform 0.12s ease",
-  _hover: { transform: "translateY(-1px)" },
+  _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
-const ghostBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  px: "5",
-  h: "11",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
-  color: "fg.muted",
-  bg: "transparent",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  cursor: "pointer",
-  _hover: { color: "fg.default", borderColor: "border.outline" },
-});
+// Secondary action: Park's outline variant, kept as a rounded-full pill to match.
+const pillOutline = css({ rounded: "full" });
 
 const DOTS = "••••••••••••••••••••••••";
 
@@ -179,16 +146,17 @@ function CopyButton(
   },
 ) {
   return (
-    <button
-      type="button"
-      class={`${iconBtn} ${props.copied() === props.id ? copiedIcon : ""}`}
+    <IconButton
+      variant="outline"
+      size="sm"
+      class={props.copied() === props.id ? copiedIcon : undefined}
       aria-label="Copy"
       onClick={() => props.onCopy(props.id, props.value)}
     >
       <Show when={props.copied() === props.id} fallback={<Copy size={15} />}>
         <Check size={15} />
       </Show>
-    </button>
+    </IconButton>
   );
 }
 
@@ -228,16 +196,16 @@ function CredentialsCard(
             </div>
           </div>
           <div class={valueRow}>
-            <button
-              type="button"
-              class={iconBtn}
+            <IconButton
+              variant="outline"
+              size="sm"
               aria-label="Reveal"
               onClick={() => props.setRevealed((r) => !r)}
             >
               <Show when={props.revealed()} fallback={<Eye size={15} />}>
                 <EyeOff size={15} />
               </Show>
-            </button>
+            </IconButton>
             <CopyButton
               id="sk"
               value={props.secret}
@@ -436,15 +404,15 @@ export function Bundle(
         />
 
         <div class={actions}>
-          <button type="button" class={ghostBtn} onClick={props.onDone}>
+          <Button variant="outline" class={pillOutline} onClick={props.onDone}>
             Done
-          </button>
-          <button type="button" class={sparkBtn} onClick={copyAll}>
+          </Button>
+          <Button class={sparkBtn} onClick={copyAll}>
             <Show when={copied() === "all"} fallback={<Copy size={16} />}>
               <Check size={16} />
             </Show>
             Copy all
-          </button>
+          </Button>
         </div>
       </div>
     </main>
