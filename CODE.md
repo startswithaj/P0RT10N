@@ -66,6 +66,14 @@ component, NOT a browser-native `alert`/`prompt`/`confirm` and NOT a bespoke
   pattern, list the recipe's slots).
 - Example: the burger-menu actions open `ActionDialog` (`PortionActions.tsx`)
   built on `components/ui/dialog.tsx`, not `confirm()`/`prompt()`.
+- To add a wrapper, prefer the CLI over hand-copying:
+  `cd app/packages/client && deno run -A npm:@park-ui/cli@latest add <names...>`.
+  Gotchas: (1) the CLI always ends with "An unexpected error occurred" — the
+  `.tsx` files are still written correctly, ignore it; (2) it does NOT pull
+  transitive component deps, so grep the new files for unresolved `from './x'`
+  and add those too (e.g. `button`→`group`,`loader`; `toast`→`close-button`,
+  `icon`,`spinner`); (3) it strips the trailing newline from `panda.config.ts`
+  on every run — `git checkout panda.config.ts` afterward.
 
 ### Card drop shadow
 
