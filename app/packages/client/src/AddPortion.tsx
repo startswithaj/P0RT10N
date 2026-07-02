@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { ArrowLeft, Boxes, KeyRound, Mail, Server } from "lucide-solid";
+import { addFriendInput } from "@p0rt1on/shared/domain";
 import { Button } from "./components/ui/button.tsx";
 import { IconButton } from "./components/ui/icon-button.tsx";
 import { Input } from "./components/ui/input.tsx";
@@ -258,6 +259,20 @@ export function AddPortion(
   const [retention, setRetention] = createSignal(14);
   const [enroll, setEnroll] = createSignal<"key" | "invite">("key");
 
+  // The AddFriendInput fields this form assembles. Validation is delegated to
+  // the same `addFriendInput` schema the server enforces (single source of
+  // truth), so an empty/badly-formatted name or a non-positive-integer quota /
+  // retention gates submit here exactly as it would be rejected at the API
+  // boundary. (The NumberInputs already reject empty/negative/fractional input
+  // at the widget level; this is the backstop and drives the disabled state.)
+  const core = () => ({
+    name: name().trim(),
+    quotaBytes: Math.round(quota() * GB),
+    retentionDays: retention(),
+    isolationMode: mode(),
+  });
+  const valid = () => addFriendInput.safeParse(core()).success;
+
   return (
     <main class={page}>
       <div class={shell}>
@@ -279,14 +294,8 @@ export function AddPortion(
           class={card}
           onSubmit={(e) => {
             e.preventDefault();
-            if (!name().trim()) return;
-            props.onSubmit({
-              name: name().trim(),
-              quotaBytes: Math.round(quota() * GB),
-              retentionDays: retention(),
-              isolationMode: mode(),
-              enroll: enroll(),
-            });
+            if (!valid()) return;
+            props.onSubmit({ ...core(), enroll: enroll() });
           }}
         >
           <Field.Root>
@@ -334,7 +343,9 @@ export function AddPortion(
             <Button type="button" variant="outline" onClick={props.onBack}>
               Cancel
             </Button>
-            <Button type="submit" class={sparkBtn}>Create portion</Button>
+            <Button type="submit" class={sparkBtn} disabled={!valid()}>
+              Create portion
+            </Button>
           </div>
         </form>
       </div>
