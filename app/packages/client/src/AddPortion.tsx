@@ -1,6 +1,12 @@
 import { createSignal, For, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { ArrowLeft, Boxes, KeyRound, Mail, Server } from "lucide-solid";
+import { Button } from "./components/ui/button.tsx";
+import { IconButton } from "./components/ui/icon-button.tsx";
+import { Input } from "./components/ui/input.tsx";
+import * as Field from "./components/ui/field.tsx";
+import * as NumberInput from "./components/ui/number-input.tsx";
+import * as RadioGroup from "./components/ui/radio-group.tsx";
 
 // "Add a portion" form. Collects a full AddFriendInput (+ enrollment choice) and
 // hands it up; App runs the real friends.add mutation.
@@ -29,19 +35,6 @@ const topRow = css({
   gap: "3",
   mb: "2",
 });
-const backBtn = css({
-  display: "grid",
-  placeItems: "center",
-  w: "9",
-  h: "9",
-  rounded: "l2",
-  flexShrink: "0",
-  color: "fg.muted",
-  cursor: "pointer",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  _hover: { bg: "bg.muted", color: "fg.default" },
-});
 const title = css({ fontFamily: "display", fontSize: "xl", lineHeight: "1.2" });
 const subtitle = css({ color: "fg.muted", fontSize: "sm", mb: "6", ml: "12" });
 
@@ -56,72 +49,18 @@ const card = css({
   gap: "6",
   boxShadow: "lg",
 });
-const field = css({ display: "flex", flexDirection: "column", gap: "2" });
-const label = css({ fontSize: "sm", fontWeight: "bold", color: "fg.default" });
 const hint = css({ fontSize: "xs", color: "fg.muted" });
-const inputWrap = css({
-  position: "relative",
-  display: "flex",
-  alignItems: "center",
-});
-const input = css({
-  w: "full",
-  h: "11",
-  px: "3.5",
-  rounded: "l2",
-  bg: "bg.canvas",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  color: "fg.default",
-  fontFamily: "body",
-  fontSize: "sm",
-  // Hide the browser's number spinners so they don't overlap the GB/days suffix.
-  appearance: "textfield",
-  MozAppearance: "textfield",
-  "&::-webkit-inner-spin-button": { WebkitAppearance: "none", margin: "0" },
-  "&::-webkit-outer-spin-button": { WebkitAppearance: "none", margin: "0" },
-  _placeholder: { color: "fg.muted" },
-  _focus: {
-    borderColor: "brandcyan.9",
-    outlineWidth: "1px",
-    outlineStyle: "solid",
-    outlineColor: "brandcyan.9",
-  },
-});
-const suffix = css({
-  position: "absolute",
-  right: "3.5",
-  color: "fg.muted",
-  fontSize: "sm",
-  pointerEvents: "none",
-});
 
 const chips = css({ display: "flex", gap: "2", flexWrap: "wrap" });
-const chipBase = css({
-  px: "3.5",
-  h: "9",
-  rounded: "full",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  bg: "bg.canvas",
-  color: "fg.muted",
-  fontSize: "sm",
-  fontFamily: "body",
-  cursor: "pointer",
-  _hover: { color: "fg.default" },
-});
-const chipSel = css({
-  borderColor: "brandcyan.9",
-  color: "brandcyan.11",
-  bg: "bg.default",
-});
 
 const modeGrid = css({
   display: "grid",
   gridTemplateColumns: "repeat(2, 1fr)",
   gap: "3",
 });
-const modeBase = css({
+// Each RadioGroup.Item rendered as a selectable card; `_checked` marks the
+// currently-selected option (border + surface, no separate visible dot needed).
+const modeCard = css({
   textAlign: "left",
   p: "4",
   rounded: "l2",
@@ -133,8 +72,8 @@ const modeBase = css({
   flexDirection: "column",
   gap: "1.5",
   _hover: { borderColor: "border.outline" },
+  _checked: { borderColor: "brandcyan.9", bg: "bg.default" },
 });
-const modeSel = css({ borderColor: "brandcyan.9", bg: "bg.default" });
 const modeHead = css({
   display: "flex",
   alignItems: "center",
@@ -144,6 +83,8 @@ const modeHead = css({
   color: "fg.default",
 });
 const modeIcon = css({ color: "brandcyan.9" });
+// The radio indicator sits at the far right of the card header.
+const radioDot = css({ ml: "auto", flexShrink: "0" });
 
 const actions = css({
   display: "flex",
@@ -151,39 +92,13 @@ const actions = css({
   gap: "3",
   mt: "2",
 });
-const ghostBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  px: "5",
-  h: "11",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
-  color: "fg.muted",
-  bg: "transparent",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  cursor: "pointer",
-  _hover: { color: "fg.default", borderColor: "border.outline" },
-});
+// Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
+// Button recipe still supplies sizing, radius and typography.
 const sparkBtn = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "2",
-  px: "6",
-  h: "11",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
   bg: "spark",
-  color: "white",
-  borderWidth: "1.5px",
   borderColor: "spark",
-  cursor: "pointer",
-  transition: "transform 0.12s ease",
-  _hover: { transform: "translateY(-1px)" },
+  color: "white",
+  _hover: { bg: "spark", opacity: "0.9" },
 });
 
 const PRESETS = [10, 30, 50, 100];
@@ -223,31 +138,35 @@ function QuotaField(
   props: { quota: () => number; setQuota: (n: number) => void },
 ) {
   return (
-    <div class={field}>
-      <label class={label}>Storage quota</label>
+    <Field.Root>
+      <Field.Label>Storage quota (GB)</Field.Label>
       <div class={chips}>
         <For each={PRESETS}>
           {(gb) => (
-            <button
+            <Button
               type="button"
-              class={`${chipBase} ${props.quota() === gb ? chipSel : ""}`}
+              size="sm"
+              variant={props.quota() === gb ? "solid" : "outline"}
               onClick={() => props.setQuota(gb)}
             >
               {gb} GB
-            </button>
+            </Button>
           )}
         </For>
       </div>
-      <div class={inputWrap}>
-        <input
-          class={input}
-          type="number"
-          value={props.quota()}
-          onInput={(e) => props.setQuota(Number(e.currentTarget.value))}
-        />
-        <span class={suffix}>GB</span>
-      </div>
-    </div>
+      <NumberInput.Root
+        min={1}
+        value={String(props.quota())}
+        formatOptions={{ maximumFractionDigits: 0 }}
+        onValueChange={(d) => props.setQuota(d.valueAsNumber)}
+      >
+        <NumberInput.Control>
+          <NumberInput.Input />
+          <NumberInput.IncrementTrigger />
+          <NumberInput.DecrementTrigger />
+        </NumberInput.Control>
+      </NumberInput.Root>
+    </Field.Root>
   );
 }
 
@@ -258,28 +177,29 @@ function ModePicker(
   },
 ) {
   return (
-    <div class={field}>
-      <label class={label}>Isolation mode</label>
+    <RadioGroup.Root
+      value={props.mode()}
+      onValueChange={(d) => props.setMode(d.value as "dedicated" | "shared")}
+    >
+      <RadioGroup.Label>Isolation mode</RadioGroup.Label>
       <div class={modeGrid}>
         <For each={MODES}>
           {(m) => (
-            <button
-              type="button"
-              class={`${modeBase} ${props.mode() === m.id ? modeSel : ""}`}
-              onClick={() => props.setMode(m.id)}
-            >
+            <RadioGroup.Item value={m.id} class={modeCard}>
               <span class={modeHead}>
                 <span class={modeIcon}>
                   <m.icon size={16} />
                 </span>
-                {m.label}
+                <RadioGroup.ItemText>{m.label}</RadioGroup.ItemText>
+                <RadioGroup.ItemControl class={radioDot} />
               </span>
               <span class={hint}>{m.body}</span>
-            </button>
+              <RadioGroup.ItemHiddenInput />
+            </RadioGroup.Item>
           )}
         </For>
       </div>
-    </div>
+    </RadioGroup.Root>
   );
 }
 
@@ -290,38 +210,39 @@ function EnrollPicker(
   },
 ) {
   return (
-    <div class={field}>
-      <label class={label}>Tailscale enrollment</label>
+    <RadioGroup.Root
+      value={props.enroll()}
+      onValueChange={(d) => props.setEnroll(d.value as "key" | "invite")}
+    >
+      <RadioGroup.Label>Tailscale enrollment</RadioGroup.Label>
       <div class={modeGrid}>
         <For each={ENROLL}>
           {(e) => (
-            <button
-              type="button"
-              class={`${modeBase} ${props.enroll() === e.id ? modeSel : ""}`}
-              onClick={() => props.setEnroll(e.id)}
-            >
+            <RadioGroup.Item value={e.id} class={modeCard}>
               <span class={modeHead}>
                 <span class={modeIcon}>
                   <e.icon size={16} />
                 </span>
-                {e.label}
+                <RadioGroup.ItemText>{e.label}</RadioGroup.ItemText>
+                <RadioGroup.ItemControl class={radioDot} />
               </span>
               <span class={hint}>{e.body}</span>
-            </button>
+              <RadioGroup.ItemHiddenInput />
+            </RadioGroup.Item>
           )}
         </For>
       </div>
       <Show when={props.enroll() === "invite"}>
-        <div class={inputWrap}>
-          <input
-            class={input}
+        <Field.Root>
+          <Field.Label>Email address</Field.Label>
+          <Input
             type="email"
             placeholder="friend@example.com"
             autocomplete="off"
           />
-        </div>
+        </Field.Root>
       </Show>
-    </div>
+    </RadioGroup.Root>
   );
 }
 
@@ -341,14 +262,15 @@ export function AddPortion(
     <main class={page}>
       <div class={shell}>
         <div class={topRow}>
-          <button
+          <IconButton
             type="button"
-            class={backBtn}
+            variant="outline"
+            size="sm"
             aria-label="Back"
             onClick={props.onBack}
           >
             <ArrowLeft size={18} />
-          </button>
+          </IconButton>
           <h1 class={title}>Add a portion</h1>
         </div>
         <p class={subtitle}>Provision a new friend's immutable S3 endpoint.</p>
@@ -367,55 +289,52 @@ export function AddPortion(
             });
           }}
         >
-          <div class={field}>
-            <label class={label} for="name">Friend name</label>
-            <div class={inputWrap}>
-              <input
-                id="name"
-                class={input}
-                placeholder="e.g. alice"
-                autocomplete="off"
-                value={name()}
-                onInput={(e) => setName(e.currentTarget.value)}
-              />
-            </div>
-            <span class={hint}>
+          <Field.Root>
+            <Field.Label>Friend name</Field.Label>
+            <Input
+              placeholder="e.g. alice"
+              autocomplete="off"
+              value={name()}
+              onInput={(e) => setName(e.currentTarget.value)}
+            />
+            <Field.HelperText>
               Lowercase; used for their bucket and alias.
-            </span>
-          </div>
+            </Field.HelperText>
+          </Field.Root>
 
           <QuotaField quota={quota} setQuota={setQuota} />
 
           <ModePicker mode={mode} setMode={setMode} />
 
-          <div class={field}>
-            <label class={label} for="lock">Object-lock retention</label>
-            <div class={inputWrap}>
-              <input
-                id="lock"
-                class={input}
-                type="number"
-                min="1"
-                value={retention()}
-                onInput={(e) => setRetention(Number(e.currentTarget.value))}
-              />
-              <span class={suffix}>days</span>
-            </div>
-            <span class={hint}>
+          <Field.Root>
+            <Field.Label>Object-lock retention (days)</Field.Label>
+            <NumberInput.Root
+              min={1}
+              value={String(retention())}
+              formatOptions={{ maximumFractionDigits: 0 }}
+              onValueChange={(d) => setRetention(d.valueAsNumber)}
+            >
+              <NumberInput.Control>
+                <NumberInput.Input />
+                <NumberInput.IncrementTrigger />
+                <NumberInput.DecrementTrigger />
+              </NumberInput.Control>
+            </NumberInput.Root>
+            <Field.HelperText>
               Backups are write-once for this long and bypass is denied — so
               even if a friend's machine is compromised, an attacker can't
               delete or encrypt their existing backups within the retention
               window.
-            </span>
-          </div>
+            </Field.HelperText>
+          </Field.Root>
 
           <EnrollPicker enroll={enroll} setEnroll={setEnroll} />
 
           <div class={actions}>
-            <button type="button" class={ghostBtn} onClick={props.onBack}>
+            <Button type="button" variant="outline" onClick={props.onBack}>
               Cancel
-            </button>
-            <button type="submit" class={sparkBtn}>Create portion</button>
+            </Button>
+            <Button type="submit" class={sparkBtn}>Create portion</Button>
           </div>
         </form>
       </div>
