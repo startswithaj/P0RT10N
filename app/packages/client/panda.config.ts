@@ -2,6 +2,8 @@ import { defineConfig } from "@pandacss/dev";
 import { createPreset } from "@park-ui/panda-preset";
 import slate from "@park-ui/panda-preset/colors/slate";
 import brandCyan from "./src/theme/cyan-brand"; // custom Radix scale anchored on #2DE2E6
+// Utility recipes the preset omits but Park's Button/Loader chain needs.
+import { absoluteCenter, group } from "./src/theme/park-recipes";
 
 /**
  * p0rt1on — Park UI (Ark UI + Panda) preset.
@@ -43,6 +45,10 @@ export default defineConfig({
 
   theme: {
     extend: {
+      recipes: {
+        group,
+        absoluteCenter,
+      },
       keyframes: {
         spin: {
           "0%": { transform: "rotate(0deg)" },

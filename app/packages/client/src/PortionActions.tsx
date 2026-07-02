@@ -9,9 +9,13 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { css } from "styled-system/css";
-import { Check, Copy, LoaderCircle } from "lucide-solid";
+import { Check, Copy } from "lucide-solid";
 import { OFFBOARD_STEPS, type OffboardStepKey } from "@p0rt1on/shared/steps";
 import * as Dialog from "./components/ui/dialog.tsx";
+import * as Field from "./components/ui/field.tsx";
+import { Button } from "./components/ui/button.tsx";
+import { IconButton } from "./components/ui/icon-button.tsx";
+import { Input } from "./components/ui/input.tsx";
 import { StepChecklist, stepStatusFor } from "./components/StepChecklist.tsx";
 import { queryClient, trpc } from "./trpc.ts";
 
@@ -73,39 +77,12 @@ const body = css({
 });
 // Softer backdrop than the recipe default (`!` = Panda !important so it wins).
 const dimBackdrop = css({ background: "rgba(0, 0, 0, 0.35)!" });
-const spin = css({ animation: "spin 0.7s linear infinite" });
 // Lift the panel off the dimmed page — modals should float (shadow > hard border).
 const contentShadow = css({
   boxShadow:
     "0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.4)!",
 });
 const desc = css({ fontSize: "sm", color: "fg.muted", lineHeight: "1.5" });
-const field = css({ display: "flex", flexDirection: "column", gap: "2" });
-const label = css({
-  fontSize: "xs",
-  fontWeight: "bold",
-  color: "fg.default",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-});
-const input = css({
-  w: "full",
-  h: "11",
-  px: "3.5",
-  rounded: "l2",
-  bg: "bg.canvas",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  color: "fg.default",
-  fontFamily: "body",
-  fontSize: "sm",
-  _focus: {
-    borderColor: "brandcyan.9",
-    outlineWidth: "1px",
-    outlineStyle: "solid",
-    outlineColor: "brandcyan.9",
-  },
-});
 const errText = css({ fontSize: "sm", color: "fg.error" });
 const codeWrap = css({ position: "relative" });
 const codeBlock = css({
@@ -122,68 +99,21 @@ const codeBlock = css({
   pr: "10",
   color: "fg.default",
 });
-const copyBtn = css({
-  position: "absolute",
-  top: "2",
-  right: "2",
-  display: "grid",
-  placeItems: "center",
-  w: "7",
-  h: "7",
-  rounded: "l2",
-  color: "fg.muted",
-  cursor: "pointer",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  _hover: { color: "fg.default", bg: "bg.muted" },
-});
+// Copy sits in the code block's top-right; IconButton supplies the box + hover.
+const copyPos = css({ position: "absolute", top: "2", right: "2" });
 const actionsRow = css({
   display: "flex",
   justifyContent: "flex-end",
   gap: "3",
   mt: "1",
 });
-const ghostBtn = css({
-  px: "5",
-  h: "10",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
-  color: "fg.muted",
-  bg: "transparent",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  cursor: "pointer",
-  _hover: { color: "fg.default", borderColor: "border.outline" },
-});
-const confirmBtn = css({
-  px: "5",
-  h: "10",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
+// Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
+// Button recipe still supplies sizing, radius and typography.
+const sparkBtn = css({
   bg: "spark",
-  color: "white",
-  borderWidth: "1.5px",
   borderColor: "spark",
-  cursor: "pointer",
-  _disabled: { opacity: "0.4", cursor: "not-allowed" },
-});
-const dangerBtn = css({
-  px: "5",
-  h: "10",
-  rounded: "full",
-  fontFamily: "body",
-  fontWeight: "bold",
-  fontSize: "sm",
-  bg: "fg.error",
   color: "white",
-  borderWidth: "1.5px",
-  borderColor: "fg.error",
-  cursor: "pointer",
-  _disabled: { opacity: "0.4", cursor: "not-allowed" },
+  _hover: { bg: "spark", opacity: "0.9" },
 });
 
 type ActionResult =
@@ -243,49 +173,43 @@ function ConfirmBody(props: {
       <p class={desc}>{actionDesc(props.p)}</p>
       <Switch>
         <Match when={props.p.kind === "resize"}>
-          <div class={field}>
-            <label class={label}>Quota (GB)</label>
-            <input
-              class={input}
+          <Field.Root>
+            <Field.Label>Quota (GB)</Field.Label>
+            <Input
               type="number"
               min="1"
               value={props.qty()}
               onInput={(e) => props.setQty(Number(e.currentTarget.value))}
             />
-          </div>
+          </Field.Root>
         </Match>
         <Match when={props.p.kind === "offboard"}>
-          <div class={field}>
-            <label class={label}>Type "{props.p.friend.name}" to confirm</label>
-            <input
-              class={input}
+          <Field.Root>
+            <Field.Label>Type "{props.p.friend.name}" to confirm</Field.Label>
+            <Input
               autocomplete="off"
               value={props.confirmName()}
               onInput={(e) => props.setConfirmName(e.currentTarget.value)}
             />
-          </div>
+          </Field.Root>
         </Match>
       </Switch>
       <Show when={props.err()}>
         <p class={errText}>{props.err()}</p>
       </Show>
       <div class={actionsRow}>
-        <button type="button" class={ghostBtn} onClick={props.onCancel}>
+        <Button variant="outline" onClick={props.onCancel}>
           Cancel
-        </button>
-        <button
-          type="button"
-          class={props.p.kind === "offboard" ? dangerBtn : confirmBtn}
+        </Button>
+        <Button
+          colorPalette={props.p.kind === "offboard" ? "red" : undefined}
+          class={props.p.kind === "offboard" ? undefined : sparkBtn}
+          loading={props.busy()}
           disabled={!props.canConfirm()}
           onClick={props.onConfirm}
         >
-          <Show
-            when={props.busy()}
-            fallback={confirmLabel(props.p.kind)}
-          >
-            <LoaderCircle size={16} class={spin} />
-          </Show>
-        </button>
+          {confirmLabel(props.p.kind)}
+        </Button>
       </div>
     </>
   );
@@ -303,21 +227,22 @@ function TsResultBody(props: {
       <p class={desc}>Shown once — run this on {props.name}'s machine:</p>
       <div class={codeWrap}>
         <pre class={codeBlock}>{props.cmd}</pre>
-        <button
-          type="button"
-          class={copyBtn}
+        <IconButton
+          variant="outline"
+          size="sm"
+          class={copyPos}
           aria-label="Copy"
           onClick={() => props.onCopy(props.cmd)}
         >
           <Show when={props.copied()} fallback={<Copy size={14} />}>
             <Check size={14} />
           </Show>
-        </button>
+        </IconButton>
       </div>
       <div class={actionsRow}>
-        <button type="button" class={confirmBtn} onClick={props.onDone}>
+        <Button class={sparkBtn} onClick={props.onDone}>
           Done
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -388,9 +313,9 @@ function OffboardProgressBody(props: {
       </Show>
       <Show when={failed()}>
         <div class={actionsRow}>
-          <button type="button" class={ghostBtn} onClick={props.onClose}>
+          <Button variant="outline" onClick={props.onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </Show>
     </>
