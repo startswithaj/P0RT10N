@@ -18,6 +18,15 @@ export default defineConfig({
       "styled-system": fileURLToPath(
         new URL("./styled-system", import.meta.url),
       ),
+      // The `@deno/vite-plugin` (which resolves these workspace imports in the
+      // real build) is deliberately absent here, so alias the shared package's
+      // two exports to their source files for component tests.
+      "@p0rt1on/shared/domain": fileURLToPath(
+        new URL("../shared/domain.ts", import.meta.url),
+      ),
+      "@p0rt1on/shared/steps": fileURLToPath(
+        new URL("../shared/steps.ts", import.meta.url),
+      ),
     },
   },
   test: {

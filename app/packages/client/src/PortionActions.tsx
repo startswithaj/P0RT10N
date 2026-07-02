@@ -354,7 +354,9 @@ export function ActionDialog(
     if (!p || busy()) return false;
     if (p.kind === "resize") return qty() > 0;
     if (p.kind === "offboard") {
-      return confirmName() === p.friend.name.toUpperCase();
+      // The dialog's label instructs typing the name verbatim ("Type
+      // \"{name}\" to confirm"), so match it exactly — not an upper-cased form.
+      return confirmName() === p.friend.name;
     }
     return true;
   };
