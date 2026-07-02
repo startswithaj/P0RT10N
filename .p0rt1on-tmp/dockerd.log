@@ -1,0 +1,4 @@
+time="2026-07-02T05:17:29.231387126Z" level=info msg="Starting up"
+time="2026-07-02T05:17:29.232764501Z" level=warning msg="Error while setting daemon root propagation, this is not generally critical but may cause some functionality to not work or fallback to less desirable behavior" dir=/var/lib/docker error="could not setup daemon root propagation to shared: mount /var/lib/docker:/var/lib/docker, flags: 0x1000: operation not permitted"
+time="2026-07-02T05:17:29.233496168Z" level=warning msg="could not change group /var/run/docker.sock to docker: group docker not found"
+failed to load listeners: can't create unix socket /var/run/docker.sock: device or resource busy

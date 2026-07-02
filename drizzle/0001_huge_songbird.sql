@@ -1,0 +1,1 @@
+ALTER TABLE `activity` ADD `request_buckets` text DEFAULT '{}' NOT NULL;

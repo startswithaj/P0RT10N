@@ -1,0 +1,17 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 100 100"
+  width="100"
+  height="100"
+>
+  <rect width="100" height="100" rx="22" fill="#160F2E"></rect>
+  <path
+    d="M 81.933 41.676 A 33 33 0 1 1 49.200 17.010 L 49.200 27.514 A 22.5 22.5 0 1 0 71.835 44.571 Z"
+    fill="#2DE2E6"
+  ></path>
+  <path
+    d="M 50.800 17.010 A 33 33 0 0 1 81.492 40.138 L 71.394 43.033 A 22.5 22.5 0 0 0 50.800 27.514 Z"
+    fill="#FF2E97"
+  ></path>
+  <circle cx="50" cy="50" r="11" fill="#FF2E97"></circle>
+</svg>

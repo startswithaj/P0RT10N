@@ -1,0 +1,32 @@
+{
+  "name": "@p0rt1on/client",
+  "version": "0.0.1",
+  "exports": "./src/main.tsx",
+  "imports": {
+    "solid-js": "npm:solid-js@^1.9",
+    "solid-js/web": "npm:solid-js@^1.9/web",
+    "@tanstack/solid-query": "npm:@tanstack/solid-query@^5",
+    "@trpc/client": "npm:@trpc/client@^11",
+    "@trpc/server": "npm:@trpc/server@^11",
+    "@ark-ui/solid": "npm:@ark-ui/solid@^5",
+    "@pandacss/dev": "npm:@pandacss/dev@^1",
+    "lucide-solid": "npm:lucide-solid@~1.18",
+    "vite": "npm:vite@^6",
+    "vite-plugin-solid": "npm:vite-plugin-solid@^2",
+    "@deno/vite-plugin": "npm:@deno/vite-plugin@^1"
+  },
+  "tasks": {
+    "prepare": "deno run -A npm:@pandacss/dev codegen",
+    "dev": "deno run -A npm:vite@^6 dev",
+    "build": "deno run -A npm:@pandacss/dev codegen && deno run -A npm:vite@^6 build"
+  },
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ]
+  }
+}

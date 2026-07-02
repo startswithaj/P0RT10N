@@ -1,0 +1,40 @@
+# p0rt1on manager. Runs the Deno app with bundled `mc` + docker CLIs, and
+# launches the combined instance containers against the host's Docker daemon
+# (socket mounted). Instances publish their MinIO port to the host; the manager
+# reaches them at host.docker.internal:<port>, and they POST the audit webhook
+# back to the manager the same way.
+#
+# Needs a .env with at least P0RT1ON_MASTER_KEY, TS_API_TOKEN, TAILNET_DOMAIN.
+# On Docker Desktop this works as-is (host.docker.internal routes to the host).
+# On Linux, keep the extra_hosts line (adds host-gateway) and note that the
+# manager reaching an instance's 127.0.0.1-published port may require running the
+# manager on the host instead, or publishing instance ports on 0.0.0.0.
+services:
+  manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev # dev image: also runs the Vite dev server
+    env_file: .env
+    # Root so it can use the mounted docker socket + write the volumes.
+    user: root
+    environment:
+      # Container overrides (the app's own defaults suit host-run dev).
+      BIND_HOST: "0.0.0.0" # so instances can POST /internal/audit to us
+      INSTANCE_HOST: "host.docker.internal" # reach instances' published ports
+      AUDIT_WEBHOOK_URL: "http://host.docker.internal:8080/internal/audit"
+      DB_PATH: "/app/data/p0rt1on.db"
+    ports:
+      - "127.0.0.1:8080:8080" # admin API — loopback only (Vite proxies here)
+      - "127.0.0.1:5173:5173" # Vite dev server (frontend) — open this in a browser
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # launch instance containers
+      - /Users/jake/Dev/p0rt1on/p0rt1on:/app # live source — restart picks up code changes
+      - p0rt1on-db:/app/data # metadata DB
+      - p0rt1on-mc:/root/.mc # mc aliases (per-instance admin creds)
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # reach the host on Linux
+    restart: unless-stopped
+
+volumes:
+  p0rt1on-db:
+  p0rt1on-mc:

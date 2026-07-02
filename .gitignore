@@ -1,0 +1,22 @@
+# secrets / local env
+.env
+*.local
+
+# local dev databases
+*.db
+*.db-shm
+*.db-wal
+.p0rt1on-dev.db*
+data/
+
+# build / tooling output
+coverage/
+**/dist/
+**/styled-system/
+node_modules/
+
+# os
+.DS_Store
+
+# Downloaded CLIs for arg verification (mc, tailscale)
+.tools/

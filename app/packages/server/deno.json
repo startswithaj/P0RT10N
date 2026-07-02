@@ -1,0 +1,8 @@
+{
+  "name": "@p0rt1on/server",
+  "version": "0.0.1",
+  "exports": {
+    "./schema": "./src/db/Schema.ts",
+    "./router": "./src/trpc/root.ts"
+  }
+}
