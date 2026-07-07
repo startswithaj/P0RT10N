@@ -1,27 +1,30 @@
-# p0rt1on
+# P0RT1ON
 
 **An orchestrator + web UI for [MinIO](https://min.io) and
-[Tailscale](https://tailscale.com) that makes sharing storage with your friends
-easy.**
+[Tailscale](https://tailscale.com) that makes lending storage to your friends
+easy — and their backups immutable.**
 
-> **Securely share some storage with friends.** Self-hosted · Multi-tenant S3 ·
-> Over Tailscale
+> **Lend friends portions of your disk as ransomware-resistant, offsite S3
+> backup targets.** Self-hosted · Multi-tenant S3 · Over Tailscale ·
+> Zero-knowledge
 
 ## What it is
 
 Lend portions of your disk to friends as offsite backup targets, managed from a
 web UI. Each friend gets their **own S3 bucket** (their size cap, their access
-key) reachable **only** over their **own Tailscale endpoint**.
+key) reachable **only** over their **own Tailscale endpoint** — and **Object
+Lock** keeps recent backups immutable even to whoever holds the friend's
+credentials.
 
-Everything p0rt1on does is doable by hand with `mc` and `tailscaled` — minting
+Everything P0RT1ON does is doable by hand with `mc` and `tailscaled` — minting
 auth keys, provisioning MinIO, setting quotas and Object Lock, wiring up
-`tailscale serve`. p0rt1on is the orchestration + UI on top, so adding a friend
+`tailscale serve`. P0RT1ON is the orchestration + UI on top, so adding a friend
 is a form instead of a runbook.
 
 ## Why it exists
 
-To run offsite backups for friends on a home Kubernetes cluster. Lend storage,
-hand over a bundle, let each friend back up into a bucket only they can reach.
+To run offsite backups for friends on a home server. Lend storage, hand over a
+credentials bundle, let each friend back up into a bucket only they can reach.
 
 It's **zero-knowledge**: the server stores only the bytes a client uploads. If
 the friend encrypts client-side, you hold ciphertext you can't read — no
@@ -36,22 +39,32 @@ choice (Kopia recommended; any S3 client works).
 - **Nothing exposed to the public internet.** Everything rides on Tailscale — no
   open ports, no router forwarding, no exposed home IP. There's no public
   endpoint to scan or attack.
-- **Two enrollment modes, both handled by the app.** Either **mint an auth key**
-  (pre-authorized, single-use, pre-tagged; redeemed with
-  `tailscale up --authkey=…`, headless, no account) or **invite to the tailnet**
-  by email (friend joins with their own identity). You pick in the UI; p0rt1on
-  does the Tailscale API work.
-- **Ransomware-resistant.** MinIO **Object Lock** keeps recent objects immutable
-  even to whoever holds the friend's credentials, so a compromised client can't
+- **Headless enrollment, handled by the app.** Each friend gets a
+  pre-authorized, single-use, pre-tagged Tailscale auth key (redeemed with
+  `tailscale up --authkey=…` — no Tailscale account needed). P0RT1ON mints,
+  scopes, and revokes keys via the Tailscale API. (Invite-by-email enrollment is
+  planned; the UI previews it but it isn't wired up yet.)
+- **Ransomware-resistant.** MinIO **Object Lock** (GOVERNANCE by default) keeps
+  recent objects immutable even to whoever holds the friend's credentials —
+  friend creds are explicitly denied lock bypass — so a compromised client can't
   encrypt, tamper with, or wipe the backups. A **hard quota** caps each portion.
+- **Zero-knowledge by construction.** Friend S3 secrets and Tailscale auth keys
+  exist only in request scope and are shown once in the UI — never written to
+  the DB, cache, or logs. The metadata DB (SQLite) holds no secrets; each
+  instance's MinIO root credential is **derived** from `P0RT1ON_MASTER_KEY`, not
+  stored.
+- **Full lifecycle from the dashboard.** Add · resize quota · rotate key ·
+  suspend / resume · offboard. Usage is sampled per bucket; activity comes from
+  MinIO audit webhooks POSTed back to the manager — no Prometheus, no agents on
+  the friend's side.
 - **Runs on any container runtime** — Docker, Podman, Kubernetes.
 
 ## Requirements
 
-- A container runtime (Docker/Podman/k8s) — the manager launches stock
-  `minio/minio` + `tailscale/tailscale` containers per friend.
-- A Tailscale account + API access (tailnet + API key/OAuth client) to mint auth
-  keys / send invites.
+- A container runtime (Docker/Podman/k8s) — the manager launches the combined
+  MinIO + tailscaled instance image per friend.
+- A Tailscale account + API access (tailnet + OAuth client) to mint auth keys —
+  see [Setup](#setup--tailscale-oauth-client).
 - Disk space for the sum of the portions you hand out — one filesystem is fine;
   quotas keep friends apart.
 - A volume for the manager's SQLite DB (metadata only, no secrets).
@@ -62,14 +75,32 @@ choice (Kopia recommended; any S3 client works).
   (`minio server /data`); `/data` is a **directory on a volume** (named volume,
   host path, or PVC), not a raw device. Portions are sized by **hard quota**,
   not partitioning, so friends share one filesystem.
-- **Stock images, launched at runtime.** You don't build MinIO or Tailscale; the
-  manager runs the pinned upstream images per friend.
 - **Metadata only.** The manager's SQLite DB holds no secrets — friend bundles
   are shown once and never persisted.
+- **One key to rule the fleet.** `P0RT1ON_MASTER_KEY` deterministically derives
+  every instance's root credential. It must be **stable and backed up**: losing
+  or changing it loses admin access to every instance. Keep it in a secret
+  manager; never commit it.
+
+## Quick start (manager)
+
+```bash
+cp .env.example .env   # fill in P0RT1ON_MASTER_KEY, TAILSCALE_OAUTH_CLIENT_SECRET, TAILNET_DOMAIN
+docker compose up
+```
+
+- Admin UI: `http://127.0.0.1:5173` (dev; the admin API binds loopback-only on
+  `:8080` — it is never exposed to friends or the tailnet).
+- The manager needs the Docker socket mounted (it launches instance containers)
+  and two volumes: the metadata DB and `mc` aliases. The provided
+  `docker-compose.yml` wires all of this, including the audit-webhook path from
+  instances back to the manager.
+- Without `TAILSCALE_OAUTH_CLIENT_SECRET` the manager boots with a Tailscale
+  **stub**: it runs, but provisioning fails loudly at the Tailscale steps.
 
 ## Setup — Tailscale OAuth client
 
-p0rt1on calls the Tailscale API on **every** add / suspend / offboard (mint the
+P0RT1ON calls the Tailscale API on **every** add / suspend / offboard (mint the
 friend's auth key, scope its ACL, delete its node). Give it a least-privilege,
 long-lived **OAuth client** rather than a personal API token (those are
 full-access and expire in ≤90 days). The Tailscale API **cannot** create OAuth
@@ -101,21 +132,21 @@ hand — the app adds them at provision time (owned by `tag:p0rt1on`).
 | **Keys → Auth Keys** | **Write** | mint + revoke each friend's auth key                          |
 
 Attach the tag **`tag:p0rt1on`**, then **Generate** and copy the **client
-secret** (shown once) → this is `TS_API_TOKEN`.
+secret** (shown once) → this is `TAILSCALE_OAUTH_CLIENT_SECRET`.
 
 > **⚠️ Security limitation — read this before using a shared tailnet.** The
 > **Policy File → Write** permission is broad. Tailscale does **not** let you
 > restrict _which_ ACL rules an OAuth client may create, so a client with this
 > permission can edit the **entire** tailnet policy. In practice this means:
 > **if this client's secret is compromised, an attacker can write an ACL rule
-> that grants a p0rt1on-generated key access to _any_ machine on your tailnet.**
-> p0rt1on itself only ever writes narrow per-friend rules — but Tailscale can't
+> that grants a P0RT1ON-generated key access to _any_ machine on your tailnet.**
+> P0RT1ON itself only ever writes narrow per-friend rules — but Tailscale can't
 > _enforce_ that limit on the credential, so the credential is as powerful as
 > the whole policy file.
 >
-> **Recommendation:** if you have other machines on this tailnet, run p0rt1on on
+> **Recommendation:** if you have other machines on this tailnet, run P0RT1ON on
 > a **separate tailnet (a separate Tailscale account)**. Then even a fully
-> compromised client can only affect the p0rt1on tailnet — your personal
+> compromised client can only affect the P0RT1ON tailnet — your personal
 > machines are unreachable because they aren't on it at all. (If you must share
 > one tailnet, the alternative is to drop the **Policy File** permission and
 > manage the ACL by hand — see the note in step 3.)
@@ -137,15 +168,15 @@ per-friend grant allows — their own storage box, nothing else on your tailnet.
 
 **Least-privilege alternative (no Policy File permission).** If you'd rather the
 client be _provably_ unable to widen access (see the warning in step 2), omit
-the **Policy File** permission when creating the client. p0rt1on then can't edit
-the ACL, so you write the per-friend grants yourself — either one static rule
-for all friends:
+the **Policy File** permission when creating the client and set
+`TAILSCALE_ACL_MODE=manual` — P0RT1ON then skips ACL edits and shows you the
+grant lines to paste by hand. Either one static rule for all friends:
 
 ```jsonc
 { "src": ["tag:p0rt1on-friend"], "dst": ["tag:p0rt1on-serve:443"] }
 ```
 
-(friends reach only p0rt1on serve nodes; isolated from each other by MinIO
+(friends reach only P0RT1ON serve nodes; isolated from each other by MinIO
 credentials, not the network), or one rule per friend for full network
 isolation:
 
@@ -158,16 +189,15 @@ a leaked client can only mint friend-tagged keys — never grant them new reach.
 
 ### 4. Environment
 
-| Var              | Value                                                                                           |
-| ---------------- | ----------------------------------------------------------------------------------------------- |
-| `TS_API_TOKEN`   | the OAuth client **secret** (`tskey-client-…`)                                                  |
-| `TS_TAILNET`     | your tailnet name (e.g. `tailXXXX.ts.net`), or `-`                                              |
-| `TS_TAG_OWNER`   | `tag:p0rt1on`                                                                                   |
-| `TAILNET_DOMAIN` | your MagicDNS base (e.g. `tailXXXX.ts.net`) — used to build `https://<name>.<domain>` endpoints |
+| Var                             | Value                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `P0RT1ON_MASTER_KEY`            | strong random value; derives every instance's root credential — **stable, backed up, secret**   |
+| `TAILSCALE_OAUTH_CLIENT_SECRET` | the OAuth client **secret** (`tskey-client-…`) — not a personal API token                       |
+| `TAILSCALE_TAG_OWNER`           | `tag:p0rt1on`                                                                                   |
+| `TAILNET_DOMAIN`                | your MagicDNS base (e.g. `tailXXXX.ts.net`) — used to build `https://<name>.<domain>` endpoints |
+| `TAILSCALE_ACL_MODE`            | `auto` (API edits the policy) or `manual` (you paste the grants — step 3)                       |
 
-Put these in `.env` (gitignored — see `.env.example`). Without `TS_API_TOKEN`
-the manager boots with a Tailscale **stub**: it runs, but provisioning fails
-loudly at the Tailscale steps.
+Put these in `.env` (gitignored — see `.env.example` for the full list).
 
 ## How to be a client
 
@@ -222,6 +252,15 @@ Optional: `-v p0rt1on-ts:/var/lib/tailscale` persists the tailnet node across
 runs (the auth key is single-use); `-v p0rt1on-cache:/cache` with
 `KOPIA_CACHE_DIRECTORY=/cache` speeds up repeat runs. See
 [`backup-client/README.md`](backup-client/README.md) for all options.
+
+## Under the hood
+
+- **Manager:** Deno + tRPC API, SolidJS SPA dashboard, SQLite (Drizzle) metadata
+  DB. Shells out to `mc` and `docker` — stock upstream images, pinned.
+- **Instance image:** one container running **both** MinIO and tailscaled,
+  published at `https://<name>.<tailnet>.ts.net` via `tailscale serve`.
+- **Activity:** MinIO audit webhooks → manager (`/internal/audit`), aggregated
+  into per-friend stats. Usage sampled via `mc du`.
 
 ---
 

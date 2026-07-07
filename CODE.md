@@ -43,13 +43,14 @@ mc CLI           │  McShellClient               │
 
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 
-- REST API v2 only (`TS_API_TOKEN`). No LocalAPI, no tsnet in the manager.
+- REST API v2 only (`TAILSCALE_OAUTH_CLIENT_SECRET`). No LocalAPI, no tsnet in
+  the manager.
 - Ops used: mint pre-tagged single-use auth keys, edit ACLs/tagOwners,
   list/delete nodes.
 
 ### Instances — `instance/Dockerfile`, `entrypoint.sh`
 
-- One container per portion: tailscaled joins via `TS_AUTHKEY`, then
+- One container per portion: tailscaled joins via `TAILSCALE_AUTHKEY`, then
   `tailscale serve` publishes MinIO :9000 as HTTPS 443 on the tailnet.
 - Volumes: 4 data volumes (erasure set — required for Object Lock) + 1
   tailscale-state volume.
