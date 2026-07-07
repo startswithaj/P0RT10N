@@ -30,7 +30,7 @@ const iconWrap = css({
 });
 const spin = css({
   animation: "spin 0.8s linear infinite",
-  color: "brandcyan.9",
+  color: "cyan.9",
 });
 const pendingDot = css({
   w: "4",
@@ -39,7 +39,7 @@ const pendingDot = css({
   borderWidth: "2px",
   borderColor: "border.default",
 });
-const doneIcon = css({ color: "brandcyan.9" });
+const doneIcon = css({ color: "cyan.9" });
 const errorMark = css({ color: "fg.error" });
 const labelDone = css({ color: "fg.default" });
 const labelActive = css({ color: "fg.default", fontWeight: "bold" });

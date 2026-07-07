@@ -67,13 +67,15 @@ const modeCard = css({
   rounded: "l2",
   borderWidth: "1px",
   borderColor: "border.default",
-  bg: "bg.canvas",
+  // Unselected cards recede: cool near-white in light (NOT the cream canvas),
+  // page-indigo in dark. Selected pops to the card surface via _checked.
+  bg: { base: "gray.2", _dark: "bg.canvas" },
   cursor: "pointer",
   display: "flex",
   flexDirection: "column",
   gap: "1.5",
   _hover: { borderColor: "border.outline" },
-  _checked: { borderColor: "brandcyan.9", bg: "bg.default" },
+  _checked: { borderColor: "cyan.9", bg: "bg.default" },
 });
 const modeHead = css({
   display: "flex",
@@ -83,7 +85,7 @@ const modeHead = css({
   fontSize: "sm",
   color: "fg.default",
 });
-const modeIcon = css({ color: "brandcyan.9" });
+const modeIcon = css({ color: "cyan.9" });
 // The radio indicator sits at the far right of the card header.
 const radioDot = css({ ml: "auto", flexShrink: "0" });
 
@@ -100,7 +102,8 @@ const blockHint = css({ fontSize: "sm", color: "fg.muted", mr: "auto" });
 const sharedBanner = css({
   fontSize: "sm",
   color: "fg.default",
-  bg: "bg.muted",
+  // Same recessed gray as the unselected mode cards above it — one gray, not two.
+  bg: { base: "gray.2", _dark: "bg.canvas" },
   borderWidth: "1px",
   borderColor: "border.default",
   rounded: "l2",
@@ -128,7 +131,7 @@ const ENROLL = [
   {
     id: "invite" as const,
     icon: Mail,
-    label: "Invite to the tailnet",
+    label: "Invite to tailnet",
     body:
       "Email them an invite to join with their own Tailscale identity and devices.",
   },
@@ -206,8 +209,12 @@ function QuotaField(
         formatOptions={{ maximumFractionDigits: 0 }}
         onValueChange={(d) => props.setQuota(d.valueAsNumber)}
       >
+        {
+          /* v1 markup: Input is a sibling of Control; Control is only the
+            absolutely-positioned stepper column (triggers). */
+        }
+        <NumberInput.Input />
         <NumberInput.Control>
-          <NumberInput.Input />
           <NumberInput.IncrementTrigger />
           <NumberInput.DecrementTrigger />
         </NumberInput.Control>
@@ -233,8 +240,9 @@ function RetentionField(
         formatOptions={{ maximumFractionDigits: 0 }}
         onValueChange={(d) => props.setRetention(d.valueAsNumber)}
       >
+        {/* v1 markup: Input is a sibling of Control (see QuotaField). */}
+        <NumberInput.Input />
         <NumberInput.Control>
-          <NumberInput.Input />
           <NumberInput.IncrementTrigger />
           <NumberInput.DecrementTrigger />
         </NumberInput.Control>

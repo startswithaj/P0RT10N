@@ -53,6 +53,8 @@ const statValue = css({
   fontWeight: "bold",
   lineHeight: "1.1",
 });
+// Deliberate weight drop: the muted suffix renders Space Mono Regular at 2xl
+// (reads much lighter/rounder than the bold value — that contrast is the look).
 const statValueMuted = css({ color: "fg.muted", fontWeight: "normal" });
 
 const section = css({ mb: "8" });
@@ -98,7 +100,7 @@ const rowIcon = css({
   rounded: "l2",
   borderWidth: "1px",
   borderColor: "border.default",
-  color: "brandcyan.9",
+  color: "cyan.9",
   flexShrink: "0",
 });
 const rowName = css({ fontWeight: "bold", fontSize: "sm" });
@@ -114,7 +116,7 @@ const statusPill = css({
   textTransform: "uppercase",
   flexShrink: "0",
 });
-const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "brandcyan.9" });
+const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "cyan.9" });
 const dotDown = css({ w: "2", h: "2", rounded: "full", bg: "fg.error" });
 const dotProv = css({
   w: "2",
@@ -123,7 +125,7 @@ const dotProv = css({
   bg: "warning",
   animation: "pulse 1.4s ease-in-out infinite",
 });
-const upText = css({ color: "brandcyan.11" });
+const upText = css({ color: "cyan.11" });
 const downText = css({ color: "fg.error" });
 const provText = css({ color: "warning" });
 const errorBox = css({ color: "fg.muted", fontSize: "sm", mt: "8" });

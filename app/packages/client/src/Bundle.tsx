@@ -79,7 +79,7 @@ const fieldValue = css({
   wordBreak: "break-all",
 });
 const valueRow = css({ display: "flex", alignItems: "center", gap: "2" });
-const copiedIcon = css({ color: "brandcyan.9" });
+const copiedIcon = css({ color: "cyan.9" });
 
 const codeWrap = css({ position: "relative" });
 const codeBlock = css({
@@ -106,7 +106,7 @@ const inviteNote = css({
   fontSize: "sm",
   color: "fg.muted",
 });
-const inviteIcon = css({ color: "brandcyan.9" });
+const inviteIcon = css({ color: "cyan.9" });
 const aclNote = css({ fontSize: "sm", color: "fg.default", mb: "2" });
 const aclEyebrow = css({
   fontSize: "xs",

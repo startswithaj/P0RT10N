@@ -59,7 +59,7 @@ const success = css({
   gap: "2",
   mt: "8",
 });
-const successMark = css({ color: "brandcyan.9" });
+const successMark = css({ color: "cyan.9" });
 const errorMark = css({ color: "fg.error" });
 const errorText = css({
   color: "fg.error",

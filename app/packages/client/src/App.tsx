@@ -86,7 +86,7 @@ function staleness(
 const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
 
-// ---- styles (brand tokens: brandcyan accent, spark magenta, indigo canvas) ----
+// ---- styles (brand tokens: cyan accent, spark magenta, indigo canvas) ----
 const page = css({
   minH: "100dvh",
   bg: "bg.canvas",
@@ -107,10 +107,15 @@ const tabs = css({ display: "flex", gap: "5" });
 const tabLink = css({
   fontFamily: "body",
   fontSize: "sm",
+  // v1's Button has no `link` variant; on `plain` the text-link look needs the
+  // recipe's md sizing zeroed out (the old 0.43 link variant did this itself).
+  h: "auto",
+  px: "0",
+  py: "0",
   color: "fg.muted",
   bg: "transparent",
   cursor: "pointer",
-  _hover: { color: "fg.default" },
+  _hover: { color: "fg.default", bg: "transparent" },
   "&[data-active='true']": { color: "fg.default", fontWeight: "bold" },
 });
 const actions = css({ display: "flex", gap: "6", alignItems: "center" });
@@ -139,9 +144,9 @@ const segBtn = css({
   color: "fg.muted",
   _hover: { color: "fg.default", bg: "transparent" },
   "&[data-active='true']": {
-    bg: "brandcyan.9",
+    bg: "cyan.9",
     color: "onAccent",
-    _hover: { color: "onAccent", bg: "brandcyan.9" },
+    _hover: { color: "onAccent", bg: "cyan.9" },
   },
 });
 // Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan) and the
@@ -181,9 +186,11 @@ const statTop = css({
   textTransform: "uppercase",
   mb: "3",
 });
+// Deliberately the light cut of Space Mono — big numerals in regular weight
+// (the bold reads too heavy at 2xl).
 const statValue = css({
   fontSize: "2xl",
-  fontWeight: "bold",
+  fontWeight: "normal",
   lineHeight: "1.1",
 });
 const statSub = css({
@@ -252,7 +259,7 @@ const barTrack = css({
   bg: "bg.muted",
   overflow: "hidden",
 });
-const barOk = css({ h: "full", bg: "brandcyan.9", rounded: "full" });
+const barOk = css({ h: "full", bg: "cyan.9", rounded: "full" });
 const barWarn = css({ h: "full", bg: "spark", rounded: "full" });
 const metaRow = css({
   display: "flex",
@@ -311,7 +318,7 @@ const footerNote = css({
   letterSpacing: "0.1em",
   textTransform: "uppercase",
 });
-const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "brandcyan.9" });
+const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "cyan.9" });
 const dotDown = css({ w: "2", h: "2", rounded: "full", bg: "fg.error" });
 // The footer health chip is a link to the Status page (which shows the issue).
 const footerStatusBtn = css({
@@ -327,7 +334,7 @@ const footerStatusBtn = css({
 });
 
 // Outline pills (a cyan fill reads murky on the dark canvas — outline is clean).
-const badgeActive = css({ color: "brandcyan.11", borderColor: "brandcyan.8" });
+const badgeActive = css({ color: "cyan.11", borderColor: "cyan.8" });
 const badgeFailed = css({ color: "fg.error", borderColor: "border.error" });
 const badgeNeutral = css({ color: "fg.muted" });
 
@@ -471,7 +478,7 @@ function NavBar(
       <div class={actions}>
         <div class={tabs}>
           <Button
-            variant="link"
+            variant="plain"
             class={tabLink}
             data-active={props.view() === "portions" ? "true" : "false"}
             onClick={() => props.setView("portions")}
@@ -479,7 +486,7 @@ function NavBar(
             Portions
           </Button>
           <Button
-            variant="link"
+            variant="plain"
             class={tabLink}
             data-active={props.view() === "status" ? "true" : "false"}
             onClick={() => props.setView("status")}
@@ -489,7 +496,7 @@ function NavBar(
         </div>
         <div class={segWrap}>
           <Button
-            variant="ghost"
+            variant="plain"
             class={segBtn}
             data-active={theme() === "dark" ? "true" : "false"}
             onClick={() => setThemeValue("dark")}
@@ -497,7 +504,7 @@ function NavBar(
             Dark
           </Button>
           <Button
-            variant="ghost"
+            variant="plain"
             class={segBtn}
             data-active={theme() === "light" ? "true" : "false"}
             onClick={() => setThemeValue("light")}
@@ -630,7 +637,7 @@ function AppFooter(
       <Wordmark size={16} />
       <span class={footerNote}>
         <Button
-          variant="ghost"
+          variant="plain"
           size="xs"
           class={footerStatusBtn}
           onClick={() => props.onStatus()}
