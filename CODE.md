@@ -65,26 +65,32 @@ component, NOT a browser-native `alert`/`prompt`/`confirm` and NOT a bespoke
   `vitest.config.ts`, `client-coverage-threshold.ts`, `deno.json`) on the
   assumption it holds only vendored registry output. Your own composite
   components go up a level in `src/components/` so they stay covered/linted.
-- **Theme = vendored legacy preset (since 2026-07):** `@park-ui/panda-preset` is
-  discontinued upstream, so its exact output (our accent/gray/radius args) is
-  extracted into `src/theme/park-preset.generated.ts` and used as the Panda
-  preset — same CSS as the 0.43 package, but source we own (generated — never
-  hand-edit; see its header). Regenerate it with
-  `app/packages/client/extract-legacy-preset.ts` after editing
-  `src/theme/cyan-brand.ts`. The v1-era component wrappers need four
-  slots/variants the 0.43 theme lacks — patched via `theme.extend` in
-  `panda.config.ts` (see SKEW PATCHES comment there).
+- **Theme = Park UI v1 source (since 2026-07):** Park UI v1 ships no theme
+  package — `park-ui init`/`add` copy the theme into `src/theme/` as source we
+  own: one recipe file per component in `theme/recipes/` (+ `index.ts`),
+  palettes in `theme/colors/`, base tokens in `theme/tokens/`, plus
+  conditions/global-css/keyframes/text-styles. `panda.config.ts` imports these
+  directly (no `presets` key — Panda's defaults supply base scales and the
+  `.dark` condition). Brand deviations from stock Park are marked with
+  `BRAND OVERRIDE` comments at the point of change: the cyan scale anchored on
+  #2DE2E6 with indigo solid-ink (`colors/cyan.ts`), indigo dark surfaces
+  (`colors/slate.ts`), gray-pinned outline/plain buttons and outline badges
+  (`recipes/button.ts`, `recipes/badge.ts`), the 0.43 radio "donut"
+  (`recipes/radio-group.ts`), and the canvas/spark/radii layer in
+  `panda.config.ts`. Grep `BRAND OVERRIDE` before re-running `park-ui add` for
+  a component whose recipe already exists — the CLI overwrites recipe files.
 - Example: the burger-menu actions open `ActionDialog` (`PortionActions.tsx`)
   built on `components/ui/dialog.tsx`, not `confirm()`/`prompt()`.
-- **Adding a component:** `park-ui add` copies v1-REGISTRY wrappers styled for
-  the 2026 design language — they will look different against our legacy recipes
-  and may reference recipe slots/variants we don't have. After adding: extend
-  the legacy recipe via a skew patch in `panda.config.ts` (pattern exists), run
-  codegen + `deno task check:client`, and eyeball the result. CLI gotchas: it
+- **Adding a component:** `npx @park-ui/cli add <name>` copies the v1 wrapper
+  into `components/ui/` AND its recipe into `src/theme/recipes/` (updating both
+  index files). If the recipe file already exists it gets OVERWRITTEN — check
+  it for `BRAND OVERRIDE` comments first and re-apply them after. Then run
+  codegen + `deno task check:client` and eyeball the result. CLI gotchas: it
   requires a temporary `"baseUrl": "."` in `tsconfig.json` (remove after — tsc 6
   hard-errors on it; upstream bug
   https://github.com/chakra-ui/park-ui/issues/540), and `components.json` holds
-  its aliases.
+  its aliases. (`park-ui init` is interactive-only; its radius prompt is
+  ignored upstream — our radii mapping lives in `panda.config.ts`.)
 
 ### IMPORTANT: no disabled buttons without a visible reason
 

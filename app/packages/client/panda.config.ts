@@ -28,8 +28,7 @@ import { zIndex } from "~/theme/tokens/z-index";
  *
  * Park UI is single-accent + single-gray on Radix 1-12 scales. The brand maps:
  *   accent : cyan  — the stock file re-anchored on the brand scale so dark
- *            step 9 is EXACTLY #2DE2E6 (see BRAND OVERRIDE in colors/cyan.ts;
- *            scale provenance in cyan-brand.ts)
+ *            step 9 is EXACTLY #2DE2E6 (see BRAND OVERRIDE in colors/cyan.ts)
  *   gray   : slate — cool blue-violet gray; dark surfaces overridden to the
  *            brand indigo (see BRAND OVERRIDE in colors/slate.ts)
  *

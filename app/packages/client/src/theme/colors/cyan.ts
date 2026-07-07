@@ -2,10 +2,12 @@ import { defineSemanticTokens } from "@pandacss/dev";
 
 // BRAND OVERRIDE: this file was installed by `park-ui add cyan` (stock Radix
 // cyan) and then re-anchored on the p0rt1on brand cyan — a custom Radix-style
-// 1-12 scale whose dark step 9 is EXACTLY #2DE2E6 (see src/theme/cyan-brand.ts
-// for the scale's provenance/notes; the values here are copied from it).
-// Steps 9/10 are the solid brand cyan; 1-8 are backgrounds/borders, 11/12 are
-// text. Alpha steps composite over white (light) / #0c1a1b (dark).
+// 1-12 scale whose dark step 9 is EXACTLY #2DE2E6. The scale was generated
+// via OKLCH interpolation on the brand hue (~-163 deg); regenerate from the
+// Radix custom-color tool to hand-tune. Steps 9/10 are the solid brand cyan;
+// 1-8 are backgrounds/borders, 11/12 are text. Alpha steps are translucent
+// colours that composite over white (light) / #0c1a1b (dark) to the exact
+// solid step (Radix a-scale convention; used by ghost/subtle hovers).
 // `solid.fg` is deep-indigo ink (#160F2E, = the onAccent token) instead of
 // Park's default white — the cyan fill is light, so its ink must be dark and
 // must not flip with the theme.
