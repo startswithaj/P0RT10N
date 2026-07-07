@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { FakeTime } from "@std/testing/time";
 import { expect } from "@std/expect";
 import type { FriendBundle } from "@p0rt1on/shared/domain";
 import type { ProgressEvent } from "../lib/progress.ts";
@@ -96,5 +97,41 @@ describe("JobService", () => {
       { type: "step", step: "storage" },
       { type: "done", bundleReady: false },
     ]);
+  });
+
+  it("prunes finished jobs after the 15-minute TTL", async () => {
+    const time = new FakeTime();
+    try {
+      const svc = new JobService(noopLogger());
+      const id = svc.start(
+        "offboard",
+        fakeGen<void>([{ type: "done", result: undefined }]),
+      );
+      await Array.fromAsync(svc.progress(id)); // job finished at t=0
+      time.tick(16 * 60 * 1000);
+      // Next start() triggers the prune (no timers by design).
+      svc.start(
+        "offboard",
+        fakeGen<void>([{ type: "done", result: undefined }]),
+      );
+      expect(await Array.fromAsync(svc.progress(id))).toEqual([{
+        type: "error",
+        message: "job not found (expired or manager restarted)",
+        step: null,
+      }]);
+    } finally {
+      time.restore();
+    }
+  });
+
+  it("claimBundle throws for unknown ids and for jobs that produced no bundle", async () => {
+    const svc = new JobService(noopLogger());
+    expect(() => svc.claimBundle("nope")).toThrow("job not found");
+    const id = svc.start(
+      "offboard",
+      fakeGen<void>([{ type: "done", result: undefined }]),
+    );
+    await Array.fromAsync(svc.progress(id));
+    expect(() => svc.claimBundle(id)).toThrow("none produced");
   });
 });

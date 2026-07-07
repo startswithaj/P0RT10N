@@ -296,10 +296,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log: Logger,
   ): Promise<void> {
     if (reservation.instanceExisted) {
-      log.debug("instance already running; skipping pair creation", {
+      // Adopting the shared pool: never assume it works — start it if it's
+      // stopped and verify the HEALTHCHECK, so a dead pool fails THIS add
+      // cleanly instead of at some later mc call (no silent adopt).
+      log.debug("adopting existing instance; verifying health", {
         instanceId: reservation.instanceId,
+        tsHostname: reservation.tsHostname,
       });
-      return; // shared pool already running
+      await this.runtime.ensureRunning(reservation.tsHostname);
+      await this.runtime.waitUntilHealthy(reservation.tsHostname);
+      return;
     }
     // The container needs its OWN serve auth key (server-side tag), separate
     // from the friend's enrollment key.
@@ -551,6 +557,22 @@ export class ProvisioningService implements ProvisioningServiceContract {
       "deleteInstance",
       () => this.repo.deleteInstance(instanceId),
     );
+  }
+
+  /**
+   * Boot recovery: any row still `provisioning` at process start is
+   * a crashed provision — fail it so the sweep (run right after in main.ts)
+   * reaps it on the same boot and frees the name/port.
+   */
+  async recoverStaleProvisioning(): Promise<string[]> {
+    const names = await this.repo.failStaleProvisioning();
+    if (names.length > 0) {
+      this.logger.info("recovered stale provisioning rows", {
+        count: names.length,
+        names,
+      });
+    }
+    return names;
   }
 
   async sweepFailed(): Promise<number> {

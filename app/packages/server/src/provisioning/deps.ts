@@ -124,8 +124,32 @@ export interface ProvisioningRepo {
   /** Friend IDs left in `failed` state — tombstones for the cleanup sweep. */
   failedFriendIds(): Promise<number[]>;
 
+  /**
+   * Boot recovery: flip every stale `provisioning` friend (and its
+   * now-empty instance, matching markFailed semantics) to `failed` so the
+   * sweep reaps them. Returns the affected friend names for logging.
+   */
+  failStaleProvisioning(): Promise<string[]>;
+
   /** Instances left in `failed` state — for reaping orphaned containers/volumes. */
   failedInstances(): Promise<{ instanceId: number; tsHostname: string }[]>;
+
+  /** Every non-failed instance (id + address) — the boot reconcile's worklist. */
+  liveInstances(): Promise<
+    {
+      instanceId: number;
+      tsHostname: string;
+      minioPort: number;
+      status: string;
+    }[]
+  >;
+
+  /**
+   * The instance's container no longer exists: fail the instance and all its
+   * non-failed friends (one transaction) so the sweep reaps the rows and
+   * frees the names. Returns how many friends were failed.
+   */
+  failInstanceMissing(instanceId: number): Promise<number>;
 
   /** Remove the friend row (offboard). */
   deleteFriend(friendId: number): Promise<void>;

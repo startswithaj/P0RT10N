@@ -44,4 +44,17 @@ describe("CryptoKeyGen", () => {
       gen.rootCredentialFor("alice"),
     );
   });
+
+  it("derives the audit token deterministically, distinct from root creds", () => {
+    const gen = new CryptoKeyGen("master-1");
+    const token = gen.auditWebhookToken();
+
+    expect(token).toMatch(/^[A-Za-z0-9_-]{40}$/);
+    // Same master key → same token (nothing stored, listener + instances agree).
+    expect(new CryptoKeyGen("master-1").auditWebhookToken()).toBe(token);
+    // Different master key → different token.
+    expect(new CryptoKeyGen("master-2").auditWebhookToken()).not.toBe(token);
+    // Distinct derivation domain — never collides with any root credential.
+    expect(gen.rootCredentialFor("alice").secretKey).not.toBe(token);
+  });
 });

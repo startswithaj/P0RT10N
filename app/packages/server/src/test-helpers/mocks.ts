@@ -7,7 +7,13 @@ import type {
 import { McShellClient } from "../minio/McShellClient.ts";
 import { Env } from "../lib/Env.ts";
 import type { FetchLike } from "../tailscale/TailscaleHttpApi.ts";
-import type { InstanceRuntime, InstanceSpec } from "../runtime/runtime.ts";
+import type {
+  ContainerHandle,
+  ContainerRuntime,
+  InstanceHealth,
+  InstanceRuntime,
+  InstanceSpec,
+} from "../runtime/runtime.ts";
 import type { TailnetNode, TailscaleApi } from "../tailscale/tailscale.ts";
 import type {
   FriendNaming,
@@ -37,6 +43,17 @@ export function noopLogger(): Logger {
     child: () => logger,
   };
   return logger;
+}
+
+/** Logger that records warn messages, for asserting log-backstop behaviour. */
+export function recordingLogger(): { logger: Logger; warns: string[] } {
+  const warns: string[] = [];
+  const logger: Logger = {
+    ...noopLogger(),
+    warn: (msg) => warns.push(msg),
+    child: () => logger,
+  };
+  return { logger, warns };
 }
 
 export const TEST_CONFIG: ProvisioningConfig = {
@@ -259,13 +276,63 @@ export function mockTailscaleApi(
   };
 }
 
+/** ContainerRuntime mock for reconcile tests: canned list, health per name. */
+export function mockContainerRuntime(
+  calls: Calls,
+  opts: {
+    containers?: ContainerHandle[];
+    healthFor?: (name: string) => InstanceHealth;
+    listError?: Error;
+  } = {},
+): ContainerRuntime {
+  return {
+    ensureInstance: (spec) => {
+      calls.push(`docker:ensureInstance:${spec.name}`);
+      return Promise.resolve({ name: spec.name, id: "id", state: "running" });
+    },
+    ensureStarted: (name) => {
+      calls.push(`docker:start:${name}`);
+      return Promise.resolve();
+    },
+    status: () => Promise.resolve("running"),
+    health: (name) => Promise.resolve(opts.healthFor?.(name) ?? "healthy"),
+    diagnose: (name) =>
+      Promise.resolve({
+        name,
+        state: "running",
+        health: "healthy",
+        healthReason: null,
+        exitCode: null,
+        exitError: null,
+        recentLogs: "",
+      }),
+    stop: () => Promise.resolve(),
+    remove: (name) => {
+      calls.push(`docker:remove:${name}`);
+      return Promise.resolve();
+    },
+    removeVolumes: () => Promise.resolve(),
+    list: () =>
+      opts.listError
+        ? Promise.reject(opts.listError)
+        : Promise.resolve(opts.containers ?? []),
+  };
+}
+
 export function mockInstanceRuntime(calls: Calls): InstanceRuntime {
   return {
     ensureInstance: (spec) => {
       calls.push("runtime:ensureInstance");
       return Promise.resolve({ name: spec.name, id: "id", state: "running" });
     },
-    waitUntilHealthy: () => Promise.resolve(),
+    ensureRunning: () => {
+      calls.push("runtime:ensureRunning");
+      return Promise.resolve();
+    },
+    waitUntilHealthy: () => {
+      calls.push("runtime:waitUntilHealthy");
+      return Promise.resolve();
+    },
     diagnoseInstance: (name) =>
       Promise.resolve({
         name,
@@ -317,6 +384,15 @@ export function mockProvisioningRepo(
     context: () => Promise.reject(new Error("context not stubbed")),
     friendsOnInstance: () => Promise.resolve(0),
     failedFriendIds: () => Promise.resolve([]),
+    failStaleProvisioning: () => {
+      calls.push("repo:failStaleProvisioning");
+      return Promise.resolve([]);
+    },
+    liveInstances: () => Promise.resolve([]),
+    failInstanceMissing: (id) => {
+      calls.push(`repo:failInstanceMissing:${id}`);
+      return Promise.resolve(0);
+    },
     failedInstances: () => Promise.resolve([]),
     deleteFriend: () => {
       calls.push("repo:deleteFriend");
@@ -374,6 +450,7 @@ export const CTX: FriendProvisionContext = {
 /** Overridable parts for a ProvisioningService under test. */
 export interface ProvisioningParts {
   repo?: Partial<ProvisioningRepo>;
+  runtime?: Partial<InstanceRuntime>;
   smoke?: () => Promise<void>;
   nodes?: TailnetNode[];
   config?: Partial<ProvisioningConfig>;
@@ -389,7 +466,7 @@ export function buildProvisioningService(
     { ...TEST_CONFIG, ...parts.config },
     mockProvisioningRepo(calls, reservation, parts.repo),
     mockMcFactory(mockMcClient(calls), calls),
-    mockInstanceRuntime(calls),
+    { ...mockInstanceRuntime(calls), ...parts.runtime },
     mockTailscaleApi(calls, parts.nodes),
     {
       generateS3Credential: () => TEST_CRED,

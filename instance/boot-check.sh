@@ -4,16 +4,16 @@
 # HEALTHCHECK to report healthy, confirm MinIO is live, then tear it down.
 #
 # Usage:
-#   TS_AUTHKEY=tskey-auth-... ./instance/boot-check.sh
+#   TAILSCALE_AUTHKEY=tskey-auth-... ./instance/boot-check.sh
 #
-# Mint TS_AUTHKEY from the admin console tagged `tag:p0rt1on-serve`. Use an
+# Mint TAILSCALE_AUTHKEY from the admin console tagged `tag:p0rt1on-serve`. Use an
 # EPHEMERAL key so the test node auto-removes from the tailnet when it stops.
 # Requires: Docker, and a tailnet with MagicDNS + HTTPS certificates enabled
 # (tailscale serve --https=443 fails without them).
 set -euo pipefail
 
-: "${TS_AUTHKEY:?set TS_AUTHKEY (an ephemeral tag:p0rt1on-serve auth key)}"
-HOST="${TS_HOSTNAME:-p0rt1on-bootcheck}"
+: "${TAILSCALE_AUTHKEY:?set TAILSCALE_AUTHKEY (an ephemeral tag:p0rt1on-serve auth key)}"
+HOST="${TAILSCALE_HOSTNAME:-p0rt1on-bootcheck}"
 PORT="${MINIO_PORT:-9000}"
 NAME="p0rt1on-bootcheck"
 IMAGE="p0rt1on-instance:bootcheck"
@@ -28,9 +28,9 @@ trap cleanup EXIT
 
 echo "==> starting $NAME (hostname=$HOST, minio :$PORT)"
 docker run -d --name "$NAME" \
-  -e TS_AUTHKEY="$TS_AUTHKEY" \
-  -e TS_HOSTNAME="$HOST" \
-  -e TS_TAG="tag:p0rt1on-serve" \
+  -e TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
+  -e TAILSCALE_HOSTNAME="$HOST" \
+  -e TAILSCALE_TAG="tag:p0rt1on-serve" \
   -e MINIO_ROOT_USER="bootcheck" \
   -e MINIO_ROOT_PASSWORD="bootcheck-secret-123" \
   -e MINIO_PORT="$PORT" \

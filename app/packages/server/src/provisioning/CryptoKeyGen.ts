@@ -69,4 +69,19 @@ export class CryptoKeyGen implements KeyGen {
       ),
     };
   }
+
+  /**
+   * Audit-webhook bearer token, derived like the root creds: the
+   * same master key always yields the same token, so it's never stored or
+   * configured. Both the manager's listener and every instance's
+   * audit_webhook config consume this.
+   */
+  auditWebhookToken(): string {
+    return deriveString(
+      this.masterKey,
+      "audit-webhook-token",
+      SECRET_KEY_LENGTH,
+      SECRET_ALPHABET,
+    );
+  }
 }

@@ -10,7 +10,7 @@ import { NotFoundError } from "../lib/ServiceError.ts";
 // any connection. `progress` is a pure observer (replay + live), so SSE
 // reconnects are always safe — they re-attach, never re-run. Jobs do NOT
 // survive a manager restart: the friend row is left in `provisioning`/live
-// state and boot reconcile owns recovery (PRD 2.2/4.2).
+// state and boot reconcile owns recovery.
 //
 // Zero-knowledge note: an add job holds its once-shown FriendBundle in memory
 // only until claimed (single claim, wiped on handover) or until the job is

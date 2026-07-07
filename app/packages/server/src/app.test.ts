@@ -79,4 +79,38 @@ describe("app wiring (tRPC caller over a real DB)", () => {
       .rejects.toThrow();
     await expect(caller.friends.suspend({ friendId })).rejects.toThrow();
   });
+
+  // Job-model wiring: mutations START detached work; jobs.progress observes it.
+  // In the unit env the work fails at the external boundary (no mc/docker) —
+  // that failure MUST arrive as a terminal error DATA event, never a hang or a
+  // stream throw (the bug class the job model exists to kill).
+
+  it("addStart detaches the job; failure arrives as an error event via jobs.progress", async () => {
+    const { jobId } = await caller.friends.addStart(
+      makeAddInput("dave", "dedicated"),
+    );
+    const events = await Array.fromAsync(await caller.jobs.progress({ jobId }));
+    expect(events.at(-1)?.type).toBe("error");
+    // Failed add ⇒ no bundle; the claim maps NotFoundError → TRPC NOT_FOUND.
+    await expect(caller.jobs.claimBundle({ jobId })).rejects.toThrow(
+      "none produced",
+    );
+  });
+
+  it("offboardStart returns a jobId whose progress stream terminates", async () => {
+    const { jobId } = await caller.friends.offboardStart({ friendId });
+    const events = await Array.fromAsync(await caller.jobs.progress({ jobId }));
+    expect(["done", "error"]).toContain(events.at(-1)?.type);
+  });
+
+  it("jobs.progress yields a renderable error event for an unknown job id", async () => {
+    const events = await Array.fromAsync(
+      await caller.jobs.progress({ jobId: crypto.randomUUID() }),
+    );
+    expect(events).toEqual([{
+      type: "error",
+      message: "job not found (expired or manager restarted)",
+      step: null,
+    }]);
+  });
 });

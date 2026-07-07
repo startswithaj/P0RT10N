@@ -1,5 +1,7 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { serveDir, serveFile } from "@std/http/file-server";
+import { LimitedBytesTransformStream } from "@std/streams/limited-bytes-transform-stream";
 import { join } from "@std/path";
 import { appRouter } from "./trpc/root.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
@@ -36,15 +38,49 @@ export interface ServerOptions {
   onListen?: (addr: { port: number }) => void;
 }
 
+/** Audit events are small JSON objects; anything past this is not MinIO. */
+const MAX_AUDIT_BODY_BYTES = 1024 * 1024;
+
+/**
+ * Constant-time string equality: compare fixed-length SHA-256 digests so
+ * neither content nor length differences shortcut (node's timingSafeEqual
+ * throws on unequal lengths, so raw bytes can't be compared directly).
+ */
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+/** JSON.parse to a value or null — malformed input is a 400, not a throw. */
+function parseJson(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 /** Handle a MinIO audit webhook POST: token-guard, parse, fan out to onEvent. */
 async function handleAudit(req: Request, audit: AuditHook): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("method not allowed", { status: 405 });
   }
-  if ((req.headers.get("authorization") ?? "") !== `Bearer ${audit.token}`) {
+  const auth = req.headers.get("authorization") ?? "";
+  if (!safeEqual(auth, `Bearer ${audit.token}`)) {
     return new Response("unauthorized", { status: 401 });
   }
-  const body = await req.json().catch(() => null);
+  // Reject oversized payloads BEFORE reading the body into memory — declared
+  // size first, then a hard streaming cap for bodies with no Content-Length.
+  if (Number(req.headers.get("content-length") ?? "0") > MAX_AUDIT_BODY_BYTES) {
+    return new Response("payload too large", { status: 413 });
+  }
+  const capped = req.body?.pipeThrough(
+    new LimitedBytesTransformStream(MAX_AUDIT_BODY_BYTES, { error: true }),
+  );
+  const text = await new Response(capped ?? "").text().catch(() => null);
+  if (text === null) return new Response("payload too large", { status: 413 });
+  const body = parseJson(text);
   if (body === null) return new Response("bad request", { status: 400 });
   const events = Array.isArray(body) ? body : [body];
   await Promise.all(events.map((e) => audit.onEvent(e)));

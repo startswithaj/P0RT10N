@@ -100,6 +100,21 @@ describe("McShellClient arg-building", () => {
       ["admin", "service", "restart", "--json", "alice"],
     );
   });
+
+  it("setAuditWebhook failure never leaks the token in the error", async () => {
+    const cmds: RecordedCommand[] = [];
+    // Fail with the token in BOTH places it can appear: the echoed argv and
+    // mc's own stderr.
+    const failing = client(cmds, () => ({
+      code: 1,
+      stdout: "",
+      stderr: "unable to set auth_token=Bearer s3cr3t-tok",
+    }));
+    const err = await failing.setAuditWebhook("http://m/audit", "s3cr3t-tok")
+      .then(() => null, (e: Error) => e.message);
+    expect(err).toContain("«redacted»");
+    expect(err).not.toContain("s3cr3t-tok");
+  });
 });
 
 describe("McShellClient policy", () => {

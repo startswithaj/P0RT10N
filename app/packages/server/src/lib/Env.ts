@@ -75,23 +75,19 @@ export class Env {
 
   // ---- Tailscale ----
   /** OAuth client secret; undefined ⇒ run with the stub. */
-  get tailscaleToken(): string | undefined {
-    return this.#opt("TS_API_TOKEN");
-  }
-  get tailnet(): string {
-    return this.#str("TS_TAILNET", "-");
+  get tailscaleOauthClientSecret(): string | undefined {
+    return this.#opt("TAILSCALE_OAUTH_CLIENT_SECRET");
   }
   get tagOwner(): string | undefined {
-    return this.#opt("TS_TAG_OWNER");
+    return this.#opt("TAILSCALE_TAG_OWNER");
   }
 
-  // ---- audit webhook ----
-  get auditWebhookToken(): string {
-    return this.#str("AUDIT_WEBHOOK_TOKEN", "change-me");
-  }
-
-  /** Everything the provisioning stack needs, with dev-friendly defaults. */
-  provisioningConfig(): ProvisioningConfig {
+  /**
+   * Everything the provisioning stack needs, with dev-friendly defaults —
+   * except `auditWebhookToken`, which is DERIVED from the master key, not
+   * env-sourced; app.ts composes it in.
+   */
+  provisioningConfig(): Omit<ProvisioningConfig, "auditWebhookToken"> {
     return {
       instanceImage: this.#str("INSTANCE_IMAGE", "p0rt1on-instance:latest"),
       network: this.#str("P0RT1ON_NETWORK", "p0rt1on-net"),
@@ -104,7 +100,7 @@ export class Env {
       sharedInstanceName: this.#str("SHARED_INSTANCE_NAME", "pool"),
       tailnetDomain: this.#str("TAILNET_DOMAIN", "example.ts.net"),
       serveNodeTag: this.#str("SERVE_NODE_TAG", "tag:p0rt1on-serve"),
-      aclMode: this.#str("TS_ACL_MODE", "auto") === "manual"
+      aclMode: this.#str("TAILSCALE_ACL_MODE", "auto") === "manual"
         ? "manual"
         : "auto",
       // Instances (containers) POST audit events here — reach the manager via
@@ -113,7 +109,6 @@ export class Env {
         "AUDIT_WEBHOOK_URL",
         "http://host.docker.internal:8080/internal/audit",
       ),
-      auditWebhookToken: this.auditWebhookToken,
     };
   }
 }

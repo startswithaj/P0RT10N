@@ -74,15 +74,20 @@ export class McShellClient implements McClient {
     return `${this.target.alias}/${bucket}`;
   }
 
-  /** Run an mc subcommand; throw on non-zero exit with the captured stderr. */
-  private async exec(args: string[]): Promise<string> {
+  /**
+   * Run an mc subcommand; throw on non-zero exit with the captured stderr.
+   * `redact` values are masked out of the error message (argv echo AND mc's
+   * own output can both contain them) — secrets never reach logs/UI.
+   */
+  private async exec(args: string[], redact: string[] = []): Promise<string> {
     const res = await this.runner.run(this.mcBin, args);
     if (res.code !== 0) {
+      const raw = `mc ${args.join(" ")} failed (${res.code}): ${
+        res.stderr.trim() || res.stdout.trim()
+      }`;
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        `mc ${args.join(" ")} failed (${res.code}): ${
-          res.stderr.trim() || res.stdout.trim()
-        }`,
+        redact.reduce((m, r) => m.replaceAll(r, "«redacted»"), raw),
       );
     }
     return res.stdout;
@@ -231,7 +236,7 @@ export class McShellClient implements McClient {
       // must be baked in here. Quoted because mc's KV parser splits on the
       // embedded space otherwise.
       `auth_token="Bearer ${authToken}"`,
-    ]);
+    ], [authToken]);
     // `--json` avoids mc's interactive restart UI (needs a TTY we don't have).
     await this.exec([
       "admin",

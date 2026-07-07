@@ -59,15 +59,38 @@ describe("ProvisioningService.addFriend", () => {
     expect(bundle.manualAclInstructions).toContain("tcp:443");
   });
 
-  it("does not start containers when the shared pool already exists", async () => {
+  it("adopting the existing shared pool verifies it instead of assuming", async () => {
     const calls: Calls = [];
     await buildProvisioningService(calls, {
       ...DEDICATED_RES,
       instanceExisted: true,
     }).addFriend({ ...ADD_INPUT, isolationMode: "shared" });
 
+    // No new container — but the adopted one is started (if stopped) and
+    // health-verified before any bucket work touches it.
     expect(calls).not.toContain("runtime:ensureInstance");
-    expect(calls).toContain("mc:makeBucketWithLock");
+    expect(calls).toContain("runtime:ensureRunning");
+    expect(calls.indexOf("runtime:waitUntilHealthy")).toBeLessThan(
+      calls.indexOf("mc:makeBucketWithLock"),
+    );
+  });
+
+  it("adopting an unhealthy pool fails the add cleanly (no silent adopt)", async () => {
+    const calls: Calls = [];
+    const svc = buildProvisioningService(calls, {
+      ...DEDICATED_RES,
+      instanceExisted: true,
+    }, {
+      runtime: {
+        waitUntilHealthy: () =>
+          Promise.reject(new Error("did not become healthy")),
+      },
+    });
+
+    await expect(svc.addFriend({ ...ADD_INPUT, isolationMode: "shared" }))
+      .rejects.toThrow("did not become healthy");
+    expect(calls).toContain("repo:markFailed");
+    expect(calls).not.toContain("mc:makeBucketWithLock");
   });
 
   it("marks the friend failed and rethrows when a step throws", async () => {

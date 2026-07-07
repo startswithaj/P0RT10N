@@ -69,6 +69,13 @@ export interface ContainerRuntime {
   /** Start the instance container if absent; adopt + ensure running if it exists. */
   ensureInstance(spec: InstanceSpec): Promise<ContainerHandle>;
 
+  /**
+   * Adopt-only start: start an EXISTING container if stopped; no-op if
+   * running; absent → throw. Never invents a container — that's
+   * ensureInstance's job, with a full spec.
+   */
+  ensureStarted(name: string): Promise<void>;
+
   /** Current lifecycle state without mutating — drives idempotency + reconcile. */
   status(name: string): Promise<ContainerState>;
 
@@ -116,6 +123,14 @@ export interface InstanceRuntime {
    * any admin call — `docker run` returns before MinIO is accepting connections.
    */
   waitUntilHealthy(instanceName: string): Promise<void>;
+
+  /**
+   * Adopt-only start: the instance container must already
+   * exist — start it if stopped, throw if absent. Pair with
+   * `waitUntilHealthy` so adopting an existing instance never silently
+   * assumes it works.
+   */
+  ensureRunning(instanceName: string): Promise<void>;
 
   /** Diagnostics for an instance by its hostname (state + health + logs). */
   diagnoseInstance(instanceName: string): Promise<InstanceDiagnostics>;

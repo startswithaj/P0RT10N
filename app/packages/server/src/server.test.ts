@@ -64,6 +64,66 @@ describe("startServer (HTTP)", () => {
       expect(noAuth.status).toBe(401);
       await noAuth.body?.cancel();
 
+      const wrongToken = await fetch(
+        `http://127.0.0.1:${port}/internal/audit`,
+        {
+          method: "POST",
+          headers: { authorization: "Bearer wrong" },
+          body: "{}",
+        },
+      );
+      expect(wrongToken.status).toBe(401);
+      await wrongToken.body?.cancel();
+
+      // >1 MiB body rejected up front (413) — never reaches onEvent.
+      const huge = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
+        method: "POST",
+        headers: { authorization: "Bearer sekret" },
+        body: `{"pad":"${"x".repeat(1024 * 1024 + 1)}"}`,
+      });
+      expect(huge.status).toBe(413);
+      await huge.body?.cancel();
+      expect(received.length).toBe(0);
+
+      // Same cap with NO Content-Length (chunked stream): the declared-size
+      // check can't see it, so the LimitedBytesTransformStream must trip.
+      // The server aborts the read mid-upload, so the client races between
+      // receiving the 413 and a connection reset — BOTH prove the cap fired;
+      // the invariant is that the event is never ingested.
+      const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
+      const chunkedOutcome = await fetch(
+        `http://127.0.0.1:${port}/internal/audit`,
+        {
+          method: "POST",
+          headers: { authorization: "Bearer sekret" },
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              // 17 × 64 KiB = 1088 KiB > 1 MiB
+              Array.from({ length: 17 }).forEach(() =>
+                controller.enqueue(chunk)
+              );
+              controller.close();
+            },
+          }),
+        },
+      ).then(
+        async (res) => {
+          await res.body?.cancel();
+          return res.status;
+        },
+        () => "reset" as const,
+      );
+      expect([413, "reset"]).toContain(chunkedOutcome);
+      expect(received.length).toBe(0);
+
+      const badJson = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
+        method: "POST",
+        headers: { authorization: "Bearer sekret" },
+        body: "not json",
+      });
+      expect(badJson.status).toBe(400);
+      await badJson.body?.cancel();
+
       const ok = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
         method: "POST",
         headers: { authorization: "Bearer sekret" },

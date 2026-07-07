@@ -75,15 +75,20 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
 
   // deno-lint-ignore require-await
   async markFailed(friendId: number): Promise<void> {
-    const row = this.db.select({ instanceId: friends.instanceId })
-      .from(friends).where(eq(friends.id, friendId)).get();
-    this.db.update(friends).set({ status: "failed" })
-      .where(eq(friends.id, friendId)).run();
-    // A brand-new instance with no surviving friends is failed too.
-    if (row && this.liveFriendsOn(row.instanceId) === 0) {
-      this.db.update(instances).set({ status: "failed" })
-        .where(eq(instances.id, row.instanceId)).run();
-    }
+    this.failFriendRow(this.db, friendId);
+  }
+
+  // deno-lint-ignore require-await
+  async failStaleProvisioning(): Promise<string[]> {
+    // At boot any `provisioning` row is stale — provisioning only ever happens
+    // inside the running process, so no cross-restart concurrency exists. One
+    // transaction so a crash mid-flip can't leave a half-recovered set.
+    return this.db.transaction((tx) => {
+      const stale = tx.select({ id: friends.id, name: friends.name })
+        .from(friends).where(eq(friends.status, "provisioning")).all();
+      stale.forEach((row) => this.failFriendRow(tx, row.id));
+      return stale.map((r) => r.name);
+    });
   }
 
   // deno-lint-ignore require-await
@@ -120,6 +125,45 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   async failedFriendIds(): Promise<number[]> {
     return this.db.select({ id: friends.id }).from(friends)
       .where(eq(friends.status, "failed")).all().map((r) => r.id);
+  }
+
+  // deno-lint-ignore require-await
+  async liveInstances(): Promise<
+    {
+      instanceId: number;
+      tsHostname: string;
+      minioPort: number;
+      status: string;
+    }[]
+  > {
+    return this.db.select({
+      instanceId: instances.id,
+      tsHostname: instances.tsHostname,
+      minioPort: instances.minioPort,
+      status: instances.status,
+    }).from(instances).where(ne(instances.status, "failed")).all();
+  }
+
+  // deno-lint-ignore require-await
+  async failInstanceMissing(instanceId: number): Promise<number> {
+    // The instance's container is gone (host wipe, manual docker rm): fail the
+    // instance and every non-failed friend on it in one transaction so the
+    // sweep reaps the rows and frees the names. Data is already gone — this
+    // only makes the DB stop lying about it.
+    return this.db.transaction((tx) => {
+      const live = tx.select({ id: friends.id }).from(friends)
+        .where(and(
+          eq(friends.instanceId, instanceId),
+          ne(friends.status, "failed"),
+        )).all();
+      live.forEach((row) =>
+        tx.update(friends).set({ status: "failed" })
+          .where(eq(friends.id, row.id)).run()
+      );
+      tx.update(instances).set({ status: "failed" })
+        .where(eq(instances.id, instanceId)).run();
+      return live.length;
+    });
   }
 
   // deno-lint-ignore require-await
@@ -251,8 +295,21 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     return inserted[0].id;
   }
 
-  private liveFriendsOn(instanceId: number): number {
-    const row = this.db.select({ c: count() }).from(friends)
+  /** markFailed semantics over either the db or a transaction handle. */
+  private failFriendRow(h: Db | Tx, friendId: number): void {
+    const row = h.select({ instanceId: friends.instanceId })
+      .from(friends).where(eq(friends.id, friendId)).get();
+    h.update(friends).set({ status: "failed" })
+      .where(eq(friends.id, friendId)).run();
+    // A brand-new instance with no surviving friends is failed too.
+    if (row && this.liveFriendsOn(row.instanceId, h) === 0) {
+      h.update(instances).set({ status: "failed" })
+        .where(eq(instances.id, row.instanceId)).run();
+    }
+  }
+
+  private liveFriendsOn(instanceId: number, h: Db | Tx = this.db): number {
+    const row = h.select({ c: count() }).from(friends)
       .where(
         and(eq(friends.instanceId, instanceId), ne(friends.status, "failed")),
       ).get();

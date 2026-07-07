@@ -4,7 +4,8 @@
 # reaches them at host.docker.internal:<port>, and they POST the audit webhook
 # back to the manager the same way.
 #
-# Needs a .env with at least P0RT1ON_MASTER_KEY, TS_API_TOKEN, TAILNET_DOMAIN.
+# Needs a .env with at least P0RT1ON_MASTER_KEY, TAILSCALE_OAUTH_CLIENT_SECRET,
+# and TAILNET_DOMAIN.
 # On Docker Desktop this works as-is (host.docker.internal routes to the host).
 # On Linux, keep the extra_hosts line (adds host-gateway) and note that the
 # manager reaching an instance's 127.0.0.1-published port may require running the

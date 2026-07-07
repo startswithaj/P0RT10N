@@ -11,8 +11,7 @@ describe("Env", () => {
     expect(e.port).toBe(8080);
     expect(e.bindHost).toBe("127.0.0.1");
     expect(e.dbPath).toBe("./data/p0rt1on.db");
-    expect(e.tailscaleToken).toBeUndefined();
-    expect(e.tailnet).toBe("-");
+    expect(e.tailscaleOauthClientSecret).toBeUndefined();
 
     const c = e.provisioningConfig();
     expect(c.instanceImage).toBe("p0rt1on-instance:latest");
@@ -22,10 +21,10 @@ describe("Env", () => {
     expect(c.aclMode).toBe("auto");
   });
 
-  it("reads TS_ACL_MODE=manual", () => {
-    expect(env({ TS_ACL_MODE: "manual" }).provisioningConfig().aclMode)
+  it("reads TAILSCALE_ACL_MODE=manual", () => {
+    expect(env({ TAILSCALE_ACL_MODE: "manual" }).provisioningConfig().aclMode)
       .toBe("manual");
-    expect(env({ TS_ACL_MODE: "bogus" }).provisioningConfig().aclMode)
+    expect(env({ TAILSCALE_ACL_MODE: "bogus" }).provisioningConfig().aclMode)
       .toBe("auto");
   });
 
@@ -35,11 +34,11 @@ describe("Env", () => {
       PORT: "9999",
       INSTANCE_IMAGE: "img:1",
       MINIO_PORT_MIN: "9200",
-      TS_API_TOKEN: "tok",
+      TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
     });
     expect(e.logLevel).toBe("debug");
     expect(e.port).toBe(9999);
-    expect(e.tailscaleToken).toBe("tok");
+    expect(e.tailscaleOauthClientSecret).toBe("tok");
     expect(e.provisioningConfig().instanceImage).toBe("img:1");
     expect(e.provisioningConfig().portRange.min).toBe(9200);
   });

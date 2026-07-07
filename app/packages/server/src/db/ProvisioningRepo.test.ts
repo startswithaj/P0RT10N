@@ -200,6 +200,94 @@ describe("DrizzleProvisioningRepo", () => {
     expect(row?.s).toBe("suspended");
   });
 
+  it("failStaleProvisioning fails crashed provisions (friend + empty instance)", async () => {
+    // Simulate a crash between reserveFriend and markFailed: the row is left
+    // in `provisioning` with no in-process catch to recover it.
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+
+    const names = await repo.failStaleProvisioning();
+
+    expect(names).toEqual(["alice"]);
+    const friendRow = database.driver
+      .prepare("SELECT status s FROM friends").get();
+    expect(friendRow?.s).toBe("failed");
+    const instanceRow = database.driver
+      .prepare("SELECT status s FROM instances").get();
+    expect(instanceRow?.s).toBe("failed");
+    // The failed tombstones are now visible to the sweep.
+    expect(await repo.failedFriendIds()).toEqual([res.friendId]);
+  });
+
+  it("failStaleProvisioning leaves active and failed rows untouched", async () => {
+    const active = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    await repo.activate(active.friendId, active.instanceId);
+    const failed = await repo.reserveFriend(
+      makeAddInput("bob", "dedicated"),
+      namingFor("bob", "dedicated"),
+    );
+    await repo.markFailed(failed.friendId);
+
+    expect(await repo.failStaleProvisioning()).toEqual([]);
+
+    const statuses = database.driver
+      .prepare("SELECT name n, status s FROM friends ORDER BY name").all();
+    expect(statuses).toEqual([
+      { n: "alice", s: "active" },
+      { n: "bob", s: "failed" },
+    ]);
+  });
+
+  it("failStaleProvisioning keeps a shared instance alive for surviving friends", async () => {
+    // bob is active on the shared pool; carol crashed mid-provision. Failing
+    // carol must NOT fail the instance bob still lives on (markFailed parity).
+    const bob = await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared"),
+    );
+    await repo.activate(bob.friendId, bob.instanceId);
+    await repo.reserveFriend(
+      makeAddInput("carol", "shared"),
+      namingFor("carol", "shared"),
+    );
+
+    expect(await repo.failStaleProvisioning()).toEqual(["carol"]);
+
+    const instanceRow = database.driver
+      .prepare("SELECT status s FROM instances").get();
+    expect(instanceRow?.s).toBe("active");
+  });
+
+  it("liveInstances lists non-failed; failInstanceMissing fails instance + friends", async () => {
+    const bob = await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared"),
+    );
+    await repo.activate(bob.friendId, bob.instanceId);
+    const carol = await repo.reserveFriend(
+      makeAddInput("carol", "shared"),
+      namingFor("carol", "shared"),
+    );
+    await repo.activate(carol.friendId, carol.instanceId);
+
+    const live = await repo.liveInstances();
+    expect(live.length).toBe(1); // the one shared pool
+    expect(live[0].instanceId).toBe(bob.instanceId);
+    expect(live[0].minioPort).toBe(9000);
+
+    // Container vanished: both friends and the instance flip in one call...
+    expect(await repo.failInstanceMissing(bob.instanceId)).toBe(2);
+    expect(await repo.liveInstances()).toEqual([]);
+    expect((await repo.failedFriendIds()).length).toBe(2);
+    // ...and repeating it is a no-op (already failed).
+    expect(await repo.failInstanceMissing(bob.instanceId)).toBe(0);
+  });
+
   it("deleteInstance frees the port for reuse", async () => {
     const res = await repo.reserveFriend(
       makeAddInput("alice", "dedicated"),

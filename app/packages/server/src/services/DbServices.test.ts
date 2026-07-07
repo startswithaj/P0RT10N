@@ -11,6 +11,9 @@ import {
   TEST_REPO_CONFIG,
 } from "../test-helpers/testDb.ts";
 import {
+  buildProvisioningService,
+  type Calls,
+  DEDICATED_RES,
   mockMcClient,
   mockMcFactory,
   mockTailscaleApi,
@@ -25,6 +28,57 @@ describe("ActivityServiceImpl.stream", () => {
     const iterable = svc.stream(1, new AbortController().signal);
     expect(() => iterable[Symbol.asyncIterator]()).toThrow("not implemented");
     database.driver.close();
+  });
+});
+
+describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
+  let database: Database;
+  let repo: DrizzleProvisioningRepo;
+
+  beforeEach(() => {
+    database = createTestDatabase();
+    repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+  });
+  afterEach(() => database.driver.close());
+
+  it("kill -9 mid-provision: next boot recovers, sweeps, and frees the name", async () => {
+    // Crash between reserveFriend and markFailed: the row is stuck in
+    // `provisioning` and the unique name is blocked with no recovery path.
+    await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    await expect(repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    )).rejects.toThrow();
+
+    // Boot sequence against the REAL repo (external teardown mocked): the
+    // reservation fixture is unused — every repo call delegates to SQLite.
+    // Explicit delegation (not a spread): class methods live on the prototype,
+    // so spreading the repo instance into the mock would silently drop them.
+    const calls: Calls = [];
+    const svc = buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failStaleProvisioning: () => repo.failStaleProvisioning(),
+        failedFriendIds: () => repo.failedFriendIds(),
+        failedInstances: () => repo.failedInstances(),
+        context: (id) => repo.context(id),
+        friendsOnInstance: (id) => repo.friendsOnInstance(id),
+        deleteFriend: (id) => repo.deleteFriend(id),
+        deleteInstance: (id) => repo.deleteInstance(id),
+        audit: (f, a, d) => repo.audit(f, a, d),
+      },
+    });
+    expect(await svc.recoverStaleProvisioning()).toEqual(["alice"]);
+    expect(await svc.sweepFailed()).toBeGreaterThan(0);
+
+    // Same boot, same name: reservable again — nothing orphaned.
+    const again = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    expect(again.friendId).toBeGreaterThan(0);
   });
 });
 

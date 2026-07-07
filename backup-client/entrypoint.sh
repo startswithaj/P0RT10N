@@ -26,8 +26,8 @@ RETENTION_DAYS="${RETENTION_DAYS:-30}"
 # as the tailnet node name and as the Kopia snapshot source (see overrides below).
 # Without this each fresh container gets a random hostname and snapshot history
 # fragments across sources.
-TS_HOSTNAME="${TS_HOSTNAME:-$S3_BUCKET}"
-TS_EXTRA_ARGS="${TS_EXTRA_ARGS:-}"
+TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-$S3_BUCKET}"
+TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
 # SKIP_TAILSCALE=1 talks to S3_ENDPOINT directly (local testing without a tailnet).
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-}"
 
@@ -43,12 +43,12 @@ case "$S3_ENDPOINT" in
 esac
 
 # --- 2 & 3. Bring up Tailscale (userspace) -----------------------------------
-TS_PID=""
+TAILSCALED_PID=""
 cleanup() {
-  if [ -n "$TS_PID" ]; then
+  if [ -n "$TAILSCALED_PID" ]; then
     log "tearing down Tailscale"
     tailscale down >/dev/null 2>&1 || true
-    kill "$TS_PID" >/dev/null 2>&1 || true
+    kill "$TAILSCALED_PID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -56,7 +56,7 @@ trap cleanup EXIT INT TERM
 if [ "$SKIP_TAILSCALE" = "1" ]; then
   log "SKIP_TAILSCALE=1 — connecting to $S3_ENDPOINT directly (no tailnet)"
 else
-  : "${TS_AUTHKEY:?TS_AUTHKEY is required (your Tailscale auth key from the bundle); set SKIP_TAILSCALE=1 to bypass for local testing}"
+  : "${TAILSCALE_AUTHKEY:?TAILSCALE_AUTHKEY is required (your Tailscale auth key from the bundle); set SKIP_TAILSCALE=1 to bypass for local testing}"
 
   log "starting tailscaled (userspace networking)"
   tailscaled \
@@ -65,17 +65,17 @@ else
     --outbound-http-proxy-listen=localhost:1055 \
     --state=/var/lib/tailscale/tailscaled.state \
     >/tmp/tailscaled.log 2>&1 &
-  TS_PID=$!
+  TAILSCALED_PID=$!
 
   # `tailscale up` is idempotent: if a persisted state volume already authenticated
   # this node, it comes up without re-redeeming the (single-use) key.
-  log "joining tailnet as '$TS_HOSTNAME'"
+  log "joining tailnet as '$TAILSCALE_HOSTNAME'"
   # shellcheck disable=SC2086
   tailscale up \
-    --authkey="$TS_AUTHKEY" \
-    --hostname="$TS_HOSTNAME" \
+    --authkey="$TAILSCALE_AUTHKEY" \
+    --hostname="$TAILSCALE_HOSTNAME" \
     --accept-routes \
-    $TS_EXTRA_ARGS
+    $TAILSCALE_EXTRA_ARGS
 
   # Wait for the backend to report Running (up to ~30s).
   i=0
@@ -109,7 +109,7 @@ if kopia repository connect s3 \
   --access-key="$S3_ACCESS_KEY_ID" \
   --secret-access-key="$S3_SECRET_ACCESS_KEY" \
   --override-username=p0rt1on \
-  --override-hostname="$TS_HOSTNAME" \
+  --override-hostname="$TAILSCALE_HOSTNAME" \
   $KOPIA_TLS_ARGS $KOPIA_CACHE_ARGS >/dev/null 2>&1; then
   log "connected to existing Kopia repository"
 else
@@ -124,7 +124,7 @@ else
     --retention-mode=GOVERNANCE \
     --retention-period="${RETENTION_DAYS}d" \
     --override-username=p0rt1on \
-    --override-hostname="$TS_HOSTNAME" \
+    --override-hostname="$TAILSCALE_HOSTNAME" \
     $KOPIA_TLS_ARGS $KOPIA_CACHE_ARGS
 fi
 

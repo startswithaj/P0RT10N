@@ -31,6 +31,8 @@ describe("DockerRuntime.ensureInstance", () => {
       "p0rt1on=1",
       "--network",
       "p0rt1on-net",
+      "--restart",
+      "unless-stopped",
       "--add-host",
       "host.docker.internal:host-gateway",
       "-p",
@@ -44,11 +46,11 @@ describe("DockerRuntime.ensureInstance", () => {
       "--env-file",
       "/run/secrets/minio-alice.env",
       "-e",
-      "TS_AUTHKEY=tskey-abc",
+      "TAILSCALE_AUTHKEY=tskey-abc",
       "-e",
-      "TS_HOSTNAME=alice",
+      "TAILSCALE_HOSTNAME=alice",
       "-e",
-      "TS_TAG=tag:p0rt1on-serve",
+      "TAILSCALE_TAG=tag:p0rt1on-serve",
       "-e",
       "MINIO_PORT=9100",
       "p0rt1on-instance:x",
@@ -65,14 +67,46 @@ describe("DockerRuntime.ensureInstance", () => {
       .ensureInstance(INSTANCE);
     expect(handle.id).toBe("abc");
     expect(cmds.some((c) => c.args[0] === "run")).toBe(false);
+    // Adopted containers may predate the restart policy — it's applied in place.
+    expect(
+      cmds.some((c) =>
+        c.args.join(" ") === "update --restart unless-stopped " + INSTANCE.name
+      ),
+    ).toBe(true);
+  });
+
+  it("starts a stopped container (after retrofitting the restart policy)", async () => {
+    const cmds: RecordedCommand[] = [];
+    const respond = (args: string[]) =>
+      args[0] === "inspect" ? ok("abc exited") : ok();
+    await new DockerRuntime(fakeRunner(cmds, respond)).ensureInstance(INSTANCE);
+    const verbs = cmds.map((c) => c.args[0]);
+    expect(verbs.indexOf("update")).toBeLessThan(verbs.indexOf("start"));
+  });
+});
+
+describe("DockerRuntime.ensureStarted", () => {
+  it("already running: no start, but the restart policy still converges", async () => {
+    const cmds: RecordedCommand[] = [];
+    await new DockerRuntime(fakeRunner(cmds, () => ok("abc running")))
+      .ensureStarted("x");
+    expect(cmds.some((c) => c.args[0] === "start")).toBe(false);
+    expect(cmds.some((c) => c.args[0] === "update")).toBe(true);
   });
 
   it("starts a stopped container", async () => {
     const cmds: RecordedCommand[] = [];
     const respond = (args: string[]) =>
       args[0] === "inspect" ? ok("abc exited") : ok();
-    await new DockerRuntime(fakeRunner(cmds, respond)).ensureInstance(INSTANCE);
+    await new DockerRuntime(fakeRunner(cmds, respond)).ensureStarted("x");
     expect(cmds.some((c) => c.args[0] === "start")).toBe(true);
+  });
+
+  it("throws for an absent container instead of inventing one", async () => {
+    const rt = new DockerRuntime(
+      fakeRunner([], () => ({ code: 1, stdout: "", stderr: "no such" })),
+    );
+    await expect(rt.ensureStarted("x")).rejects.toThrow("cannot adopt");
   });
 });
 
@@ -195,6 +229,10 @@ describe("DockerInstanceRuntime", () => {
         calls.push(`ensureInstance:${s.name}`);
         return Promise.resolve(handle(s.name));
       },
+      ensureStarted: (n) => {
+        calls.push(`ensureStarted:${n}`);
+        return Promise.resolve();
+      },
       status: () => Promise.resolve("running"),
       health: () => Promise.resolve("healthy"),
       diagnose: (n) =>
@@ -229,6 +267,14 @@ describe("DockerInstanceRuntime", () => {
       INSTANCE,
     );
     expect(calls).toEqual(["ensureInstance:p0rt1on-instance-alice"]);
+  });
+
+  it("ensureRunning addresses the container by instance name", async () => {
+    const calls: string[] = [];
+    await new DockerInstanceRuntime(recordingRuntime(calls)).ensureRunning(
+      "alice",
+    );
+    expect(calls).toEqual(["ensureStarted:p0rt1on-instance-alice"]);
   });
 
   it("stop/removeInstance address the container by instance name", async () => {

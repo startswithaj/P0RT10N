@@ -98,6 +98,10 @@ export class DockerRuntime implements ContainerRuntime {
       LABEL,
       "--network",
       spec.network,
+      // Survive host reboots / docker restarts without the manager's help
+      // (boot reconcile covers the cases this can't).
+      "--restart",
+      "unless-stopped",
       // So MinIO's audit webhook can reach the manager on the host (Linux too).
       "--add-host",
       "host.docker.internal:host-gateway",
@@ -110,11 +114,11 @@ export class DockerRuntime implements ContainerRuntime {
       "--env-file",
       spec.rootCredSecretRef,
       "-e",
-      `TS_AUTHKEY=${spec.authKey}`,
+      `TAILSCALE_AUTHKEY=${spec.authKey}`,
       "-e",
-      `TS_HOSTNAME=${spec.tsHostname}`,
+      `TAILSCALE_HOSTNAME=${spec.tsHostname}`,
       "-e",
-      `TS_TAG=${spec.tag}`,
+      `TAILSCALE_TAG=${spec.tag}`,
       "-e",
       `MINIO_PORT=${spec.minioPort}`,
       spec.image,
@@ -123,6 +127,20 @@ export class DockerRuntime implements ContainerRuntime {
 
   async status(name: string): Promise<ContainerState> {
     return (await this.inspect(name)).state;
+  }
+
+  async ensureStarted(name: string): Promise<void> {
+    const found = await this.inspect(name);
+    if (found.state === "absent") {
+      throw new ServiceError(
+        "INTERNAL_SERVER_ERROR",
+        `container ${name} not found — cannot adopt a container that does not exist`,
+      );
+    }
+    // Adopting always converges the restart policy — pre-existing containers
+    // may predate the `--restart unless-stopped` run flag.
+    await this.retrofitRestartPolicy(name);
+    if (found.state === "stopped") await this.checked(["start", name]);
   }
 
   async health(name: string): Promise<InstanceHealth> {
@@ -214,14 +232,24 @@ export class DockerRuntime implements ContainerRuntime {
   ): Promise<ContainerHandle> {
     const found = await this.inspect(name);
     if (found.state === "running") {
+      await this.retrofitRestartPolicy(name);
       return { name, id: found.id, state: "running" };
     }
     if (found.state === "stopped") {
+      await this.retrofitRestartPolicy(name);
       await this.checked(["start", name]);
       return { name, id: found.id, state: "running" };
     }
     const id = (await this.checked(makeRunArgs())).trim();
     return { name, id, state: "running" };
+  }
+
+  /**
+   * Adopted containers may predate the `--restart unless-stopped` run flag —
+   * apply it in place so every adopt converges on the same policy. Idempotent.
+   */
+  private async retrofitRestartPolicy(name: string): Promise<void> {
+    await this.checked(["update", "--restart", "unless-stopped", name]);
   }
 
   /** `docker inspect` for id + state; absent (not found) → state "absent". */
@@ -267,6 +295,10 @@ export class DockerInstanceRuntime implements InstanceRuntime {
 
   async waitUntilHealthy(instanceName: string): Promise<void> {
     await this.pollHealth(containerNames(instanceName).container, 60);
+  }
+
+  async ensureRunning(instanceName: string): Promise<void> {
+    await this.runtime.ensureStarted(containerNames(instanceName).container);
   }
 
   /** Poll health every 2s (recursive, to satisfy no-imperative-loops). */

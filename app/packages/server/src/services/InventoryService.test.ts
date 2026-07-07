@@ -17,6 +17,7 @@ describe("RuntimeInventoryService", () => {
     healthFor: (name: string) => InstanceHealth,
   ): ContainerRuntime => ({
     ensureInstance: () => Promise.resolve(handle),
+    ensureStarted: () => Promise.resolve(),
     status: () => Promise.resolve("running"),
     health: (name) => Promise.resolve(healthFor(name)),
     diagnose: (name) =>

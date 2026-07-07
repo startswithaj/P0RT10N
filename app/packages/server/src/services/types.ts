@@ -50,6 +50,8 @@ export interface ProvisioningService {
   ): AsyncGenerator<ProgressEvent<OffboardStepKey, void>>;
   /** Reap failed-provision tombstones (partial resources + rows). Returns count. */
   sweepFailed(): Promise<number>;
+  /** Boot recovery: fail stale `provisioning` rows; returns names. */
+  recoverStaleProvisioning(): Promise<string[]>;
 }
 
 /** Point-in-time usage history (`mc du` samples). */

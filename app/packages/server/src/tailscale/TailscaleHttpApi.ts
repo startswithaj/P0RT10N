@@ -28,8 +28,6 @@ export type FetchLike = (
 export interface TailscaleConfig {
   /** API access token (Bearer). Supplied via env/secret, never persisted. */
   token: string;
-  /** Tailnet name, or "-" for the token's default tailnet. */
-  tailnet: string;
   baseUrl?: string;
   /** Owner assigned to each friend tag in tagOwners (default autogroup:admin). */
   tagOwner?: string;
@@ -192,7 +190,9 @@ export class TailscaleHttpApi implements TailscaleApi {
   // ---- helpers ----
 
   private tn(): string {
-    return encodeURIComponent(this.config.tailnet);
+    // "-" is the API's alias for the token's own tailnet — an OAuth client is
+    // bound to exactly one, so it never needs naming explicitly.
+    return "-";
   }
 
   private tagOwner(): string {

@@ -15,7 +15,7 @@ describe("TailscaleHttpApi", () => {
     ) => { status?: number; json?: unknown; headers?: Record<string, string> },
   ) {
     return new TailscaleHttpApi(
-      { token: "tok", tailnet: "example.com", baseUrl: "https://api.test/v2" },
+      { token: "tok", baseUrl: "https://api.test/v2" },
       fakeFetch(recorded, handler),
       () => NOW,
     );
@@ -28,7 +28,7 @@ describe("TailscaleHttpApi", () => {
     })).mintAuthKey({ tag: "tag:p0rt1on-friend-alice", expirySeconds: 3600 });
 
     expect(reqs[0].method).toBe("POST");
-    expect(reqs[0].url).toBe("https://api.test/v2/tailnet/example.com/keys");
+    expect(reqs[0].url).toBe("https://api.test/v2/tailnet/-/keys");
     const body = JSON.parse(reqs[0].body ?? "{}");
     expect(body.capabilities.devices.create.preauthorized).toBe(true);
     expect(body.capabilities.devices.create.reusable).toBe(false);
@@ -70,7 +70,7 @@ describe("TailscaleHttpApi", () => {
       },
     })).nodesByTag("tag:p0rt1on-friend-alice");
 
-    expect(reqs[0].url).toBe("https://api.test/v2/tailnet/example.com/devices");
+    expect(reqs[0].url).toBe("https://api.test/v2/tailnet/-/devices");
     expect(nodes.map((n) => n.nodeId)).toEqual(["n1", "n3"]);
     expect(nodes[0].online).toBe(true); // fresh
     expect(nodes[1].online).toBe(false); // stale
@@ -99,7 +99,7 @@ describe("TailscaleHttpApi", () => {
     await client.deleteNode("n9");
     expect(reqs[0]).toMatchObject({
       method: "DELETE",
-      url: "https://api.test/v2/tailnet/example.com/keys/k1",
+      url: "https://api.test/v2/tailnet/-/keys/k1",
     });
     expect(reqs[1]).toMatchObject({
       method: "DELETE",
@@ -131,7 +131,6 @@ describe("TailscaleHttpApi", () => {
     const client = new TailscaleHttpApi(
       {
         token: "tskey-client-CID-secret",
-        tailnet: "example.com",
         baseUrl: "https://api.test/v2",
       },
       fakeFetch(reqs, (req) => {
