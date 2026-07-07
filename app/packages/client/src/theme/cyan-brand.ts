@@ -22,6 +22,20 @@ export const brandCyan = {
       "10": { value: "#1eb9bc" },
       "11": { value: "#008d90" },
       "12": { value: "#0c5d5f" },
+      // Alpha steps: translucent colors that composite over white to the exact
+      // solid step above (Radix a-scale convention; used by ghost/subtle hovers).
+      a1: { value: "#00e6e60a" },
+      a2: { value: "#00d3d317" },
+      a3: { value: "#00c2c82a" },
+      a4: { value: "#00bcbc3d" },
+      a5: { value: "#00b4b452" },
+      a6: { value: "#00aaac69" },
+      a7: { value: "#00a2a689" },
+      a8: { value: "#009da0b6" },
+      a9: { value: "#00c0c4e2" },
+      a10: { value: "#00b0b3e1" },
+      a11: { value: "#008d90ff" },
+      a12: { value: "#005557f3" },
     },
     dark: {
       "1": { value: "#0c1a1b" },
@@ -36,6 +50,19 @@ export const brandCyan = {
       "10": { value: "#15d5d9" },
       "11": { value: "#86ebed" },
       "12": { value: "#c7f8f8" },
+      // Alpha steps composite over the dark page base (dark.1 #0c1a1b).
+      a1: { value: "#0c1a1b05" },
+      a2: { value: "#00feff09" },
+      a3: { value: "#00feff16" },
+      a4: { value: "#00feff23" },
+      a5: { value: "#00f9ff30" },
+      a6: { value: "#00faff42" },
+      a7: { value: "#00fbff59" },
+      a8: { value: "#19fcff79" },
+      a9: { value: "#31fbffe3" },
+      a10: { value: "#17faffd5" },
+      a11: { value: "#90fdffeb" },
+      a12: { value: "#cdfffff7" },
     },
   }),
   semanticTokens: defineSemanticTokens.colors({
@@ -109,6 +136,106 @@ export const brandCyan = {
       value: {
         _light: "{colors.brandcyan.light.12}",
         _dark: "{colors.brandcyan.dark.12}",
+      },
+    },
+    a1: {
+      value: {
+        _light: "{colors.brandcyan.light.a1}",
+        _dark: "{colors.brandcyan.dark.a1}",
+      },
+    },
+    a2: {
+      value: {
+        _light: "{colors.brandcyan.light.a2}",
+        _dark: "{colors.brandcyan.dark.a2}",
+      },
+    },
+    a3: {
+      value: {
+        _light: "{colors.brandcyan.light.a3}",
+        _dark: "{colors.brandcyan.dark.a3}",
+      },
+    },
+    a4: {
+      value: {
+        _light: "{colors.brandcyan.light.a4}",
+        _dark: "{colors.brandcyan.dark.a4}",
+      },
+    },
+    a5: {
+      value: {
+        _light: "{colors.brandcyan.light.a5}",
+        _dark: "{colors.brandcyan.dark.a5}",
+      },
+    },
+    a6: {
+      value: {
+        _light: "{colors.brandcyan.light.a6}",
+        _dark: "{colors.brandcyan.dark.a6}",
+      },
+    },
+    a7: {
+      value: {
+        _light: "{colors.brandcyan.light.a7}",
+        _dark: "{colors.brandcyan.dark.a7}",
+      },
+    },
+    a8: {
+      value: {
+        _light: "{colors.brandcyan.light.a8}",
+        _dark: "{colors.brandcyan.dark.a8}",
+      },
+    },
+    a9: {
+      value: {
+        _light: "{colors.brandcyan.light.a9}",
+        _dark: "{colors.brandcyan.dark.a9}",
+      },
+    },
+    a10: {
+      value: {
+        _light: "{colors.brandcyan.light.a10}",
+        _dark: "{colors.brandcyan.dark.a10}",
+      },
+    },
+    a11: {
+      value: {
+        _light: "{colors.brandcyan.light.a11}",
+        _dark: "{colors.brandcyan.dark.a11}",
+      },
+    },
+    a12: {
+      value: {
+        _light: "{colors.brandcyan.light.a12}",
+        _dark: "{colors.brandcyan.dark.a12}",
+      },
+    },
+    // Park UI recipe aliases (colorPalette.default etc.) — same shape as the
+    // preset's built-in colors: default = solid step 9, emphasized = 10,
+    // text = 11. fg is the text-on-solid color; Park's cyan uses white, but
+    // #2DE2E6 is far too bright for white text, so we use the darkest teal.
+    default: {
+      value: {
+        _light: "{colors.brandcyan.light.9}",
+        _dark: "{colors.brandcyan.dark.9}",
+      },
+    },
+    emphasized: {
+      value: {
+        _light: "{colors.brandcyan.light.10}",
+        _dark: "{colors.brandcyan.dark.10}",
+      },
+    },
+    fg: {
+      value: {
+        _light: "{colors.brandcyan.dark.1}",
+        _dark: "{colors.brandcyan.dark.1}",
+      },
+    },
+    text: {
+      value: {
+        _light: "{colors.brandcyan.light.11}",
+        _dark: "{colors.brandcyan.dark.11}",
       },
     },
   }),

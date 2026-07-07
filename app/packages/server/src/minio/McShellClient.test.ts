@@ -92,6 +92,10 @@ describe("McShellClient arg-building", () => {
       "alice",
       "audit_webhook:p0rt1on",
     ]);
+    // MinIO sends auth_token verbatim as the Authorization header — the
+    // Bearer scheme the manager expects must be baked in, quoted for mc's
+    // space-splitting KV parser.
+    expect(cmds[0].args[6]).toBe('auth_token="Bearer tok"');
     expect(cmds[1].args).toEqual(
       ["admin", "service", "restart", "--json", "alice"],
     );
@@ -137,6 +141,45 @@ describe("McShellClient parsing + errors", () => {
     const respond = () => ({ code: 1, stdout: "", stderr: "bucket exists" });
     await expect(client(cmds, respond).makeBucketWithLock("backup"))
       .rejects.toThrow("bucket exists");
+  });
+
+  // Teardown idempotency: "already absent" (or a name that could never exist,
+  // like a bucket below MinIO's 3-char minimum) is success, not an error.
+  it("removeBucket succeeds when the bucket does not exist", async () => {
+    const respond = () => ({
+      code: 1,
+      stdout: "",
+      stderr:
+        "mc: <ERROR> Unable to validate target `alice/backup`. Bucket `backup` does not exist.",
+    });
+    await expect(client([], respond).removeBucket("backup")).resolves
+      .toBeUndefined();
+  });
+
+  it("removeBucket succeeds when the bucket name is too short to exist", async () => {
+    const respond = () => ({
+      code: 1,
+      stdout: "",
+      stderr:
+        "mc: <ERROR> Unable to validate target `alice/do`. Bucket name cannot be shorter than 3 characters",
+    });
+    await expect(client([], respond).removeBucket("do")).resolves
+      .toBeUndefined();
+  });
+
+  it("removeBucket still rethrows unrelated errors", async () => {
+    const respond = () => ({ code: 1, stdout: "", stderr: "access denied" });
+    await expect(client([], respond).removeBucket("backup"))
+      .rejects.toThrow("access denied");
+  });
+
+  it("removeUser succeeds when the user does not exist", async () => {
+    const respond = () => ({
+      code: 1,
+      stdout: "",
+      stderr: "mc: <ERROR> The specified user does not exist.",
+    });
+    await expect(client([], respond).removeUser("AK")).resolves.toBeUndefined();
   });
 
   it("trace throws NOT_IMPLEMENTED on iteration", () => {

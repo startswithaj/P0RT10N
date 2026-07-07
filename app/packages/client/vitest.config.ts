@@ -44,8 +44,10 @@ export default defineConfig({
       reportsDirectory: "./coverage",
       include: ["src/**/*.{ts,tsx}"],
       // Generated code and entrypoints are excluded from the coverage floor.
+      // src/theme/ is registry-copied Park UI v1 token/recipe data (no logic).
       exclude: [
         "src/components/ui/**",
+        "src/theme/**",
         "styled-system/**",
         "src/main.tsx",
         "src/**/*.{test,spec}.{ts,tsx}",

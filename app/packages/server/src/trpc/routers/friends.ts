@@ -30,15 +30,20 @@ export const friendsRouter = router({
     .mutation(({ ctx, input }) => ctx.provisioningService.addFriend(input)),
 
   /**
-   * Streaming provision over SSE: emits a `step` event as each provisioning step
-   * begins, then a `done` event carrying the once-shown bundle. Lets the UI show
-   * real per-step progress and halt on the exact step that fails.
+   * Start provisioning as a background job and return its id immediately. The
+   * UI observes per-step progress via `jobs.progress` and claims the once-shown
+   * bundle via `jobs.claimBundle` — the work is detached from any connection,
+   * so a dropped/reconnected stream can never re-run or orphan it.
    */
-  addStream: publicProcedure
+  addStart: publicProcedure
     .input(addFriendInput)
-    .subscription(async function* ({ ctx, input }) {
-      yield* ctx.provisioningService.addFriendStream(input);
-    }),
+    .mutation(({ ctx, input }) => ({
+      jobId: ctx.jobService.start(
+        "add",
+        ctx.provisioningService.addFriendStream(input),
+        (bundle) => bundle,
+      ),
+    })),
 
   /** Resize the hard quota; effective immediately. */
   resize: publicProcedure
@@ -80,13 +85,15 @@ export const friendsRouter = router({
     }),
 
   /**
-   * Streaming offboard over SSE: emits a `step` event as each teardown step
-   * begins, then a `done` event. Lets the UI show the same per-step checklist as
-   * provisioning and halt on the exact step that fails.
+   * Start the destructive teardown as a background job; same observer model as
+   * `addStart` (no bundle to claim).
    */
-  offboardStream: publicProcedure
+  offboardStart: publicProcedure
     .input(offboardFriendInput)
-    .subscription(async function* ({ ctx, input }) {
-      yield* ctx.provisioningService.offboardStream(input.friendId);
-    }),
+    .mutation(({ ctx, input }) => ({
+      jobId: ctx.jobService.start(
+        "offboard",
+        ctx.provisioningService.offboardStream(input.friendId),
+      ),
+    })),
 });

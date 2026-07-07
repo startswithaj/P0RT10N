@@ -17,6 +17,10 @@ export const trpc = createTRPCClient<AppRouter>({
   links: [
     splitLink({
       condition: (op) => op.type === "subscription",
+      // Subscriptions are pure OBSERVERS (jobs.progress replays + follows a
+      // background job) — work is started by mutations only, so EventSource's
+      // built-in reconnect is safe here: it re-attaches and replays, never
+      // re-runs. Failures arrive as `error` DATA events, not stream errors.
       true: httpSubscriptionLink({ url: "/trpc" }),
       false: httpBatchLink({ url: "/trpc" }),
     }),

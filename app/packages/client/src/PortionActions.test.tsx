@@ -13,7 +13,11 @@ vi.mock("./trpc.ts", () => ({
       suspend: { mutate: vi.fn() },
       resume: { mutate: vi.fn() },
       resize: { mutate: vi.fn() },
-      offboardStream: { subscribe: vi.fn() },
+      offboardStart: { mutate: vi.fn() },
+    },
+    jobs: {
+      progress: { subscribe: vi.fn() },
+      claimBundle: { mutate: vi.fn() },
     },
   },
   queryClient: { invalidateQueries: vi.fn() },
@@ -104,6 +108,54 @@ describe("ActionDialog", () => {
         })
       );
       await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    });
+
+    it("rotate dialog warns the new secret is shown once, before confirming", () => {
+      const friend = makeFriend();
+      renderDialog({ friend, kind: "rotate-s3" });
+
+      // The warning is part of the pre-confirmation copy (w1 US-006).
+      expect(screen.getByText(/shown once/i)).toBeInTheDocument();
+      expect(trpc.friends.rotateKey.mutate).not.toHaveBeenCalled();
+    });
+
+    it("offboard starts a job and surfaces a job error event on the checklist", async () => {
+      const friend = makeFriend({ id: 7, name: "alice" });
+      renderDialog({ friend, kind: "offboard" });
+      mutateOf(trpc.friends.offboardStart.mutate).mockResolvedValue({
+        jobId: "j1",
+      });
+      let handlers:
+        | { onData: (ev: unknown) => void; onError: (err: unknown) => void }
+        | undefined;
+      mutateOf(trpc.jobs.progress.subscribe).mockImplementation(
+        (_input: unknown, h: typeof handlers) => {
+          handlers = h;
+          return { unsubscribe: vi.fn() };
+        },
+      );
+
+      fireEvent.input(screen.getByRole("textbox"), {
+        target: { value: "alice" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Offboard" }));
+
+      await waitFor(() =>
+        expect(trpc.friends.offboardStart.mutate).toHaveBeenCalledWith({
+          friendId: 7,
+        })
+      );
+      await waitFor(() => expect(handlers).toBeDefined());
+
+      // Failures arrive as DATA events on the observer stream — the dialog
+      // must freeze on the failing step and show the message.
+      handlers?.onData({ type: "step", step: "storage" });
+      handlers?.onData({
+        type: "error",
+        message: "mc rb failed",
+        step: "storage",
+      });
+      expect(await screen.findByText(/mc rb failed/)).toBeInTheDocument();
     });
 
     it("does not call any mutation when the dialog is cancelled", () => {

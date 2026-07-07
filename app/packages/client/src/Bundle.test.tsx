@@ -34,6 +34,31 @@ describe("Bundle", () => {
     });
   });
 
+  describe("copy all", () => {
+    it("copies every section on the screen, not just the S3 fields", () => {
+      const writeText = vi.fn(() => Promise.resolve());
+      vi.stubGlobal("navigator", { clipboard: { writeText } });
+      const bundle = renderBundle({
+        manualAclInstructions: '{"src": ["tag:friend"]}',
+      }, "key");
+
+      fireEvent.click(screen.getByRole("button", { name: /copy all/i }));
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      const text = writeText.mock.calls[0][0] as unknown as string;
+      // S3 credentials…
+      expect(text).toContain(bundle.s3AccessKeyId);
+      expect(text).toContain(bundle.s3SecretKey);
+      expect(text).toContain(bundle.s3Endpoint);
+      expect(text).toContain(bundle.bucket);
+      // …plus the Tailscale command, ACL lines, and Kopia quickstart.
+      expect(text).toContain(bundle.tailscaleUpCommand as string);
+      expect(text).toContain(bundle.manualAclInstructions as string);
+      expect(text).toContain(bundle.kopiaQuickstart);
+      vi.unstubAllGlobals();
+    });
+  });
+
   describe("tailscale section", () => {
     it("renders the up-command when an auth key is present (key enroll)", () => {
       const bundle = renderBundle({}, "key");

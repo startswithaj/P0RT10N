@@ -60,20 +60,40 @@ component, NOT a browser-native `alert`/`prompt`/`confirm` and NOT a bespoke
 - Components live in `src/components/ui/*.tsx` and wrap the Ark primitive with
   its Panda **recipe** via `createStyleContext(<recipe>)` — see `menu.tsx`,
   `dialog.tsx` as the template.
-- The recipes are already generated in `styled-system/recipes/` (the Park UI
-  panda preset ships them). If a component's recipe exists there but the
-  `components/ui/*.tsx` wrapper doesn't, add the wrapper (copy `menu.tsx`'s
-  pattern, list the recipe's slots).
+- **`src/components/ui/` is for Park UI CLI-copied components ONLY** — nothing
+  hand-authored. The folder is excluded from coverage, lint, and fmt (see
+  `vitest.config.ts`, `client-coverage-threshold.ts`, `deno.json`) on the
+  assumption it holds only vendored registry output. Your own composite
+  components go up a level in `src/components/` so they stay covered/linted.
+- **Theme = vendored legacy preset (since 2026-07):** `@park-ui/panda-preset` is
+  discontinued upstream, so its exact output (our accent/gray/radius args) is
+  extracted into `src/theme/park-preset.generated.ts` and used as the Panda
+  preset — same CSS as the 0.43 package, but source we own (generated — never
+  hand-edit; see its header). Regenerate it with
+  `app/packages/client/extract-legacy-preset.ts` after editing
+  `src/theme/cyan-brand.ts`. The v1-era component wrappers need four
+  slots/variants the 0.43 theme lacks — patched via `theme.extend` in
+  `panda.config.ts` (see SKEW PATCHES comment there).
 - Example: the burger-menu actions open `ActionDialog` (`PortionActions.tsx`)
   built on `components/ui/dialog.tsx`, not `confirm()`/`prompt()`.
-- To add a wrapper, prefer the CLI over hand-copying:
-  `cd app/packages/client && deno run -A npm:@park-ui/cli@latest add <names...>`.
-  Gotchas: (1) the CLI always ends with "An unexpected error occurred" — the
-  `.tsx` files are still written correctly, ignore it; (2) it does NOT pull
-  transitive component deps, so grep the new files for unresolved `from './x'`
-  and add those too (e.g. `button`→`group`,`loader`; `toast`→`close-button`,
-  `icon`,`spinner`); (3) it strips the trailing newline from `panda.config.ts`
-  on every run — `git checkout panda.config.ts` afterward.
+- **Adding a component:** `park-ui add` copies v1-REGISTRY wrappers styled for
+  the 2026 design language — they will look different against our legacy recipes
+  and may reference recipe slots/variants we don't have. After adding: extend
+  the legacy recipe via a skew patch in `panda.config.ts` (pattern exists), run
+  codegen + `deno task check:client`, and eyeball the result. CLI gotchas: it
+  requires a temporary `"baseUrl": "."` in `tsconfig.json` (remove after — tsc 6
+  hard-errors on it; upstream bug
+  https://github.com/chakra-ui/park-ui/issues/540), and `components.json` holds
+  its aliases.
+
+### IMPORTANT: no disabled buttons without a visible reason
+
+A disabled button must never leave the user guessing. If a button is disabled,
+the UI must show WHY, right there — inline validation text under the offending
+field(s), or helper text next to the button (e.g. "Enter the portion's name to
+confirm", "Name must be at least 3 characters"). If the reason can't be shown,
+don't disable the button: let the click run validation and surface the errors.
+Applies to every action button (submit, confirm, destructive).
 
 ### Card drop shadow
 
@@ -87,6 +107,8 @@ provisioning checklist, the bundle card + its code blocks) use Panda/Park UI's
 - **Scale:** Park exposes `xs, sm, md, lg, xl` (theme-aware via gray-alpha).
   Park's `card` recipe already applies `lg` by default; we set it explicitly on
   the non-Park surfaces so every panel matches.
+- **List rows** (Status page service rows) get `sm`, not `lg` — dense repeating
+  items want texture, not elevation competing with the stat cards.
 - These shadows are intentionally subtle on the dark indigo canvas. If you want
   stronger dark-mode elevation later, replace `"lg"` with a custom theme-aware
   semantic token (separate `base`/`_dark` values + a faint top highlight).

@@ -1,31 +1,38 @@
 import { defineConfig } from "@pandacss/dev";
-import { createPreset } from "@park-ui/panda-preset";
-import slate from "@park-ui/panda-preset/colors/slate";
-import brandCyan from "./src/theme/cyan-brand"; // custom Radix scale anchored on #2DE2E6
+import parkLegacyPreset from "./src/theme/park-preset.generated";
 // Utility recipes the preset omits but Park's Button/Loader chain needs.
 import { absoluteCenter, group } from "./src/theme/park-recipes";
 
 /**
- * p0rt1on — Park UI (Ark UI + Panda) preset.
+ * p0rt1on — Park UI (Ark UI + Panda), legacy 0.43 theme vendored as source.
  *
- * Park UI is single-accent + single-gray on Radix 1–12 scales. We map the brand on:
- *   accentColor : brandCyan — custom palette anchored EXACTLY on #2DE2E6 (src/theme/cyan-brand.ts)
+ * The @park-ui/panda-preset package is discontinued upstream (frozen at 0.43.1,
+ * Nov 2024), so its exact output — createPreset({ accentColor: brandCyan,
+ * grayColor: slate, radius: "md" }) — is extracted into
+ * src/theme/park-preset.generated.ts (see extract-legacy-preset.ts). Same CSS
+ * as before, but the theme is now source we own instead of a frozen npm black
+ * box.
+ *
+ * Park UI is single-accent + single-gray on Radix 1–12 scales. The brand maps:
+ *   accentColor : brandCyan — custom palette anchored EXACTLY on #2DE2E6
+ *                 (src/theme/cyan-brand.ts — feeds the extraction script)
  *   grayColor   : slate     — cool blue-violet gray that reads as the indigo surfaces
- *   radius      : md        — adjust to taste
+ *   radius      : md
  *
  * The two brand things Park UI's model doesn't cover are layered on via theme.extend:
  *   1. The synthwave CANVAS — we pin bg.canvas / bg.default so dark mode is brand
  *      indigo (#160F2E / #1F1640), not Radix near-black.
  *   2. The magenta SPARK — Park is single-accent, so magenta lives as its own token
- *      (the 0/1 numerals, the aperture dot, primary CTAs). To drive Park components
- *      with it via `colorPalette="pink"`, add pink through the preset (see PARK-UI.md).
+ *      (the 0/1 numerals, the aperture dot, primary CTAs).
+ *
+ * SKEW PATCHES: the CLI-copied v1-era component wrappers in components/ui/
+ * reference recipe slots/variants the 0.43 theme never defined. Panda merges the
+ * additions below into the vendored recipes (field.requiredIndicator,
+ * spinner size=inherit, switch.indicator, button variant=plain).
  *
  * Dark mode is Panda's `.dark` class condition (Park UI convention). The brand is
  * dark-first, so the app sets `class="dark"` on <html> by default (see App.tsx).
  * Panda condition convention: `base` = light, `_dark` = the `.dark` override.
- *
- * The accent is the custom brandCyan palette (step 9 = #2DE2E6). To go back to a
- * built-in, swap brandCyan for `cyan` from '@park-ui/panda-preset/colors/cyan'.
  */
 export default defineConfig({
   preflight: true,
@@ -34,20 +41,55 @@ export default defineConfig({
   exclude: [],
   outdir: "styled-system",
 
-  // createPreset already bundles @pandacss/preset-base — don't add it again.
-  presets: [
-    createPreset({
-      accentColor: brandCyan,
-      grayColor: slate,
-      radius: "md",
-    }),
-  ],
+  // parkLegacyPreset references @pandacss/preset-base by name — don't add it again.
+  presets: [parkLegacyPreset],
 
   theme: {
     extend: {
       recipes: {
         group,
         absoluteCenter,
+        // Skew patch: v1 close-button/App buttons use variant="plain" — style it
+        // like the 0.43 ghost variant (transparent, gray hover wash).
+        button: {
+          className: "button",
+          variants: {
+            variant: {
+              plain: {
+                color: "fg.default",
+                _hover: { background: "gray.a3" },
+                _selected: { background: "gray.a3" },
+              },
+            },
+          },
+        },
+        // Skew patch: v1 loader.tsx renders <Spinner size="inherit">.
+        spinner: {
+          className: "spinner",
+          variants: {
+            size: { inherit: { "--size": "1em" } },
+          },
+        },
+      },
+      slotRecipes: {
+        // Skew patch: v1 field.tsx exports a RequiredIndicator slot.
+        field: {
+          className: "field",
+          slots: ["requiredIndicator"],
+          base: { requiredIndicator: { color: "fg.error" } },
+        },
+        // Skew patch: v1 switch.tsx exports an Indicator slot.
+        switchRecipe: {
+          className: "switch",
+          slots: ["indicator"],
+          base: {
+            indicator: {
+              display: "grid",
+              placeItems: "center",
+              height: "full",
+            },
+          },
+        },
       },
       keyframes: {
         spin: {
@@ -94,6 +136,11 @@ export default defineConfig({
   // Park components read fg/bg tokens; this just sets the page defaults + body font.
   globalCss: {
     html: {
+      // The legacy preset sets `html { colorPalette: "brandcyan" }` in its own
+      // globalCss, but this html block overrides it — restate it or every
+      // recipe's `colorPalette.default` (radio dot fill, focus rings) resolves
+      // to nothing.
+      colorPalette: "brandcyan",
       fontFamily: "body",
       background: "bg.canvas",
       color: "fg.default",

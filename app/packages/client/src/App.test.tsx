@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createRoot } from "solid-js";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { makeBundle, makeFriend } from "./test-helpers/fixtures.ts";
@@ -14,7 +14,15 @@ vi.mock("./trpc.ts", async () => {
     trpc: {
       friends: {
         list: { query: vi.fn() },
-        addStream: { subscribe: vi.fn() },
+        addStart: { mutate: vi.fn() },
+      },
+      jobs: {
+        progress: { subscribe: vi.fn() },
+        claimBundle: { mutate: vi.fn() },
+      },
+      status: {
+        get: { query: vi.fn() },
+        diagnose: { query: vi.fn() },
       },
     },
     queryClient: new QueryClient(),
@@ -39,6 +47,13 @@ describe("App dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    // Default: an all-up snapshot so the footer reads Healthy unless a test
+    // overrides it.
+    asMock(trpc.status.get.query).mockResolvedValue({
+      minio: [],
+      tailscale: [],
+      host: [{ name: "p0rt1on-api", detail: "control-plane API", state: "up" }],
+    });
   });
 
   describe("friends list", () => {
@@ -56,6 +71,115 @@ describe("App dashboard", () => {
       expect(screen.getByText("active")).toBeInTheDocument();
       expect(screen.getByText("suspended")).toBeInTheDocument();
       expect(screen.getAllByRole("progressbar")).toHaveLength(2);
+      expect(screen.queryByText("No portions yet")).not.toBeInTheDocument();
+    });
+
+    it("renders the empty-state placeholder when the list loads empty", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([]);
+
+      renderApp();
+
+      expect(await screen.findByText("No portions yet")).toBeInTheDocument();
+      // Two "Add portion" buttons: the NavBar one plus the empty-state CTA.
+      expect(
+        screen.getAllByRole("button", { name: /add portion/i }),
+      ).toHaveLength(2);
+    });
+  });
+
+  describe("staleness nudge", () => {
+    const hoursAgo = (h: number) =>
+      new Date(Date.now() - h * 3_600_000).toISOString();
+
+    it("nudges past the 48h threshold, stays quiet inside it", async () => {
+      const fresh = makeFriend({
+        id: 1,
+        name: "fresh",
+        lastRequestAt: hoursAgo(47),
+      });
+      const stale = makeFriend({
+        id: 2,
+        name: "stale",
+        lastRequestAt: hoursAgo(72),
+      });
+      asMock(trpc.friends.list.query).mockResolvedValue([fresh, stale]);
+
+      renderApp();
+
+      expect(await screen.findByText("no backups since 3 days ago"))
+        .toBeInTheDocument();
+      // Exactly one nudge: the 47h friend is inside the threshold and shows
+      // a neutral last-activity timestamp instead.
+      expect(screen.getAllByText(/no backups since/)).toHaveLength(1);
+      expect(screen.getByText("last activity 1 day ago")).toBeInTheDocument();
+    });
+
+    it("shows a recent last-activity timestamp for healthy friends", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([
+        makeFriend({ lastRequestAt: hoursAgo(0.05) }),
+      ]);
+
+      renderApp();
+
+      expect(await screen.findByText("last activity 3 minutes ago"))
+        .toBeInTheDocument();
+    });
+
+    it("shows 'never connected' instead of a false nudge for new friends", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([
+        makeFriend({ lastRequestAt: null }),
+      ]);
+
+      renderApp();
+
+      expect(await screen.findByText("never connected")).toBeInTheDocument();
+      expect(screen.queryByText(/no backups since/)).toBeNull();
+    });
+  });
+
+  describe("navigation refetch", () => {
+    it("refetches the friends list when navigating back to Portions", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([]);
+
+      renderApp();
+      await screen.findByText("No portions yet");
+      const callsAfterLoad = asMock(trpc.friends.list.query).mock.calls
+        .length as number;
+
+      // Status tab, then back to Portions — setView invalidates the cache.
+      fireEvent.click(screen.getByRole("button", { name: "Status" }));
+      fireEvent.click(screen.getByRole("button", { name: "Portions" }));
+
+      await waitFor(() =>
+        expect(asMock(trpc.friends.list.query).mock.calls.length)
+          .toBeGreaterThan(callsAfterLoad)
+      );
+    });
+  });
+
+  describe("footer health", () => {
+    it("shows Unhealthy when any status-page service is down", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([]);
+      asMock(trpc.status.get.query).mockResolvedValue({
+        minio: [{ name: "p0rt1on-x", detail: "dedicated", state: "down" }],
+        tailscale: [],
+        host: [],
+      });
+
+      renderApp();
+
+      expect(await screen.findByText("Unhealthy")).toBeInTheDocument();
+    });
+
+    it("shows Healthy and navigates to the Status page on click", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([]);
+
+      renderApp();
+
+      const chip = await screen.findByRole("button", { name: "Healthy" });
+      fireEvent.click(chip);
+      // The Status page's MinIO group renders — the chip links to the issue.
+      expect(await screen.findByText("MinIO")).toBeInTheDocument();
     });
   });
 
@@ -97,36 +221,44 @@ describe("App dashboard", () => {
       enroll: "key",
     };
 
-    it("drops the bundle and pending draft from state on finishAdd", () => {
-      createRoot((dispose) => {
-        // Capture the subscription handlers so we can push a "done" event with a
-        // secret-bearing bundle, mirroring the real provisioning stream.
-        let handlers:
-          | { onData: (ev: unknown) => void; onError: (err: unknown) => void }
-          | undefined;
-        asMock(trpc.friends.addStream.subscribe).mockImplementation(
-          (_input: unknown, h: typeof handlers) => {
-            handlers = h;
-            return { unsubscribe: vi.fn() };
-          },
-        );
+    it("drops the bundle and pending draft from state on finishAdd", async () => {
+      let dispose!: () => void;
+      // Capture the observer handlers so we can push job progress events; the
+      // secret-bearing bundle arrives only via the claimBundle mutation.
+      let handlers:
+        | { onData: (ev: unknown) => void; onError: (err: unknown) => void }
+        | undefined;
+      asMock(trpc.friends.addStart.mutate).mockResolvedValue({ jobId: "j1" });
+      asMock(trpc.jobs.claimBundle.mutate).mockResolvedValue(makeBundle());
+      asMock(trpc.jobs.progress.subscribe).mockImplementation(
+        (_input: unknown, h: typeof handlers) => {
+          handlers = h;
+          return { unsubscribe: vi.fn() };
+        },
+      );
 
-        const flow = createAddFlow();
-        flow.startAdd(draft);
-        handlers?.onData({ type: "done", result: makeBundle() });
-
-        // The completed add exposes the bundle (and remembers the draft)...
-        expect(flow.doneBundle()).not.toBeNull();
-        expect(flow.pending()).not.toBeNull();
-
-        flow.finishAdd();
-
-        // ...but finishAdd wipes both, so no secret is retained in memory.
-        expect(flow.doneBundle()).toBeNull();
-        expect(flow.pending()).toBeNull();
-
-        dispose();
+      const flow = createRoot((d) => {
+        dispose = d;
+        return createAddFlow();
       });
+      flow.startAdd(draft);
+      // addStart resolves → progress subscription attaches.
+      await waitFor(() => expect(handlers).toBeDefined());
+      // done event carries NO secrets — it triggers the single claim.
+      handlers?.onData({ type: "done", bundleReady: true });
+      await waitFor(() => expect(flow.doneBundle()).not.toBeNull());
+      expect(trpc.jobs.claimBundle.mutate).toHaveBeenCalledWith({
+        jobId: "j1",
+      });
+      expect(flow.pending()).not.toBeNull();
+
+      flow.finishAdd();
+
+      // ...but finishAdd wipes both, so no secret is retained in memory.
+      expect(flow.doneBundle()).toBeNull();
+      expect(flow.pending()).toBeNull();
+
+      dispose();
     });
   });
 });

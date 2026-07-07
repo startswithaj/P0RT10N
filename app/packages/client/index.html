@@ -13,13 +13,13 @@
     />
     <!-- dark-first: set the class before paint to avoid a flash -->
     <script>
-    try {
-      if (localStorage.getItem("p0rt1on-theme") !== "light") {
+      try {
+        if (localStorage.getItem("p0rt1on-theme") !== "light") {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (_) {
         document.documentElement.classList.add("dark");
       }
-    } catch (_) {
-      document.documentElement.classList.add("dark");
-    }
     </script>
   </head>
   <body>

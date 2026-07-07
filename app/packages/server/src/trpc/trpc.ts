@@ -8,6 +8,7 @@ import type {
   ProvisioningService,
   UsageService,
 } from "../services/types.ts";
+import type { JobService } from "../jobs/JobService.ts";
 
 /** Dependencies injected into every request. Routers read these; never globals. */
 export interface TrpcContext {
@@ -16,6 +17,7 @@ export interface TrpcContext {
   usageService: UsageService;
   activityService: ActivityService;
   inventoryService: InventoryService;
+  jobService: JobService;
   logger: Logger;
   // Populated by the HTTP adapter for the local-only admin session.
   responseHeaders?: Headers;
@@ -69,6 +71,25 @@ const loggingMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
   }
   return result;
 });
+
+/**
+ * Wrap a subscription generator so mid-stream throws are logged before they
+ * reach the SSE transport. Middleware can't do this: for subscriptions next()
+ * resolves when the generator is created, so errors thrown while streaming
+ * bypass both middlewares and would otherwise vanish from the server log.
+ */
+export async function* loggedStream<T>(
+  gen: AsyncGenerator<T>,
+  logger: Logger,
+  path: string,
+): AsyncGenerator<T> {
+  try {
+    yield* gen;
+  } catch (err) {
+    logger.warn("stream error", { path, error: String(err) });
+    throw err;
+  }
+}
 
 export const router = t.router;
 export const mergeRouters = t.mergeRouters;

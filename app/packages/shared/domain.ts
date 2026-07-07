@@ -64,14 +64,16 @@ export type S3Op = (typeof S3_OP_VALUES)[number];
 
 // ---- Primitives ----
 
-/** Friend display name: also the basis for bucket + tag, so keep it tame. */
+/** Friend display name: also the basis for bucket + tag, so keep it tame.
+ * min(3) is MinIO's bucket-name minimum — the name IS the bucket name, and a
+ * shorter one provisions a friend whose bucket can never be created. */
 const friendNameSchema: z.ZodString = z
   .string()
-  .min(1)
+  .min(3, "at least 3 characters (it becomes the S3 bucket name)")
   .max(63)
   .regex(
     /^[a-z0-9][a-z0-9-]*$/,
-    "lowercase alphanumeric + hyphen, must start alnum",
+    "lowercase letters/digits/hyphens, starting with a letter or digit",
   );
 
 /** A byte count. SQLite INTEGER is 64-bit, so raw bytes are safe. */
@@ -142,6 +144,14 @@ export const getFriendInput: z.ZodObject<{ friendId: typeof friendIdSchema }> =
   z
     .object({ friendId: friendIdSchema });
 export type GetFriendInput = z.infer<typeof getFriendInput>;
+
+/** Job observer inputs: `jobs.progress` (SSE replay+live) and the single-claim
+ * bundle handover `jobs.claimBundle`. Job ids are opaque UUIDs. */
+export const jobIdSchema: z.ZodString = z.string().uuid();
+export const jobInput: z.ZodObject<{ jobId: typeof jobIdSchema }> = z.object({
+  jobId: jobIdSchema,
+});
+export type JobInput = z.infer<typeof jobInput>;
 
 /** Usage history (point-in-time `mc du` samples), newest first. */
 export const usageHistoryInput: z.ZodObject<{

@@ -28,7 +28,7 @@ services:
       - "127.0.0.1:5173:5173" # Vite dev server (frontend) — open this in a browser
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # launch instance containers
-      - /Users/jake/Dev/p0rt1on/p0rt1on:/app # live source — restart picks up code changes
+      - .:/app # live source (repo root = build context) — restart picks up code changes
       - p0rt1on-db:/app/data # metadata DB
       - p0rt1on-mc:/root/.mc # mc aliases (per-instance admin creds)
     extra_hosts:

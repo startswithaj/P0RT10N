@@ -47,10 +47,10 @@ function actionTitle(p: Pending): string {
 function actionDesc(p: Pending): string {
   if (p.kind === "resize") return "New hard quota — effective immediately.";
   if (p.kind === "rotate-s3") {
-    return "Issues a new S3 key and revokes the current one. Their backups keep working once they update the key.";
+    return "Issues a new S3 key and revokes the current one. Their backups keep working once they update the key. The new secret is shown once and can't be retrieved again — copy it from the next screen.";
   }
   if (p.kind === "rotate-ts") {
-    return "Generates a new Tailscale client key so they can reconnect to the tailnet.";
+    return "Generates a new Tailscale client key so they can reconnect to the tailnet. The key is shown once and can't be retrieved again.";
   }
   if (p.kind === "suspend") {
     return "Disables their S3 user and revokes their node. Data is kept; resume to re-enable.";
@@ -249,8 +249,10 @@ function TsResultBody(props: {
 }
 
 /**
- * Subscribe to the offboard teardown stream: drive `setOffboard` per step, close
- * the dialog (refetching the list) on done, or freeze on the step that failed.
+ * Start the teardown as a background job, then observe it: drive `setOffboard`
+ * per step, close the dialog (refetching the list) on done, or freeze on the
+ * step that failed. Failures arrive as `error` DATA events on jobs.progress —
+ * the observer stream is replayable, so a reconnect can never re-run teardown.
  */
 function subscribeOffboard(
   friendId: number,
@@ -258,22 +260,34 @@ function subscribeOffboard(
   onDone: () => void,
 ) {
   setOffboard({ kind: "running", step: null });
-  trpc.friends.offboardStream.subscribe({ friendId }, {
-    onData: (ev) => {
-      if (ev.type === "step") {
-        setOffboard({ kind: "running", step: ev.step });
-      } else {
-        invalidate();
-        onDone();
-      }
-    },
-    onError: (err) =>
-      setOffboard((prev) => ({
-        kind: "error",
-        message: err instanceof Error ? err.message : String(err),
-        step: prev.kind === "running" ? prev.step : null,
-      })),
-  });
+  const fail = (message: string, step: OffboardStepKey | null) =>
+    setOffboard((prev) => ({
+      kind: "error",
+      message,
+      step: step ?? (prev.kind === "running" ? prev.step : null),
+    }));
+  trpc.friends.offboardStart.mutate({ friendId })
+    .then(({ jobId }) =>
+      trpc.jobs.progress.subscribe({ jobId }, {
+        onData: (ev) => {
+          // Wire steps are plain strings; the keys come from OFFBOARD_STEPS.
+          if (ev.type === "step") {
+            setOffboard({ kind: "running", step: ev.step as OffboardStepKey });
+          } else if (ev.type === "error") {
+            fail(ev.message, ev.step as OffboardStepKey | null);
+          } else {
+            invalidate();
+            onDone();
+          }
+        },
+        // Transport-level backstop (e.g. server unreachable mid-observe).
+        onError: (err) =>
+          fail(err instanceof Error ? err.message : String(err), null),
+      })
+    )
+    .catch((err) =>
+      fail(err instanceof Error ? err.message : String(err), null)
+    );
 }
 
 const OFFBOARD_LABELS = OFFBOARD_STEPS.map((s) => s.label);

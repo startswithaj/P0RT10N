@@ -90,8 +90,22 @@ const radioDot = css({ ml: "auto", flexShrink: "0" });
 const actions = css({
   display: "flex",
   justifyContent: "flex-end",
+  alignItems: "center",
   gap: "3",
   mt: "2",
+});
+// Why the CTA is disabled (CODE.md: no disabled buttons without a reason).
+const blockHint = css({ fontSize: "sm", color: "fg.muted", mr: "auto" });
+// Soft-isolation trade-off note, shown at the decision point (PLAN wireframe).
+const sharedBanner = css({
+  fontSize: "sm",
+  color: "fg.default",
+  bg: "bg.muted",
+  borderWidth: "1px",
+  borderColor: "border.default",
+  rounded: "l2",
+  p: "3",
+  mt: "3",
 });
 // Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
 // Button recipe still supplies sizing, radius and typography.
@@ -135,11 +149,42 @@ const MODES = [
   },
 ];
 
+type FormIssue = { path: (string | number | symbol)[]; message: string };
+
+function formIssues(core: unknown): FormIssue[] {
+  const parsed = addFriendInput.safeParse(core);
+  return parsed.success ? [] : parsed.error.issues;
+}
+
+function issueFor(issues: FormIssue[], field: string): string | null {
+  return issues.find((i) => i.path[0] === field)?.message ?? null;
+}
+
+// CODE.md rule: a disabled button must say WHY. First blocking problem wins;
+// the untouched-form case gets a friendlier prompt than a zod message.
+function blockReasonFor(name: string, issues: FormIssue[]): string | null {
+  if (name.trim() === "") return "Enter a friend name to continue";
+  const first = issues[0];
+  if (!first) return null;
+  const labels: Record<string, string> = {
+    name: "Name",
+    quotaBytes: "Quota",
+    retentionDays: "Retention",
+  };
+  return `${
+    labels[String(first.path[0])] ?? String(first.path[0])
+  }: ${first.message}`;
+}
+
 function QuotaField(
-  props: { quota: () => number; setQuota: (n: number) => void },
+  props: {
+    quota: () => number;
+    setQuota: (n: number) => void;
+    error: () => string | null;
+  },
 ) {
   return (
-    <Field.Root>
+    <Field.Root invalid={props.error() !== null}>
       <Field.Label>Storage quota (GB)</Field.Label>
       <div class={chips}>
         <For each={PRESETS}>
@@ -167,6 +212,41 @@ function QuotaField(
           <NumberInput.DecrementTrigger />
         </NumberInput.Control>
       </NumberInput.Root>
+      <Field.ErrorText>Must be a positive whole number of GB</Field.ErrorText>
+    </Field.Root>
+  );
+}
+
+function RetentionField(
+  props: {
+    retention: () => number;
+    setRetention: (n: number) => void;
+    error: () => string | null;
+  },
+) {
+  return (
+    <Field.Root invalid={props.error() !== null}>
+      <Field.Label>Object-lock retention (days)</Field.Label>
+      <NumberInput.Root
+        min={1}
+        value={String(props.retention())}
+        formatOptions={{ maximumFractionDigits: 0 }}
+        onValueChange={(d) => props.setRetention(d.valueAsNumber)}
+      >
+        <NumberInput.Control>
+          <NumberInput.Input />
+          <NumberInput.IncrementTrigger />
+          <NumberInput.DecrementTrigger />
+        </NumberInput.Control>
+      </NumberInput.Root>
+      <Field.HelperText>
+        Backups are write-once for this long and bypass is denied — so even if a
+        friend's machine is compromised, an attacker can't delete or encrypt
+        their existing backups within the retention window.
+      </Field.HelperText>
+      <Field.ErrorText>
+        Must be a positive whole number of days
+      </Field.ErrorText>
     </Field.Root>
   );
 }
@@ -200,6 +280,14 @@ function ModePicker(
           )}
         </For>
       </div>
+      <Show when={props.mode() === "shared"}>
+        <p class={sharedBanner}>
+          Shared mode runs everyone's buckets in ONE MinIO process — isolation
+          is IAM-policy level, not process level. A MinIO vulnerability or
+          instance-root compromise exposes all portions on it. Choose Dedicated
+          for stronger isolation.
+        </p>
+      </Show>
     </RadioGroup.Root>
   );
 }
@@ -271,7 +359,10 @@ export function AddPortion(
     retentionDays: retention(),
     isolationMode: mode(),
   });
-  const valid = () => addFriendInput.safeParse(core()).success;
+  const issues = () => formIssues(core());
+  const errFor = (field: string) => issueFor(issues(), field);
+  const valid = () => issues().length === 0;
+  const blockReason = () => blockReasonFor(name(), issues());
 
   return (
     <main class={page}>
@@ -298,7 +389,7 @@ export function AddPortion(
             props.onSubmit({ ...core(), enroll: enroll() });
           }}
         >
-          <Field.Root>
+          <Field.Root invalid={name().trim() !== "" && errFor("name") !== null}>
             <Field.Label>Friend name</Field.Label>
             <Input
               placeholder="e.g. alice"
@@ -309,37 +400,29 @@ export function AddPortion(
             <Field.HelperText>
               Lowercase; used for their bucket and alias.
             </Field.HelperText>
+            <Field.ErrorText>{errFor("name")}</Field.ErrorText>
           </Field.Root>
 
-          <QuotaField quota={quota} setQuota={setQuota} />
+          <QuotaField
+            quota={quota}
+            setQuota={setQuota}
+            error={() => errFor("quotaBytes")}
+          />
 
           <ModePicker mode={mode} setMode={setMode} />
 
-          <Field.Root>
-            <Field.Label>Object-lock retention (days)</Field.Label>
-            <NumberInput.Root
-              min={1}
-              value={String(retention())}
-              formatOptions={{ maximumFractionDigits: 0 }}
-              onValueChange={(d) => setRetention(d.valueAsNumber)}
-            >
-              <NumberInput.Control>
-                <NumberInput.Input />
-                <NumberInput.IncrementTrigger />
-                <NumberInput.DecrementTrigger />
-              </NumberInput.Control>
-            </NumberInput.Root>
-            <Field.HelperText>
-              Backups are write-once for this long and bypass is denied — so
-              even if a friend's machine is compromised, an attacker can't
-              delete or encrypt their existing backups within the retention
-              window.
-            </Field.HelperText>
-          </Field.Root>
+          <RetentionField
+            retention={retention}
+            setRetention={setRetention}
+            error={() => errFor("retentionDays")}
+          />
 
           <EnrollPicker enroll={enroll} setEnroll={setEnroll} />
 
           <div class={actions}>
+            <Show when={blockReason()}>
+              <span class={blockHint}>{blockReason()}</span>
+            </Show>
             <Button type="button" variant="outline" onClick={props.onBack}>
               Cancel
             </Button>

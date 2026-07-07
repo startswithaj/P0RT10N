@@ -20,6 +20,7 @@ import {
   UsageServiceImpl,
 } from "./services/DbServices.ts";
 import { RuntimeInventoryService } from "./services/InventoryService.ts";
+import { JobService } from "./jobs/JobService.ts";
 import type { Logger } from "./services/types.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
 
@@ -73,6 +74,7 @@ export function buildContext(
       config.tailnetDomain,
       logger,
     ),
+    jobService: new JobService(logger),
     logger,
   };
 }

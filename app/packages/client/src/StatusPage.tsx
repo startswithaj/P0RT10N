@@ -1,5 +1,5 @@
 import { createQuery } from "@tanstack/solid-query";
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, type JSX, Show } from "solid-js";
 import { css } from "styled-system/css";
 import {
   ChevronDown,
@@ -22,11 +22,6 @@ function stateLabel(s: SvcState): string {
   return "Down";
 }
 type View = { minio: Svc[]; tailscale: Svc[]; host: Svc[] };
-
-// The instance whose diagnostics accordion is open (one at a time). Module-level
-// so it survives the 5s status poll re-rendering the rows — a per-row signal
-// would reset every poll and snap the accordion shut.
-const [expanded, setExpanded] = createSignal<string | null>(null);
 
 const statGrid = css({
   display: "grid",
@@ -80,6 +75,9 @@ const row = css({
   rounded: "l2",
   px: "4",
   py: "3",
+  // `sm` (not `lg`): rows are dense list items — texture, not elevation, so
+  // they don't compete with the stat cards above.
+  boxShadow: "sm",
 });
 const rowClickable = css({
   cursor: "pointer",
@@ -184,7 +182,7 @@ const panelLogs = css({
 const panelMutedText = css({ color: "fg.muted", fontSize: "xs" });
 
 function StatCard(
-  props: { icon: () => unknown; label: string; items: Svc[] },
+  props: { icon: () => JSX.Element; label: string; items: Svc[] },
 ) {
   const up = () => props.items.filter((s) => s.state === "up").length;
   return (
@@ -247,15 +245,23 @@ function DiagnosticsPanel(props: { instance: string }) {
   );
 }
 
-function ServiceRow(props: { svc: Svc; icon: () => unknown }) {
+function ServiceRow(
+  props: {
+    svc: Svc;
+    icon: () => JSX.Element;
+    expanded: () => string | null;
+    setExpanded: (k: string | null) => void;
+  },
+) {
   const key = () => props.svc.instance ?? "";
   const clickable = () => key().length > 0;
-  const isOpen = () => clickable() && expanded() === key();
+  const isOpen = () => clickable() && props.expanded() === key();
   return (
     <div>
       <div
         class={`${row} ${clickable() ? rowClickable : ""}`}
-        onClick={() => clickable() && setExpanded(isOpen() ? null : key())}
+        onClick={() =>
+          clickable() && props.setExpanded(isOpen() ? null : key())}
       >
         <div class={rowLeft}>
           <div class={rowIcon}>{props.icon()}</div>
@@ -286,7 +292,13 @@ function ServiceRow(props: { svc: Svc; icon: () => unknown }) {
 }
 
 function Section(
-  props: { title: string; items: Svc[]; icon: () => unknown },
+  props: {
+    title: string;
+    items: Svc[];
+    icon: () => JSX.Element;
+    expanded: () => string | null;
+    setExpanded: (k: string | null) => void;
+  },
 ) {
   return (
     <div class={section}>
@@ -297,7 +309,14 @@ function Section(
           fallback={<span class={empty}>None.</span>}
         >
           <For each={props.items}>
-            {(s) => <ServiceRow svc={s} icon={props.icon} />}
+            {(s) => (
+              <ServiceRow
+                svc={s}
+                icon={props.icon}
+                expanded={props.expanded}
+                setExpanded={props.setExpanded}
+              />
+            )}
           </For>
         </Show>
       </div>
@@ -314,6 +333,10 @@ export function StatusPage() {
   }));
   const view = (): View =>
     status.data ?? { minio: [], tailscale: [], host: [] };
+  // The instance whose diagnostics accordion is open (one at a time). Held at
+  // page scope (not per-row) so the 5s status poll re-rendering the rows can't
+  // reset it and snap the accordion shut.
+  const [expanded, setExpanded] = createSignal<string | null>(null);
 
   return (
     <Show
@@ -344,16 +367,22 @@ export function StatusPage() {
         title="MinIO instances"
         items={view().minio}
         icon={() => <Database size={16} />}
+        expanded={expanded}
+        setExpanded={setExpanded}
       />
       <Section
         title="Tailscale nodes"
         items={view().tailscale}
         icon={() => <Network size={16} />}
+        expanded={expanded}
+        setExpanded={setExpanded}
       />
       <Section
         title="Host services"
         items={view().host}
         icon={() => <Server size={16} />}
+        expanded={expanded}
+        setExpanded={setExpanded}
       />
     </Show>
   );

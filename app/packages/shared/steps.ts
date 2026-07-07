@@ -25,6 +25,18 @@ export const PROVISION_STEPS = [
 ] as const satisfies ProgressStep<string>[];
 export type ProvisionStepKey = (typeof PROVISION_STEPS)[number]["key"];
 
+/**
+ * Job progress events — the `jobs.progress` wire contract. Failures travel as
+ * DATA (`error` events), never as stream errors: the stream is a pure observer
+ * of a background job, so a dropped connection can safely reconnect and replay
+ * without re-running or losing work. `done` never carries the bundle; secrets
+ * are handed over exactly once via the `jobs.claimBundle` mutation.
+ */
+export type JobProgressEvent =
+  | { type: "step"; step: string }
+  | { type: "error"; message: string; step: string | null }
+  | { type: "done"; bundleReady: boolean };
+
 /** Offboard teardown steps, in execution order. */
 export const OFFBOARD_STEPS = [
   { key: "storage", label: "Removing S3 user & bucket" },

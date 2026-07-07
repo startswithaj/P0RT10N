@@ -25,11 +25,14 @@ describe("AddPortion", () => {
   const form = () => document.querySelector("form") as HTMLFormElement;
 
   describe("name gating", () => {
-    it("blocks submit while the name is empty", () => {
+    it("blocks submit while the name is empty — and says why", () => {
       const { onSubmit } = setup();
 
       // Default (empty) name: the CTA is disabled and the form guard refuses.
       expect(createBtn()).toBeDisabled();
+      // CODE.md rule: a disabled button must state its reason.
+      expect(screen.getByText("Enter a friend name to continue"))
+        .toBeInTheDocument();
       fireEvent.submit(form());
       expect(onSubmit).not.toHaveBeenCalled();
     });
@@ -40,12 +43,28 @@ describe("AddPortion", () => {
       // Uppercase fails friendNameSchema's `^[a-z0-9][a-z0-9-]*$` regex.
       fireEvent.input(nameField(), { target: { value: "Alice" } });
       expect(createBtn()).toBeDisabled();
+      // The reason appears both as the field's error and the CTA hint.
+      expect(screen.getAllByText(/lowercase letters/i).length)
+        .toBeGreaterThanOrEqual(1);
       fireEvent.submit(form());
       expect(onSubmit).not.toHaveBeenCalled();
 
       // A leading hyphen is also rejected (must start alphanumeric).
       fireEvent.input(nameField(), { target: { value: "-alice" } });
       expect(createBtn()).toBeDisabled();
+    });
+
+    it("blocks names shorter than MinIO's 3-char bucket minimum", () => {
+      const { onSubmit } = setup();
+
+      // "do" is a valid-looking name whose bucket can never be created —
+      // the schema now rejects it up front (min 3).
+      fireEvent.input(nameField(), { target: { value: "do" } });
+      expect(createBtn()).toBeDisabled();
+      expect(screen.getAllByText(/at least 3 characters/i).length)
+        .toBeGreaterThanOrEqual(1);
+      fireEvent.submit(form());
+      expect(onSubmit).not.toHaveBeenCalled();
     });
 
     it("enables submit once the name is valid", () => {
@@ -107,6 +126,21 @@ describe("AddPortion", () => {
   });
 
   describe("isolation-mode selection", () => {
+    it("shows the soft-isolation banner only while Shared is selected", async () => {
+      setup();
+
+      // Dedicated (default): no banner.
+      expect(screen.queryByText(/IAM-policy level/i)).toBeNull();
+
+      fireEvent.click(screen.getByRole("radio", { name: /Shared/i }));
+      expect(await screen.findByText(/IAM-policy level/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("radio", { name: /Dedicated/i }));
+      await waitFor(() =>
+        expect(screen.queryByText(/IAM-policy level/i)).toBeNull()
+      );
+    });
+
     it("carries the selected RadioGroup mode into the payload", async () => {
       const { onSubmit } = setup();
       fireEvent.input(nameField(), { target: { value: "alice" } });

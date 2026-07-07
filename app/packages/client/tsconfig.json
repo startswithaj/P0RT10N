@@ -1,9 +1,32 @@
 {
+  // Typecheck config for the client. Vite/esbuild never type-check (they strip
+  // types), so this is what `deno task check:client` (tsc --noEmit) and editors
+  // use — it's the only thing that catches bugs like an out-of-scope reference
+  // reaching runtime. `paths` mirror
+  // the Deno workspace so tRPC/shared/styled-system imports resolve the same as
+  // Vite resolves them at build time.
   "compilerOptions": {
-    "baseUrl": ".",
+    "noEmit": true,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "target": "esnext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "types": [],
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    // NOTE: the park-ui CLI requires a temporary `"baseUrl": "."` here when
+    // running `park-ui add <component>` — remove it again after (tsc deprecates
+    // baseUrl and it fails the typecheck).
     "paths": {
       "~/*": ["./src/*"],
-      "styled-system/*": ["./styled-system/*"]
+      "styled-system/*": ["./styled-system/*"],
+      "@p0rt1on/shared/*": ["../shared/*"],
+      "@p0rt1on/server/*": ["../server/src/trpc/root.ts"]
     }
-  }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

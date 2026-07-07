@@ -306,6 +306,38 @@ function QuickstartSection(
   );
 }
 
+/**
+ * "Copy all" means ALL of it: every section rendered on the bundle screen, in
+ * the same order — S3 credentials, Tailscale enrollment, manual ACL lines
+ * (when shown), and the Kopia quickstart.
+ */
+function buildCopyAllText(
+  bundle: FriendBundle,
+  enroll: "key" | "invite",
+): string {
+  const creds = [
+    `Access key: ${bundle.s3AccessKeyId}`,
+    `Secret: ${bundle.s3SecretKey}`,
+    `Endpoint: ${bundle.s3Endpoint}`,
+    `Bucket: ${bundle.bucket}`,
+  ];
+  const tailscale = enroll === "key" && bundle.tailscaleUpCommand
+    ? ["", "Tailscale:", bundle.tailscaleUpCommand]
+    : [];
+  const aclHeader = ["", "Tailscale ACL (paste into your policy):"];
+  const acl = bundle.manualAclInstructions
+    ? [...aclHeader, bundle.manualAclInstructions]
+    : [];
+  return [
+    ...creds,
+    ...tailscale,
+    ...acl,
+    "",
+    "Kopia quickstart:",
+    bundle.kopiaQuickstart,
+  ].join("\n");
+}
+
 export function Bundle(
   props: {
     bundle: FriendBundle;
@@ -325,13 +357,7 @@ export function Bundle(
 
   const authCmd = () => props.bundle.tailscaleUpCommand ?? "";
   const copyAll = () =>
-    onCopy(
-      "all",
-      `Access key: ${props.bundle.s3AccessKeyId}\n` +
-        `Secret: ${props.bundle.s3SecretKey}\n` +
-        `Endpoint: ${props.bundle.s3Endpoint}\n` +
-        `Bucket: ${props.bundle.bucket}`,
-    );
+    onCopy("all", buildCopyAllText(props.bundle, props.enroll));
 
   return (
     <main class={page}>

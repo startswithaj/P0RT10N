@@ -6,7 +6,7 @@
     "components": "~/components",
     "hooks": "~/hooks",
     "lib": "~/lib",
-    "recipes": "styled-system/recipes",
+    "recipes": "~/theme/recipes",
     "theme": "~/theme",
     "ui": "~/components/ui"
   }

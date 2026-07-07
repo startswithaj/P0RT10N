@@ -41,10 +41,12 @@
     "coverage:html": "deno coverage coverage --html",
     "coverage:check": "deno task test:coverage && deno task coverage:lcov && deno run --allow-read --allow-env devtools/coverage-threshold.ts",
     "coverage:check:client": "deno task test:client:coverage && deno run --allow-read --allow-env devtools/client-coverage-threshold.ts",
-    "check:all": "deno fmt && deno fmt --check && deno lint && deno task check && deno task coverage:check && deno task coverage:check:client"
+    "check:client": "deno run -A npm:typescript/bin/tsc --noEmit -p app/packages/client/tsconfig.json",
+    "check:all": "deno fmt && deno fmt --check && deno lint && deno task check && deno task check:client && deno task coverage:check && deno task coverage:check:client"
   },
   "lint": {
     "plugins": [
+      "./devtools/lint/park-ui-idioms.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/expression-complexity.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/function-length.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/no-foreach-mutation.ts",
@@ -71,7 +73,8 @@
       "**/styled-system/",
       "devtools/",
       "**/components/ui/",
-      "p0rt1on-website/"
+      "p0rt1on-website/",
+      ".park-migration-backup/"
     ]
   },
   "fmt": {
@@ -82,7 +85,8 @@
       "**/.vite/",
       "**/styled-system/",
       "**/components/ui/",
-      "p0rt1on-website/"
+      "p0rt1on-website/",
+      ".park-migration-backup/"
     ]
   }
 }

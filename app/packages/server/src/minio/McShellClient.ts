@@ -92,8 +92,25 @@ export class McShellClient implements McClient {
     return this.exec(["mb", "--with-lock", this.path(bucket)]).then(() => {});
   }
 
+  /**
+   * Run a removal, treating "already absent" as success (teardown idempotency
+   * house rule). `absent` matches errors meaning the resource is gone — or
+   * could never exist (e.g. a bucket name below MinIO's 3-char minimum).
+   */
+  private async execRemove(args: string[], absent: RegExp): Promise<void> {
+    try {
+      await this.exec(args);
+    } catch (err) {
+      if (err instanceof ServiceError && absent.test(err.message)) return;
+      throw err;
+    }
+  }
+
   removeBucket(bucket: string): Promise<void> {
-    return this.exec(["rb", "--force", this.path(bucket)]).then(() => {});
+    return this.execRemove(
+      ["rb", "--force", this.path(bucket)],
+      /does not exist|bucket name cannot be|invalid bucket name/i,
+    );
   }
 
   setDefaultRetention(
@@ -195,14 +212,10 @@ export class McShellClient implements McClient {
   }
 
   removeUser(accessKeyId: string): Promise<void> {
-    return this.exec([
-      "admin",
-      "user",
-      "remove",
-      this.target.alias,
-      accessKeyId,
-    ])
-      .then(() => {});
+    return this.execRemove(
+      ["admin", "user", "remove", this.target.alias, accessKeyId],
+      /does not exist/i,
+    );
   }
 
   async setAuditWebhook(endpoint: string, authToken: string): Promise<void> {
@@ -213,7 +226,11 @@ export class McShellClient implements McClient {
       this.target.alias,
       "audit_webhook:p0rt1on",
       `endpoint=${endpoint}`,
-      `auth_token=${authToken}`,
+      // MinIO sends auth_token as the Authorization header VERBATIM, and the
+      // manager's /internal/audit expects the Bearer scheme — so the prefix
+      // must be baked in here. Quoted because mc's KV parser splits on the
+      // embedded space otherwise.
+      `auth_token="Bearer ${authToken}"`,
     ]);
     // `--json` avoids mc's interactive restart UI (needs a TTY we don't have).
     await this.exec([
