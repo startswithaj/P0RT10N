@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { startServer } from "./server.ts";
+import { startAuditServer, startServer } from "./server.ts";
 import { buildContext } from "./app.ts";
 import { createTestDatabase } from "./test-helpers/testDb.ts";
 import { noopLogger, testEnv } from "./test-helpers/mocks.ts";
@@ -35,15 +35,71 @@ describe("startServer (HTTP)", () => {
     }
   });
 
-  it("audit webhook: 401 without the token, 204 + forwards with it", async () => {
+  it("admin listener does NOT serve the audit webhook", async () => {
+    // The webhook lives on its own listener so the admin API never needs a
+    // non-loopback bind; the admin listener must not even route the path.
     const database = createTestDatabase();
     const context = buildContext(database, testEnv(), noopLogger());
-    const received: unknown[] = [];
     const abort = new AbortController();
     const listening = Promise.withResolvers<number>();
     const server = startServer({
       port: 0,
       context,
+      signal: abort.signal,
+      onListen: ({ port }) => listening.resolve(port),
+    });
+    const port = await listening.promise;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
+        method: "POST",
+        headers: { authorization: "Bearer anything" },
+        body: "{}",
+      });
+      // Falls through to tRPC (no such procedure), never to handleAudit.
+      expect(res.status).not.toBe(204);
+      expect(res.status).not.toBe(401);
+      await res.body?.cancel();
+    } finally {
+      abort.abort();
+      await server.finished;
+      database.driver.close();
+    }
+  });
+
+  it("audit listener serves ONLY the webhook: tRPC paths are 404", async () => {
+    const abort = new AbortController();
+    const listening = Promise.withResolvers<number>();
+    const server = startAuditServer({
+      port: 0,
+      hostname: "127.0.0.1", // loopback in tests; 0.0.0.0 is the deploy default
+      audit: { token: "sekret", onEvent: () => Promise.resolve() },
+      signal: abort.signal,
+      onListen: ({ port }) => listening.resolve(port),
+    });
+    const port = await listening.promise;
+
+    try {
+      const trpc = await fetch(`http://127.0.0.1:${port}/trpc/friends.list`);
+      expect(trpc.status).toBe(404);
+      await trpc.body?.cancel();
+
+      const health = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(health.status).toBe(200);
+      await health.body?.cancel();
+    } finally {
+      abort.abort();
+      await server.finished;
+    }
+  });
+
+  it("audit webhook: 401 without the token, 204 + forwards with it", async () => {
+    const received: unknown[] = [];
+    const abort = new AbortController();
+    const listening = Promise.withResolvers<number>();
+    const server = startAuditServer({
+      port: 0,
+      hostname: "127.0.0.1",
       audit: {
         token: "sekret",
         onEvent: (raw) => {
@@ -135,7 +191,6 @@ describe("startServer (HTTP)", () => {
     } finally {
       abort.abort();
       await server.finished;
-      database.driver.close();
     }
   });
 

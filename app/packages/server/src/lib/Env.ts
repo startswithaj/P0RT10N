@@ -69,9 +69,27 @@ export class Env {
   get port(): number {
     return this.#num("PORT", 8080);
   }
-  /** Bind address; `0.0.0.0` in a container so instances can reach the webhook. */
-  get bindHost(): string {
-    return this.#str("BIND_HOST", "127.0.0.1");
+  /**
+   * The audit-webhook listener's port. Its own listener (not the admin one)
+   * so instance containers can POST events while the admin API stays on
+   * loopback — the two must not collide, checked here so a misconfig fails
+   * at boot with a clear message.
+   */
+  get auditPort(): number {
+    const p = this.#num("AUDIT_PORT", 8081);
+    if (p === this.port) {
+      throw new Error(
+        `AUDIT_PORT (${p}) must differ from PORT (${this.port}) — the audit ` +
+          `webhook gets its own network-exposed listener; the admin API stays ` +
+          `loopback-only`,
+      );
+    }
+    return p;
+  }
+  /** Audit listener bind address; `0.0.0.0` in-container is conventional —
+   * the host port publish (compose) controls real exposure. */
+  get auditBindHost(): string {
+    return this.#str("AUDIT_BIND_HOST", "0.0.0.0");
   }
   get dbPath(): string {
     return this.#str("DB_PATH", "./data/p0rt1on.db");
@@ -126,9 +144,10 @@ export class Env {
         : "auto",
       // Instances (containers) POST audit events here — reach the manager via
       // the host gateway, not loopback (which would be the instance itself).
+      // Points at the dedicated audit listener, never the admin port.
       auditWebhookUrl: this.#str(
         "AUDIT_WEBHOOK_URL",
-        "http://host.docker.internal:8080/internal/audit",
+        `http://host.docker.internal:${this.auditPort}/internal/audit`,
       ),
     };
   }

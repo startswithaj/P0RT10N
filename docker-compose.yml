@@ -20,12 +20,14 @@ services:
     user: root
     environment:
       # Container overrides (the app's own defaults suit host-run dev).
-      BIND_HOST: "0.0.0.0" # so instances can POST /internal/audit to us
+      # The admin API binds loopback unconditionally; only the dedicated
+      # audit-webhook listener (AUDIT_PORT) faces the container network.
       INSTANCE_HOST: "host.docker.internal" # reach instances' published ports
-      AUDIT_WEBHOOK_URL: "http://host.docker.internal:8080/internal/audit"
+      AUDIT_WEBHOOK_URL: "http://host.docker.internal:8081/internal/audit"
       DB_PATH: "/app/data/p0rt1on.db"
     ports:
       - "127.0.0.1:8080:8080" # admin API — loopback only (Vite proxies here)
+      - "8081:8081" # audit webhook — instances POST via the host gateway
       - "127.0.0.1:5173:5173" # Vite dev server (frontend) — open this in a browser
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # launch instance containers

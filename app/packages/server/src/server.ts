@@ -18,15 +18,7 @@ export interface AuditHook {
 
 export interface ServerOptions {
   port: number;
-  /**
-   * Bind address. Default loopback (admin surface is local per PLAN). Set to
-   * `0.0.0.0` when containerized so instance containers can POST the audit
-   * webhook back to the manager via the host gateway.
-   */
-  hostname?: string;
   context: TrpcContext;
-  /** Receiver for MinIO's audit webhook; omit to disable the endpoint. */
-  audit?: AuditHook;
   /**
    * Built SPA assets dir to serve for non-API routes (production). Omit in dev —
    * the Vite dev server serves the frontend, so the API only handles tRPC.
@@ -35,6 +27,19 @@ export interface ServerOptions {
   /** Aborts the server (used by tests for clean shutdown). */
   signal?: AbortSignal;
   /** Called once the listener is bound (tests await this for the real port). */
+  onListen?: (addr: { port: number }) => void;
+}
+
+export interface AuditServerOptions {
+  port: number;
+  /**
+   * Bind address for the audit listener. `0.0.0.0` when containerized so
+   * instance containers can POST events via the host gateway — safe because
+   * this listener serves ONLY the token-guarded webhook, never the admin API.
+   */
+  hostname?: string;
+  audit: AuditHook;
+  signal?: AbortSignal;
   onListen?: (addr: { port: number }) => void;
 }
 
@@ -98,11 +103,14 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
 }
 
 /**
- * Serve the tRPC router over HTTP. Local-only admin surface (PLAN): bind to
- * loopback. `/health` is a plain liveness check; `/internal/audit` receives
- * MinIO's audit webhook (token-guarded); `/trpc` routes to tRPC. When
- * `staticDir` is set (production), everything else serves the built SPA; in dev
- * it's unset and non-API requests fall through to tRPC (Vite serves the UI).
+ * Serve the tRPC router over HTTP. The admin surface binds LOOPBACK ONLY,
+ * unconditionally — locality is the access control (PLAN); widening it waits
+ * for real auth. `/health` is a plain liveness check; `/trpc` routes to tRPC.
+ * The audit webhook is deliberately NOT here (see startAuditServer): serving
+ * it from this listener once forced `0.0.0.0` binds that exposed the whole
+ * unauthenticated admin API to every container. When `staticDir` is set
+ * (production), everything else serves the built SPA; in dev it's unset and
+ * non-API requests fall through to tRPC (Vite serves the UI).
  */
 export function startServer(opts: ServerOptions): Deno.HttpServer {
   const handleTrpc = (req: Request) =>
@@ -114,16 +122,13 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
     });
   return Deno.serve({
     port: opts.port,
-    hostname: opts.hostname ?? "127.0.0.1",
+    hostname: "127.0.0.1",
     signal: opts.signal,
     onListen: opts.onListen,
   }, (req) => {
     const url = new URL(req.url);
     if (url.pathname === "/health") {
       return new Response("ok", { status: 200 });
-    }
-    if (url.pathname === AUDIT_ENDPOINT && opts.audit) {
-      return handleAudit(req, opts.audit);
     }
     if (url.pathname.startsWith(TRPC_ENDPOINT)) {
       return handleTrpc(req);
@@ -132,5 +137,29 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
       return handleStatic(req, opts.staticDir);
     }
     return handleTrpc(req);
+  });
+}
+
+/**
+ * The network-exposed sibling: serves ONLY the token-guarded audit webhook
+ * (plus `/health` for container healthchecks) so instance containers can
+ * deliver events without the admin API ever leaving loopback. Every other
+ * path — including anything tRPC-shaped — is a 404 by construction.
+ */
+export function startAuditServer(opts: AuditServerOptions): Deno.HttpServer {
+  return Deno.serve({
+    port: opts.port,
+    hostname: opts.hostname ?? "0.0.0.0",
+    signal: opts.signal,
+    onListen: opts.onListen,
+  }, (req) => {
+    const url = new URL(req.url);
+    if (url.pathname === "/health") {
+      return new Response("ok", { status: 200 });
+    }
+    if (url.pathname === AUDIT_ENDPOINT) {
+      return handleAudit(req, opts.audit);
+    }
+    return new Response("not found", { status: 404 });
   });
 }
