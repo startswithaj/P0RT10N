@@ -443,6 +443,22 @@ export function ActionDialog(
   );
 }
 
+/**
+ * Enter anywhere in the dialog triggers the confirm action (modal
+ * convention) — except on a button, which keeps its native activation so
+ * Enter on a focused Cancel still cancels. `allowed` gates it to the
+ * confirm view with a satisfied precondition (e.g. the offboard name typed).
+ */
+function confirmOnEnter(allowed: () => boolean, confirm: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    if ((e.target as HTMLElement).tagName === "BUTTON") return;
+    if (!allowed()) return;
+    e.preventDefault();
+    confirm();
+  };
+}
+
 /** The dialog's inner body: confirm form, or offboard progress, or a TS key. */
 function DialogBody(props: {
   p: Pending;
@@ -460,8 +476,16 @@ function DialogBody(props: {
   copy: (v: string) => void;
   onClose: () => void;
 }) {
+  // Only while the confirm view is showing (not offboard progress / TS key)
+  // and its preconditions hold.
+  const enterAllowed = () =>
+    props.offboard().kind === "idle" && props.tsCmd() === null &&
+    props.canConfirm();
   return (
-    <div class={body}>
+    <div
+      class={body}
+      onKeyDown={confirmOnEnter(enterAllowed, props.confirm)}
+    >
       <Dialog.Title>{actionTitle(props.p)}</Dialog.Title>
       <Switch
         fallback={

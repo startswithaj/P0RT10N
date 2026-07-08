@@ -23,7 +23,10 @@ export const field = defineSlotRecipe({
       },
     },
     requiredIndicator: {
-      color: "colorPalette.solid",
+      // LOCAL FIX: upstream says `colorPalette.solid`, a token no palette
+      // defines (only solid.bg / solid.fg exist) — the declaration silently
+      // dropped. Red matches the 0.43 behaviour (fg.error).
+      color: "fg.error",
     },
     helperText: {
       color: "fg.muted",

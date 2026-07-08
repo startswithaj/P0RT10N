@@ -15,6 +15,7 @@ import { red } from "~/theme/colors/red";
 import { slate } from "~/theme/colors/slate";
 import { colors } from "~/theme/tokens/colors";
 import { durations } from "~/theme/tokens/durations";
+import { easings } from "~/theme/tokens/easings";
 import { shadows } from "~/theme/tokens/shadows";
 import { zIndex } from "~/theme/tokens/z-index";
 
@@ -88,6 +89,7 @@ export default defineConfig({
           magenta: { value: "#FF2E97" },
         },
         durations,
+        easings,
         zIndex,
         fonts: {
           display: { value: "Bungee, system-ui, sans-serif" }, // wordmark / display only

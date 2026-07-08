@@ -79,6 +79,56 @@ describe("ActionDialog", () => {
     });
   });
 
+  describe("Enter confirms", () => {
+    it("Enter in the resize field confirms (same as clicking Save)", async () => {
+      mutateOf(trpc.friends.resize.mutate).mockResolvedValue(undefined);
+      const friend = makeFriend({ id: 3 });
+      const { onClose } = renderDialog({ friend, kind: "resize" });
+
+      const input = screen.getByRole("spinbutton");
+      fireEvent.input(input, { target: { value: "5" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(trpc.friends.resize.mutate).toHaveBeenCalledWith({
+          friendId: 3,
+          quotaBytes: 5_000_000_000,
+        })
+      );
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    });
+
+    it("Enter does nothing while the offboard name doesn't match", () => {
+      const friend = makeFriend({ name: "alice" });
+      renderDialog({ friend, kind: "offboard" });
+
+      const input = screen.getByRole("textbox");
+      fireEvent.input(input, { target: { value: "alic" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(trpc.friends.offboardStart.mutate).not.toHaveBeenCalled();
+
+      // Matching name: Enter now triggers the offboard.
+      mutateOf(trpc.friends.offboardStart.mutate).mockResolvedValue({
+        jobId: "j1",
+      });
+      mutateOf(trpc.jobs.progress.subscribe).mockReturnValue(undefined);
+      fireEvent.input(input, { target: { value: "alice" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(trpc.friends.offboardStart.mutate).toHaveBeenCalledWith({
+        friendId: friend.id,
+      });
+    });
+
+    it("Enter on a focused button keeps its native meaning (no hijack)", () => {
+      const friend = makeFriend({ name: "alice" });
+      renderDialog({ friend, kind: "suspend" });
+
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      fireEvent.keyDown(cancel, { key: "Enter" });
+      expect(trpc.friends.suspend.mutate).not.toHaveBeenCalled();
+    });
+  });
+
   describe("rotate/suspend handlers", () => {
     it("rotate calls rotateKey.mutate and closes on confirm", async () => {
       const friend = makeFriend({ id: 42 });

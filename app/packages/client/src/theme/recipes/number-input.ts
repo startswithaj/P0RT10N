@@ -70,27 +70,32 @@ export const numberInput = defineSlotRecipe({
     variant: "outline",
   },
   variants: {
+    // LOCAL FIX: --stepper-width is defined on `root`, not `control` as
+    // upstream has it — the input is a SIBLING of control (v1 markup), and
+    // custom properties don't inherit between siblings, so on `control` the
+    // input's `pe: calc(var(--stepper-width) + 0.5rem)` never resolved and
+    // typed digits slid under the absolutely-positioned stepper column.
     size: {
       sm: {
-        control: {
+        root: {
           "--stepper-width": "sizes.4.5",
         },
         input: input.variants.size.sm,
       },
       md: {
-        control: {
+        root: {
           "--stepper-width": "sizes.5",
         },
         input: input.variants.size.md,
       },
       lg: {
-        control: {
+        root: {
           "--stepper-width": "sizes.5.5",
         },
         input: input.variants.size.lg,
       },
       xl: {
-        control: {
+        root: {
           "--stepper-width": "sizes.6",
         },
         input: input.variants.size.xl,

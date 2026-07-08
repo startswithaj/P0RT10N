@@ -12,6 +12,10 @@ export const globalCss = {
     body: {
       background: "canvas",
       color: "fg.default",
+      // LOCAL FIX (restores 0.43 behaviour): tell the browser the page is
+      // dark in dark mode, or native scrollbars / selects / autofill render
+      // light-styled on the dark indigo canvas.
+      _dark: { colorScheme: "dark" },
     },
   },
 };

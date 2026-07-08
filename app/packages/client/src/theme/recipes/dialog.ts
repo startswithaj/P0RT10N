@@ -12,7 +12,11 @@ export const dialog = defineSlotRecipe({
       position: "fixed",
       top: "0",
       width: "100dvw",
-      zIndex: "var(--z-index)",
+      // LOCAL FIX: upstream says `var(--z-index)`, which nothing defines
+      // (computes to z-index auto, letting any positive-z page element paint
+      // over the dim). Use the same modal var the positioner/content use.
+      "--dialog-z-index": "zIndex.modal",
+      zIndex: "calc(var(--dialog-z-index) + var(--layer-index, 0))",
       _open: {
         animationName: "fade-in",
         animationTimingFunction: "emphasized-in",

@@ -104,18 +104,13 @@ const lockup = css({ display: "flex", alignItems: "center", gap: "3" });
 // Plain text tabs (website-style nav links). Active state via [data-active] so it
 // reliably overrides the base colour (two atomic classes have no cascade winner).
 const tabs = css({ display: "flex", gap: "5" });
+// Sizing/background come from the button recipe's `link` variant (our local
+// re-addition of the 0.43 variant) — this class only sets the nav colours.
 const tabLink = css({
   fontFamily: "body",
   fontSize: "sm",
-  // v1's Button has no `link` variant; on `plain` the text-link look needs the
-  // recipe's md sizing zeroed out (the old 0.43 link variant did this itself).
-  h: "auto",
-  px: "0",
-  py: "0",
   color: "fg.muted",
-  bg: "transparent",
-  cursor: "pointer",
-  _hover: { color: "fg.default", bg: "transparent" },
+  _hover: { color: "fg.default" },
   "&[data-active='true']": { color: "fg.default", fontWeight: "bold" },
 });
 const actions = css({ display: "flex", gap: "6", alignItems: "center" });
@@ -127,10 +122,11 @@ const segWrap = css({
   rounded: "full",
   p: "0.5",
 });
-// Rendered on Park's Button (variant ghost). The compact pill look is restored by
-// overriding the recipe's md height (h:auto) and neutralising the ghost hover
-// background (bg:transparent), while active state keeps the cyan fill + onAccent
-// ink on hover so the ghost hover-bg never leaks over the active pill.
+// Rendered on Park's Button (variant plain — needs px padding, so it can't use
+// the zero-padding `link` variant). The compact pill look overrides the
+// recipe's md height (h:auto) and neutralises plain's gray washes in EVERY
+// state (hover/active/on), while the active pill re-pins the cyan fill in
+// those same states so no wash ever leaks over it.
 const segBtn = css({
   fontFamily: "body",
   fontSize: "xs",
@@ -143,10 +139,13 @@ const segBtn = css({
   bg: "transparent",
   color: "fg.muted",
   _hover: { color: "fg.default", bg: "transparent" },
+  _active: { bg: "transparent" },
+  _on: { bg: "transparent" },
   "&[data-active='true']": {
     bg: "cyan.9",
     color: "onAccent",
     _hover: { color: "onAccent", bg: "cyan.9" },
+    _active: { bg: "cyan.9" },
   },
 });
 // Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan) and the
@@ -321,6 +320,8 @@ const footerNote = css({
 const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "cyan.9" });
 const dotDown = css({ w: "2", h: "2", rounded: "full", bg: "fg.error" });
 // The footer health chip is a link to the Status page (which shows the issue).
+// Stays on variant=plain (it wants px:1, which `link` forces to 0!) — so all
+// of plain's gray washes are neutralised here, like segBtn.
 const footerStatusBtn = css({
   h: "auto",
   px: "1",
@@ -331,6 +332,8 @@ const footerStatusBtn = css({
   color: "fg.muted",
   bg: "transparent",
   _hover: { color: "fg.default", bg: "transparent" },
+  _active: { bg: "transparent" },
+  _on: { bg: "transparent" },
 });
 
 // Outline pills (a cyan fill reads murky on the dark canvas — outline is clean).
@@ -478,7 +481,7 @@ function NavBar(
       <div class={actions}>
         <div class={tabs}>
           <Button
-            variant="plain"
+            variant="link"
             class={tabLink}
             data-active={props.view() === "portions" ? "true" : "false"}
             onClick={() => props.setView("portions")}
@@ -486,7 +489,7 @@ function NavBar(
             Portions
           </Button>
           <Button
-            variant="plain"
+            variant="link"
             class={tabLink}
             data-active={props.view() === "status" ? "true" : "false"}
             onClick={() => props.setView("status")}

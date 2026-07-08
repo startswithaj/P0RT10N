@@ -26,6 +26,9 @@ export const Footer = withContext(ark.div, 'footer')
 
 const StyledButton = styled(ark.button)
 
+// CAVEAT (upstream as-is): the hardcoded onClick comes after {...props}, so a
+// consumer-supplied onClick is silently ignored — don't pass one; wire your
+// own button (like PortionActions does) if the action needs work before close.
 export const ActionTrigger = (props: ComponentProps<typeof StyledButton>) => {
   const dialog = useDialogContext()
 

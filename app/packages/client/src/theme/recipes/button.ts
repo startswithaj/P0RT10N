@@ -102,6 +102,21 @@ export const button = defineRecipe({
           bg: "colorPalette.plain.bg.active",
         },
       },
+      link: {
+        // LOCAL ADDITION (restores the 0.43 `link` variant that v1 dropped):
+        // text-link button. The `!` marks are how 0.43 beat the size
+        // variant's h/minW/px; no background in any state, so call sites
+        // don't need to neutralise a hover wash.
+        verticalAlign: "baseline",
+        height: "auto!",
+        minW: "0!",
+        px: "0!",
+        _disabled: {
+          color: "border.disabled",
+          cursor: "not-allowed",
+          _hover: { color: "border.disabled" },
+        },
+      },
     },
     size: {
       "2xs": {
