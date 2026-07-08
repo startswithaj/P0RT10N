@@ -10,7 +10,6 @@ import {
   mockMcFactory,
   mockProvisioningRepo,
   noopLogger,
-  TEST_CRED,
 } from "../test-helpers/mocks.ts";
 import { BootReconciler } from "./BootReconciler.ts";
 
@@ -49,13 +48,8 @@ describe("BootReconciler", () => {
         ...opts.repo,
       }),
       mockContainerRuntime(calls, opts),
-      mockMcFactory(mockMcClient(calls), calls),
+      mockMcFactory(mockMcClient(calls)),
       {
-        generateS3Credential: () => TEST_CRED,
-        rootCredentialFor: () => TEST_CRED,
-      },
-      {
-        instanceHost: "127.0.0.1",
         auditWebhookUrl: "http://m/audit",
         auditWebhookToken: "tok",
       },
@@ -64,7 +58,7 @@ describe("BootReconciler", () => {
     );
   }
 
-  it("running + healthy: re-issues alias + audit webhook, touches nothing else", async () => {
+  it("running + healthy: re-issues the audit webhook, touches nothing else", async () => {
     const calls: Calls = [];
     const summary = await build(calls, { containers: [running] }).run();
 
@@ -75,7 +69,6 @@ describe("BootReconciler", () => {
       orphaned: 0,
       degraded: 0,
     });
-    expect(calls).toContain("mc:setAlias");
     expect(calls).toContain("mc:setAuditWebhook");
     // Adopt runs even when healthy — it converges config drift (restart
     // policy); the actual no-start behaviour is DockerRuntime's, tested there.

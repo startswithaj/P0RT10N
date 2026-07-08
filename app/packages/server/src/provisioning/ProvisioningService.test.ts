@@ -29,6 +29,9 @@ describe("ProvisioningService.addFriend", () => {
     expect(calls).toContain("runtime:ensureInstance");
     expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("repo:activate");
+    // The friend key's ID is persisted at mint time so failure-reap and
+    // offboard can revoke it (ID only — the secret stays request-scoped).
+    expect(calls).toContain("repo:recordTsKeyId:kid");
 
     expect(bundle.s3SecretKey).toBe(TEST_CRED.secretKey);
     expect(bundle.tsAuthKey).toBe("tskey-tag:p0rt1on-friend-alice");
@@ -214,6 +217,27 @@ describe("ProvisioningService.reissueTsKey", () => {
     expect(b.tailscaleUpCommand).toContain("--authkey=");
     expect(calls).toContain("ts:mintAuthKey:tag:p0rt1on-friend-alice");
   });
+
+  it("records the new key ID, then revokes the superseded key", async () => {
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+    }).reissueTsKey(1);
+
+    // Mint-then-revoke: the friend is never left keyless if the mint fails.
+    expect(calls.indexOf("ts:mintAuthKey:tag:p0rt1on-friend-alice"))
+      .toBeLessThan(calls.indexOf("ts:revokeAuthKey:kid-old"));
+    expect(calls).toContain("repo:recordTsKeyId:kid");
+  });
+
+  it("skips revocation when no key ID is stored (pre-column friend)", async () => {
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve({ ...CTX, tsKeyId: null }) },
+    }).reissueTsKey(1);
+
+    expect(calls.some((c) => c.startsWith("ts:revokeAuthKey"))).toBe(false);
+  });
 });
 
 describe("ProvisioningService.offboard", () => {
@@ -231,6 +255,8 @@ describe("ProvisioningService.offboard", () => {
     // The bucket-scoped IAM policy must not outlive the friend.
     expect(calls).toContain("mc:removePolicy");
     expect(calls).toContain("ts:deleteNode:n1");
+    // Neither may the enrollment key — unused it stays live for ~90 days.
+    expect(calls).toContain("ts:revokeAuthKey:kid-old");
     expect(calls).toContain("runtime:removeInstance");
     expect(calls).toContain("repo:deleteInstance");
   });
@@ -354,7 +380,8 @@ describe("ProvisioningService.offboard", () => {
     await buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
         context: () => Promise.resolve({ ...CTX, isolationMode: "shared" }),
-        friendsOnInstance: () => Promise.resolve(2),
+        // The atomic count+mark says friends remain → nothing was marked.
+        markInstanceReaping: () => Promise.resolve(false),
       },
     }).offboard(1);
 
@@ -380,9 +407,27 @@ describe("ProvisioningService.sweepFailed", () => {
 
     expect(n).toBe(1);
     expect(calls).toContain("mc:removeBucket");
+    expect(calls).toContain("ts:revokeAuthKey:kid-old");
     expect(calls).toContain("repo:deleteFriend");
     expect(calls).toContain("runtime:removeInstance");
     expect(calls).toContain("repo:deleteInstance");
+  });
+
+  it("keeps the tombstone when key revocation fails", async () => {
+    // The stored key ID is the only record a live enrollment key exists —
+    // same gating as every other resource step.
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failedFriendIds: () => Promise.resolve([1]),
+        context: () => Promise.resolve(CTX),
+      },
+      tailscale: {
+        revokeAuthKey: () => Promise.reject(new Error("api down")),
+      },
+    }).sweepFailed();
+
+    expect(calls).not.toContain("repo:deleteFriend");
   });
 
   it("reaps orphaned failed instances (no friend rows left)", async () => {

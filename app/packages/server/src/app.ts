@@ -11,6 +11,8 @@ import {
   DockerRuntime,
 } from "./runtime/DockerRuntime.ts";
 import { DenoCommandRunner, DenoTempFiles } from "./lib/CommandRunner.ts";
+import { denoPortProbe } from "./lib/net.ts";
+import { adminEndpointComposer } from "./runtime/adminEndpoint.ts";
 import type { Env } from "./lib/Env.ts";
 import {
   ActivityServiceImpl,
@@ -60,10 +62,20 @@ export function buildApp(
   const repo = new DrizzleProvisioningRepo(database.db, {
     portRange: config.portRange,
     serveNodeTag: config.serveNodeTag,
+    // Instances publish to the HOST loopback — a containerized manager's own
+    // netns says nothing about those ports, so only probe when host-run.
+    probePort: config.instanceAddressing === "host"
+      ? denoPortProbe()
+      : undefined,
   });
   const runner = new DenoCommandRunner();
   const tempFiles = new DenoTempFiles();
-  const mcFactory = new McShellClientFactory(runner, tempFiles);
+  const mcFactory = new McShellClientFactory(
+    runner,
+    tempFiles,
+    keyGen,
+    adminEndpointComposer(config.instanceAddressing),
+  );
   const tailscale = new TailscaleHttpApi({
     token: env.tailscaleOauthClientSecret,
     tagOwner: env.tagOwner,
@@ -108,9 +120,7 @@ export function buildApp(
       repo,
       containerRuntime,
       mcFactory,
-      keyGen,
       {
-        instanceHost: config.instanceHost,
         auditWebhookUrl: config.auditWebhookUrl,
         auditWebhookToken: config.auditWebhookToken,
       },

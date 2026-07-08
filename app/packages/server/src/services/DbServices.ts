@@ -53,10 +53,11 @@ export class FriendServiceImpl implements FriendService {
     const log = this.logger.child({ op: "resize", friendId });
     log.info("resizing quota", { quotaBytes });
     const ctx = await this.repo.context(friendId);
-    await this.mc.forInstance({ alias: ctx.alias }).setHardQuota(
-      ctx.bucket,
-      quotaBytes,
-    );
+    await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
+      .setHardQuota(
+        ctx.bucket,
+        quotaBytes,
+      );
     await this.repo.setQuota(friendId, quotaBytes);
     await this.repo.audit(friendId, "resize", `quotaBytes=${quotaBytes}`);
     log.info("quota resized");
@@ -70,9 +71,10 @@ export class FriendServiceImpl implements FriendService {
     const ctx = await this.repo.context(friendId);
     // Disable the S3 user (reversible) + revoke the friend's tailnet nodes.
     if (ctx.s3AccessKeyId) {
-      await this.mc.forInstance({ alias: ctx.alias }).disableUser(
-        ctx.s3AccessKeyId,
-      );
+      await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
+        .disableUser(
+          ctx.s3AccessKeyId,
+        );
     }
     try {
       await this.revokeNodes(ctx.nodeTag, log);
@@ -84,7 +86,10 @@ export class FriendServiceImpl implements FriendService {
         error: String(err),
       });
       if (ctx.s3AccessKeyId) {
-        await this.mc.forInstance({ alias: ctx.alias })
+        await this.mc.forInstance({
+          alias: ctx.alias,
+          minioPort: ctx.minioPort,
+        })
           .enableUser(ctx.s3AccessKeyId)
           .catch((e) =>
             // Access is now half-revoked while status says active — loud;
@@ -110,9 +115,10 @@ export class FriendServiceImpl implements FriendService {
     // Re-enable the S3 user; the friend re-enrolls a node with a fresh key.
     // Status flips only after the enable succeeded (mirror of suspend).
     if (ctx.s3AccessKeyId) {
-      await this.mc.forInstance({ alias: ctx.alias }).enableUser(
-        ctx.s3AccessKeyId,
-      );
+      await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
+        .enableUser(
+          ctx.s3AccessKeyId,
+        );
     }
     await this.repo.setStatus(friendId, "active");
     await this.repo.audit(friendId, "resume");

@@ -51,6 +51,33 @@ describe("DrizzleProvisioningRepo", () => {
     expect(a.instanceId).not.toBe(b.instanceId);
   });
 
+  it("skips a port a foreign process holds (probe says busy)", async () => {
+    // The DB thinks 9000 is free, but something else is bound to it — the
+    // probe must advance to 9001 instead of failing on 9000 forever.
+    const probed = new DrizzleProvisioningRepo(database.db, {
+      ...TEST_REPO_CONFIG,
+      probePort: (port) => port !== 9000,
+    });
+    const res = await probed.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    expect(res.hostPort).toBe(9001);
+  });
+
+  it("throws CONFLICT when every DB-free port probes busy", async () => {
+    const probed = new DrizzleProvisioningRepo(database.db, {
+      ...TEST_REPO_CONFIG,
+      probePort: () => false,
+    });
+    await expect(
+      probed.reserveFriend(
+        makeAddInput("alice", "dedicated"),
+        namingFor("alice", "dedicated"),
+      ),
+    ).rejects.toThrow("no free MinIO port");
+  });
+
   it("throws CONFLICT when the port range is exhausted", async () => {
     // Range is 9000..9002 (3 ports).
     await repo.reserveFriend(
@@ -88,6 +115,42 @@ describe("DrizzleProvisioningRepo", () => {
     expect(second.instanceExisted).toBe(true);
     expect(second.instanceId).toBe(first.instanceId);
     expect(second.hostPort).toBe(first.hostPort);
+  });
+
+  it("shared: never adopts a reaping instance — a new pool is created instead", async () => {
+    // The reap-vs-add race: once the sweep marks the pool `reaping`, a
+    // concurrent add must NOT reserve onto it (it's about to be removed —
+    // `instanceExisted: true` would skip container start and dangle).
+    const bob = await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared"),
+    );
+    await repo.deleteFriend(bob.friendId);
+    expect(
+      await repo.markInstanceReaping(bob.instanceId, { requireEmpty: true }),
+    ).toBe(true);
+
+    const carol = await repo.reserveFriend(
+      makeAddInput("carol", "shared"),
+      namingFor("carol", "shared"),
+    );
+    expect(carol.instanceExisted).toBe(false);
+    expect(carol.instanceId).not.toBe(bob.instanceId);
+  });
+
+  it("markInstanceReaping refuses while live friends remain (requireEmpty)", async () => {
+    const bob = await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared"),
+    );
+    expect(
+      await repo.markInstanceReaping(bob.instanceId, { requireEmpty: true }),
+    ).toBe(false);
+    // Dedicated teardown doesn't require empty — the offboarding friend's own
+    // row may still exist when the mark happens.
+    expect(
+      await repo.markInstanceReaping(bob.instanceId, { requireEmpty: false }),
+    ).toBe(true);
   });
 
   it("shared: adopting an existing pool returns its STORED hostname, not config's", async () => {

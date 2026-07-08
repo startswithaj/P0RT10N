@@ -107,6 +107,19 @@ describe("TailscaleHttpApi", () => {
     });
   });
 
+  it("revokeAuthKey tolerates an already-revoked key (404) but not other errors", async () => {
+    // Teardown idempotency: "already absent" is success.
+    await expect(
+      api([], () => ({ status: 404, json: { message: "key not found" } }))
+        .revokeAuthKey("k-gone"),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      api([], () => ({ status: 500, json: { message: "boom" } }))
+        .revokeAuthKey("k1"),
+    ).rejects.toThrow("failed (500)");
+  });
+
   it("throws on a non-2xx response", async () => {
     await expect(
       api([], () => ({ status: 403, json: { message: "denied" } }))

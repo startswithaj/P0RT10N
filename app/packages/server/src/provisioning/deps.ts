@@ -5,6 +5,7 @@ import type {
   LockMode,
 } from "@p0rt1on/shared/domain";
 import type { S3Credential } from "../minio/mc.ts";
+import type { InstanceAddressing } from "../runtime/adminEndpoint.ts";
 
 // ============================================================================
 // Dependencies the ProvisioningService orchestrates. Each is an interface so
@@ -19,11 +20,11 @@ export interface ProvisioningConfig {
   /** Docker network the instances join (they don't share it with the manager). */
   network: string;
   /**
-   * Host address the manager reaches instances' published MinIO ports on —
-   * `127.0.0.1` when the manager runs on the host, `host.docker.internal` when
-   * it's itself a container. Instances publish `127.0.0.1:<hostPort>:<port>`.
+   * How the manager reaches instances' MinIO admin plane: `host` (loopback-
+   * published port, host-run dev) or `network` (by container name over the
+   * shared docker network, containerized manager). See runtime/adminEndpoint.ts.
    */
-  instanceHost: string;
+  instanceAddressing: InstanceAddressing;
   region: string;
   /** Inclusive host-port range dedicated instances are allocated from. */
   portRange: { min: number; max: number };
@@ -76,6 +77,8 @@ export interface FriendProvisionContext {
   isolationMode: IsolationMode;
   bucket: string;
   s3AccessKeyId: string | null;
+  /** Tailscale auth-key ID (never the secret); null pre-column friends. */
+  tsKeyId: string | null;
   nodeTag: string;
   lockMode: LockMode;
   lockRetentionDays: number;
@@ -83,6 +86,8 @@ export interface FriendProvisionContext {
   instanceName: string;
   alias: string;
   tsHostname: string;
+  /** Host-published admin-plane port (composes the per-call MC_HOST endpoint). */
+  minioPort: number;
 }
 
 /**
@@ -102,6 +107,20 @@ export interface ProvisioningRepo {
 
   /** Persist the access key **ID** (never the secret) once the user exists. */
   recordAccessKey(friendId: number, accessKeyId: string): Promise<void>;
+
+  /** Persist the Tailscale auth-key **ID** (never the secret) at mint time. */
+  recordTsKeyId(friendId: number, tsKeyId: string): Promise<void>;
+
+  /**
+   * Atomically count live friends and mark the instance `reaping` (one
+   * transaction). Returns false — nothing marked — when `requireEmpty` and
+   * friends remain. Once marked, reserve refuses to adopt the instance, so
+   * teardown can proceed without racing a concurrent add.
+   */
+  markInstanceReaping(
+    instanceId: number,
+    opts: { requireEmpty: boolean },
+  ): Promise<boolean>;
 
   /** Update the friend's hard quota (resize). */
   setQuota(friendId: number, quotaBytes: number): Promise<void>;

@@ -97,8 +97,10 @@ export class UsageSampler {
     attemptsLeft = this.retry.attempts,
   ): Promise<boolean> {
     try {
-      const du = await this.mc.forInstance({ alias: target.alias })
-        .du(target.bucket);
+      const du = await this.mc.forInstance({
+        alias: target.alias,
+        minioPort: target.minioPort,
+      }).du(target.bucket);
       await this.queries.insertUsage(target.friendId, du);
       return true;
     } catch (err) {

@@ -10,6 +10,7 @@ import {
 } from "./Schema.ts";
 import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
 import { defer } from "../lib/defer.ts";
+import type { PortProbe } from "../lib/net.ts";
 import type {
   FriendNaming,
   FriendProvisionContext,
@@ -25,6 +26,11 @@ export interface RepoConfig {
   portRange: { min: number; max: number };
   /** Server-side serve-node tag stored on the `instances` row. */
   serveNodeTag: string;
+  /**
+   * Bind-probe on the publish interface — skips ports a foreign process
+   * holds that the DB doesn't know about. Absent = DB-only allocation.
+   */
+  probePort?: PortProbe;
 }
 
 /**
@@ -55,6 +61,13 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   recordAccessKey(friendId: number, accessKeyId: string): Promise<void> {
     return defer(() => {
       this.db.update(friends).set({ s3AccessKeyId: accessKeyId })
+        .where(eq(friends.id, friendId)).run();
+    });
+  }
+
+  recordTsKeyId(friendId: number, tsKeyId: string): Promise<void> {
+    return defer(() => {
+      this.db.update(friends).set({ tsKeyId })
         .where(eq(friends.id, friendId)).run();
     });
   }
@@ -118,11 +131,13 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       isolationMode: friends.isolationMode,
       bucket: friends.bucket,
       s3AccessKeyId: friends.s3AccessKeyId,
+      tsKeyId: friends.tsKeyId,
       nodeTag: friends.tsNodeTag,
       lockMode: friends.lockMode,
       lockRetentionDays: friends.lockRetentionDays,
       instanceId: friends.instanceId,
       tsHostname: instances.tsHostname,
+      minioPort: instances.minioPort,
     }).from(friends)
       .innerJoin(instances, eq(friends.instanceId, instances.id))
       .where(eq(friends.id, friendId)).get();
@@ -137,6 +152,25 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
 
   friendsOnInstance(instanceId: number): Promise<number> {
     return defer(() => this.liveFriendsOn(instanceId));
+  }
+
+  markInstanceReaping(
+    instanceId: number,
+    opts: { requireEmpty: boolean },
+  ): Promise<boolean> {
+    // Count + mark in ONE transaction: between a separate count and the
+    // container teardown a concurrent add could reserve onto this instance
+    // (reap-vs-add TOCTOU). Once marked, reserveTx refuses to adopt it.
+    return defer(() =>
+      this.db.transaction((tx) => {
+        if (opts.requireEmpty && this.liveFriendsOn(instanceId, tx) > 0) {
+          return false;
+        }
+        tx.update(instances).set({ status: "reaping" })
+          .where(eq(instances.id, instanceId)).run();
+        return true;
+      })
+    );
   }
 
   failedFriendIds(): Promise<number[]> {
@@ -268,12 +302,20 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     tsHostname: string;
     instanceExisted: boolean;
   } {
+    // Never adopt an instance in a terminal or reaping state: a concurrent
+    // offboard's reap may be tearing it down right now — adopting it would
+    // strand the new friend on a removed container (`instanceExisted: true`
+    // skips container start).
     const existing = tx.select({
       instanceId: instances.id,
       hostPort: instances.minioPort,
       tsHostname: instances.tsHostname,
     }).from(instances)
-      .where(and(eq(instances.kind, "shared"), ne(instances.status, "failed")))
+      .where(and(
+        eq(instances.kind, "shared"),
+        ne(instances.status, "failed"),
+        ne(instances.status, "reaping"),
+      ))
       .get();
     if (existing) return { ...existing, instanceExisted: true };
     return this.createInstance(tx, "shared", naming);
@@ -313,8 +355,12 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
         .map((r) => r.port),
     );
     const { min, max } = this.config.portRange;
+    // Bind-probe each DB-free candidate: without it a foreign process on an
+    // in-range port makes every allocation re-pick the same busy port —
+    // a permanent failure loop.
+    const probe = this.config.probePort ?? (() => true);
     const free = Array.from({ length: max - min + 1 }, (_, i) => min + i)
-      .find((port) => !used.has(port));
+      .find((port) => !used.has(port) && probe(port));
     if (free === undefined) throw new ConflictError("no free MinIO port");
     return free;
   }

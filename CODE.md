@@ -22,7 +22,7 @@ mc CLI           │  McShellClient               │
                  │      quota/retention/usage   │
                  └───────────────┬──▲───────────┘
                        admin ops │  │ audit webhook POSTs
-             (host.docker.internal:<port>)
+        (host: 127.0.0.1:<port> / network: container name)
                  ┌───────────────▼──┴───────────┐
                  │  instance container (1/portion)
                  │  tailscaled + MinIO together │
@@ -35,11 +35,18 @@ mc CLI           │  McShellClient               │
 
 ### MinIO — `src/minio/McShellClient.ts`
 
-- Shell-out to `mc`; one alias per instance in `~/.mc`.
+- Shell-out to `mc`; creds ride a per-call `MC_HOST_<alias>` env var (derived
+  from the master key, URL-encoded) — no `mc alias set`, no `~/.mc` state,
+  nothing secret on argv.
 - Ops used: `mc mb --with-lock`, `mc admin user/policy`, `mc quota set`,
   `mc retention set`, `mc admin config set audit_webhook`, `mc du`.
-- Manager reaches MinIO over the docker network / published port — never the
-  tailnet.
+- Manager reaches MinIO over the admin plane — never the tailnet. Endpoint is
+  composed in ONE place (`runtime/adminEndpoint.ts`, exposed as
+  `McClientFactory.adminEndpoint`), mode-picked by `INSTANCE_ADDRESSING`:
+  - `host` (default) — `http://127.0.0.1:<port>` via the loopback publish.
+  - `network` — `http://p0rt1on-instance-<alias>:<port>` over the shared docker
+    network (containerized manager; loopback publishes are unreachable
+    cross-container on Linux).
 
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 

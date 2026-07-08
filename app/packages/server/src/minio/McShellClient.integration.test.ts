@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DenoCommandRunner, DenoTempFiles } from "../lib/CommandRunner.ts";
 import { hasBinary } from "../lib/hasBinary.ts";
-import { McShellClient } from "./McShellClient.ts";
+import { mcHostEnv, McShellClient } from "./McShellClient.ts";
 
 // Real `mc` against a real MinIO. Skipped unless P0RT1ON_INTEGRATION is set
 // (see deploy/docker-compose.yml). Excluded from the default test + coverage
@@ -14,20 +14,32 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
   const runner = new DenoCommandRunner();
   const alias = "p0rt1on-it";
 
-  maybe("provisions a locked bucket + scoped user end-to-end", async () => {
-    const endpoint = Deno.env.get("MINIO_ENDPOINT") ?? "http://127.0.0.1:9000";
-    const user = Deno.env.get("MINIO_ROOT_USER") ?? "p0rtadmin";
-    const pass = Deno.env.get("MINIO_ROOT_PASSWORD") ?? "p0rtadmin123";
-    await runner.run("mc", ["alias", "set", alias, endpoint, user, pass]);
-    // Block until MinIO is accepting requests (handles container startup race).
-    await runner.run("mc", ["ready", alias]);
-
-    const bucket = `it-${crypto.randomUUID().slice(0, 8)}`;
-    const client = new McShellClient(
-      { alias },
+  // Root creds ride per-call MC_HOST env vars — no `mc alias set` bootstrap;
+  // this also grounds the env mechanism against the pinned mc release.
+  const endpoint = () =>
+    Deno.env.get("MINIO_ENDPOINT") ?? "http://127.0.0.1:9000";
+  const rootCred = () => ({
+    accessKeyId: Deno.env.get("MINIO_ROOT_USER") ?? "p0rtadmin",
+    secretKey: Deno.env.get("MINIO_ROOT_PASSWORD") ?? "p0rtadmin123",
+  });
+  const buildClient = () => {
+    const port = Number(new URL(endpoint()).port || 9000);
+    return new McShellClient(
+      { alias, minioPort: port },
+      rootCred(),
+      endpoint(),
       runner,
       new DenoTempFiles(),
     );
+  };
+  const hostEnv = () => mcHostEnv(alias, endpoint(), rootCred());
+
+  maybe("provisions a locked bucket + scoped user end-to-end", async () => {
+    // Block until MinIO is accepting requests (handles container startup race).
+    await runner.run("mc", ["ready", alias], hostEnv());
+
+    const bucket = `it-${crypto.randomUUID().slice(0, 8)}`;
+    const client = buildClient();
 
     try {
       await client.makeBucketWithLock(bucket);
@@ -59,22 +71,21 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
       // The offboard-blocker regression: `rb --force` alone cannot delete
       // versions still under retention; removeBucket must purge with --bypass
       // first. Grounds the flag set against the pinned mc release.
-      const endpoint = Deno.env.get("MINIO_ENDPOINT") ??
-        "http://127.0.0.1:9000";
-      const user = Deno.env.get("MINIO_ROOT_USER") ?? "p0rtadmin";
-      const pass = Deno.env.get("MINIO_ROOT_PASSWORD") ?? "p0rtadmin123";
-      await runner.run("mc", ["alias", "set", alias, endpoint, user, pass]);
-      await runner.run("mc", ["ready", alias]);
+      await runner.run("mc", ["ready", alias], hostEnv());
 
       const bucket = `it-lock-${crypto.randomUUID().slice(0, 8)}`;
-      const client = new McShellClient({ alias }, runner, new DenoTempFiles());
+      const client = buildClient();
 
       await client.makeBucketWithLock(bucket);
       await client.setDefaultRetention(bucket, "GOVERNANCE", 1);
       // Write an object AFTER retention is armed so it is genuinely locked.
       const tmp = await new DenoTempFiles().write("locked-data");
       try {
-        const put = await runner.run("mc", ["cp", tmp, `${alias}/${bucket}/x`]);
+        const put = await runner.run(
+          "mc",
+          ["cp", tmp, `${alias}/${bucket}/x`],
+          hostEnv(),
+        );
         expect(put.code).toBe(0);
       } finally {
         await new DenoTempFiles().remove(tmp);

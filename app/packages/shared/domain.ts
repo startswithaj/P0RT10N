@@ -39,6 +39,9 @@ export const INSTANCE_STATUS_VALUES = [
   "provisioning",
   "active",
   "stopped",
+  // Marked (atomically, while counting friends) before teardown begins, so a
+  // concurrent add can never adopt an instance that is about to be removed.
+  "reaping",
   "failed",
 ] as const;
 export type InstanceStatus = (typeof INSTANCE_STATUS_VALUES)[number];

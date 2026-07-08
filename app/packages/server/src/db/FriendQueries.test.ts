@@ -117,7 +117,12 @@ describe("FriendQueries", () => {
 
     const targets = await queries.usageSampleTargets();
     expect(targets).toEqual([
-      { friendId: active.friendId, bucket: "alice", alias: "alice" },
+      {
+        friendId: active.friendId,
+        bucket: "alice",
+        alias: "alice",
+        minioPort: 9000,
+      },
     ]);
   });
 

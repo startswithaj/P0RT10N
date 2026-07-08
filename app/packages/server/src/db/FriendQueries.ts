@@ -30,6 +30,8 @@ export interface UsageSampleTarget {
   friendId: number;
   bucket: string;
   alias: string;
+  /** Host-published admin-plane port (composes the per-call MC_HOST endpoint). */
+  minioPort: number;
 }
 
 /** Latest usage sample for a friend (or zeros if none recorded yet). */
@@ -252,6 +254,7 @@ export class FriendQueries {
         // The per-instance mc alias is its tailnet hostname (same convention
         // as BootReconciler.realign).
         alias: instances.tsHostname,
+        minioPort: instances.minioPort,
       }).from(friends)
         .innerJoin(instances, eq(instances.id, friends.instanceId))
         .where(eq(friends.status, "active"))

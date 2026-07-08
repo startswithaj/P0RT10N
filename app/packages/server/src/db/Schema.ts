@@ -69,6 +69,10 @@ export const friends = sqliteTable("friends", {
   s3AccessKeyId: text("s3_access_key_id"),
   // The friend's client node tag (`tag:p0rt1on-friend-<name>`), gated by ACL.
   tsNodeTag: text("ts_node_tag").notNull(),
+  // Tailscale auth-key ID only — never the key secret (zero-knowledge). Kept
+  // so the key can be revoked on failure-reap, re-issue, and offboard. Null
+  // for friends provisioned before this column (their keys expire naturally).
+  tsKeyId: text("ts_key_id"),
   status: text("status", { enum: FRIEND_STATUS_VALUES })
     .notNull()
     .default("provisioning"),

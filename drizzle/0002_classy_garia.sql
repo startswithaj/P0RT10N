@@ -1,0 +1,1 @@
+ALTER TABLE `friends` ADD `ts_key_id` text;

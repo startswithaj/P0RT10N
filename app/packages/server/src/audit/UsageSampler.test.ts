@@ -11,8 +11,8 @@ import { UsageSampler, type UsageStore } from "./UsageSampler.ts";
 
 describe("UsageSampler", () => {
   const TARGETS: UsageSampleTarget[] = [
-    { friendId: 1, bucket: "alice", alias: "p0rt1on-alice" },
-    { friendId: 2, bucket: "bob", alias: "p0rt1on-bob" },
+    { friendId: 1, bucket: "alice", alias: "p0rt1on-alice", minioPort: 9100 },
+    { friendId: 2, bucket: "bob", alias: "p0rt1on-bob", minioPort: 9101 },
   ];
 
   /** In-memory UsageStore recording inserted samples. */

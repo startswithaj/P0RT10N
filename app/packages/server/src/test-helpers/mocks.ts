@@ -59,7 +59,7 @@ export function recordingLogger(): { logger: Logger; warns: string[] } {
 export const TEST_CONFIG: ProvisioningConfig = {
   instanceImage: "p0rt1on-instance:pinned",
   network: "p0rt1on-net",
-  instanceHost: "127.0.0.1",
+  instanceAddressing: "host",
   region: "us-east-1",
   portRange: { min: 9000, max: 9100 },
   sharedInstanceName: "pool",
@@ -89,6 +89,7 @@ export const TEST_CRED: S3Credential = {
 export interface RecordedCommand {
   command: string;
   args: string[];
+  env?: Record<string, string>;
 }
 
 /**
@@ -105,8 +106,8 @@ export function fakeRunner(
   }),
 ): CommandRunner {
   return {
-    run: (command, args) => {
-      recorded.push({ command, args });
+    run: (command, args, env) => {
+      recorded.push({ command, args, env });
       return Promise.resolve(respond(args));
     },
   };
@@ -200,7 +201,9 @@ export function buildMcShellClient(
   written: string[] = [],
 ): McShellClient {
   return new McShellClient(
-    { alias: "alice" },
+    { alias: "alice", minioPort: 9100 },
+    TEST_CRED,
+    "http://127.0.0.1:9100",
     fakeRunner(recorded, respond),
     fakeTempFiles(written),
     "mc",
@@ -213,7 +216,7 @@ export function mockMcClient(calls: Calls): McClient {
     return Promise.resolve();
   };
   return {
-    target: { alias: "alias" },
+    target: { alias: "alias", minioPort: 9100 },
     makeBucketWithLock: note("makeBucketWithLock"),
     removeBucket: note("removeBucket"),
     setDefaultRetention: note("setDefaultRetention"),
@@ -235,16 +238,10 @@ export function mockMcClient(calls: Calls): McClient {
   };
 }
 
-export function mockMcFactory(
-  mc: McClient,
-  calls: Calls = [],
-): McClientFactory {
+export function mockMcFactory(mc: McClient): McClientFactory {
   return {
     forInstance: () => mc,
-    setAlias: () => {
-      calls.push("mc:setAlias");
-      return Promise.resolve();
-    },
+    adminEndpoint: (target) => `http://127.0.0.1:${target.minioPort}`,
   };
 }
 
@@ -262,7 +259,10 @@ export function mockTailscaleApi(
         expiresAt: "2099-01-01T00:00:00Z",
       });
     },
-    revokeAuthKey: () => Promise.resolve(),
+    revokeAuthKey: (keyId) => {
+      calls.push(`ts:revokeAuthKey:${keyId}`);
+      return Promise.resolve();
+    },
     nodesByTag: () => Promise.resolve(nodes),
     isNodeOnline: () => Promise.resolve(true),
     nodeIpv4: () => Promise.resolve("100.64.0.1"),
@@ -370,6 +370,10 @@ export function mockProvisioningRepo(
       calls.push("repo:recordAccessKey");
       return Promise.resolve();
     },
+    recordTsKeyId: (_friendId, tsKeyId) => {
+      calls.push(`repo:recordTsKeyId:${tsKeyId}`);
+      return Promise.resolve();
+    },
     setQuota: () => {
       calls.push("repo:setQuota");
       return Promise.resolve();
@@ -388,6 +392,10 @@ export function mockProvisioningRepo(
     },
     context: () => Promise.reject(new Error("context not stubbed")),
     friendsOnInstance: () => Promise.resolve(0),
+    markInstanceReaping: (_instanceId, opts) => {
+      calls.push(`repo:markInstanceReaping:requireEmpty=${opts.requireEmpty}`);
+      return Promise.resolve(true);
+    },
     failedFriendIds: () => Promise.resolve([]),
     failStaleProvisioning: () => {
       calls.push("repo:failStaleProvisioning");
@@ -443,6 +451,7 @@ export const CTX: FriendProvisionContext = {
   isolationMode: "dedicated",
   bucket: "alice",
   s3AccessKeyId: "AKIAOLD",
+  tsKeyId: "kid-old",
   nodeTag: "tag:p0rt1on-friend-alice",
   lockMode: "GOVERNANCE",
   lockRetentionDays: 30,
@@ -450,6 +459,7 @@ export const CTX: FriendProvisionContext = {
   instanceName: "p0rt1on-minio-alice",
   alias: "alias",
   tsHostname: "alice",
+  minioPort: 9100,
 };
 
 /** Overridable parts for a ProvisioningService under test. */
@@ -460,6 +470,8 @@ export interface ProvisioningParts {
   mc?: Partial<McClient>;
   smoke?: () => Promise<void>;
   nodes?: TailnetNode[];
+  /** Override individual tailscale operations (e.g. inject revoke failures). */
+  tailscale?: Partial<TailscaleApi>;
   config?: Partial<ProvisioningConfig>;
   /** Captures env-file contents the service writes (secret-handling tests). */
   written?: string[];
@@ -474,9 +486,9 @@ export function buildProvisioningService(
   return new ProvisioningService(
     { ...TEST_CONFIG, ...parts.config },
     mockProvisioningRepo(calls, reservation, parts.repo),
-    mockMcFactory({ ...mockMcClient(calls), ...parts.mc }, calls),
+    mockMcFactory({ ...mockMcClient(calls), ...parts.mc }),
     { ...mockInstanceRuntime(calls), ...parts.runtime },
-    mockTailscaleApi(calls, parts.nodes),
+    { ...mockTailscaleApi(calls, parts.nodes), ...parts.tailscale },
     {
       generateS3Credential: () => TEST_CRED,
       rootCredentialFor: () => TEST_CRED,

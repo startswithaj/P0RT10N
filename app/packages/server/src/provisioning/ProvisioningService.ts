@@ -20,6 +20,7 @@ import {
 } from "../tailscale/manualAcl.ts";
 import { ConflictError, ServiceError } from "../lib/ServiceError.ts";
 import { drainForResult } from "../lib/drainGenerator.ts";
+import { Mutex } from "../lib/Mutex.ts";
 import type { ProgressEvent, StepEvent } from "../lib/progress.ts";
 import type {
   FriendNaming,
@@ -57,6 +58,11 @@ function kopiaCreateTail(retentionDays: number): string[] {
  * `failed` (recoverable by the cleanup sweep) and the error is rethrown.
  */
 export class ProvisioningService implements ProvisioningServiceContract {
+  // Serializes the mutating ops (add/offboard/rotate/sweep) — intentional for
+  // a single-admin app: it closes interleavings like reap-vs-add without
+  // distributed locking. Read-only queries never touch it.
+  private readonly mutex = new Mutex();
+
   constructor(
     private readonly config: ProvisioningConfig,
     private readonly repo: ProvisioningRepo,
@@ -81,7 +87,13 @@ export class ProvisioningService implements ProvisioningServiceContract {
    * exact failing step instead of a fake timer running past it. Steps are named
    * by key (see PROVISION_STEPS); order can change without mislabelling.
    */
-  async *addFriendStream(
+  addFriendStream(
+    input: AddFriendInput,
+  ): AsyncGenerator<ProgressEvent<ProvisionStepKey, FriendBundle>> {
+    return this.mutex.runStream(() => this.addFriendLocked(input));
+  }
+
+  private async *addFriendLocked(
     input: AddFriendInput,
   ): AsyncGenerator<ProgressEvent<ProvisionStepKey, FriendBundle>> {
     const log = this.logger.child({ op: "addFriend", name: input.name });
@@ -136,11 +148,18 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
   }
 
-  async rotateKey(friendId: number): Promise<FriendBundle> {
+  rotateKey(friendId: number): Promise<FriendBundle> {
+    return this.mutex.run(() => this.rotateKeyLocked(friendId));
+  }
+
+  private async rotateKeyLocked(friendId: number): Promise<FriendBundle> {
     const log = this.logger.child({ op: "rotateKey", friendId });
     log.info("rotating S3 key");
     const ctx = await this.repo.context(friendId);
-    const mc = this.mc.forInstance({ alias: ctx.alias });
+    const mc = this.mc.forInstance({
+      alias: ctx.alias,
+      minioPort: ctx.minioPort,
+    });
     const warnings: string[] = [];
     // Self-heal first: a previously failed rotation can have left a stale user
     // attached to the bucket policy that no DB row records.
@@ -198,6 +217,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log.info("re-issuing tailscale enrollment key");
     const ctx = await this.repo.context(friendId);
     const minted = await this.tailscale.mintAuthKey({ tag: ctx.nodeTag });
+    await this.repo.recordTsKeyId(friendId, minted.keyId);
+    // Mint-then-revoke: the friend is never left keyless if the mint fails.
+    // The old key must not stay live once superseded (unused = still valid
+    // for ~90 days). Revocation is an auth_keys API op, so it runs in manual
+    // ACL mode too.
+    if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
     await this.repo.audit(friendId, "reissue_ts_key");
     log.info("tailscale key re-issued", { tag: ctx.nodeTag });
     return {
@@ -217,7 +242,13 @@ export class ProvisioningService implements ProvisioningServiceContract {
    * `done` event. A throw propagates out, so the UI halts on the failing step.
    * Steps are named by key (see OFFBOARD_STEPS).
    */
-  async *offboardStream(
+  offboardStream(
+    friendId: number,
+  ): AsyncGenerator<ProgressEvent<OffboardStepKey, OffboardResult>> {
+    return this.mutex.runStream(() => this.offboardLocked(friendId));
+  }
+
+  private async *offboardLocked(
     friendId: number,
   ): AsyncGenerator<ProgressEvent<OffboardStepKey, OffboardResult>> {
     const log = this.logger.child({ op: "offboard", friendId });
@@ -267,7 +298,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     reservation: InstanceReservation,
     log: Logger,
   ): AsyncGenerator<StepEvent<ProvisionStepKey>, FriendBundle> {
-    const mc = this.mc.forInstance({ alias: reservation.alias });
+    const mc = this.mc.forInstance({
+      alias: reservation.alias,
+      minioPort: reservation.hostPort,
+    });
     const cred = this.keyGen.generateS3Credential();
     log.info("step: ensure instance + ACL");
     // MUST precede minting the friend key: Tailscale rejects an auth key for a
@@ -277,6 +311,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "authkey" };
     log.debug("minting friend tailscale auth key", { tag: naming.nodeTag });
     const friendKey = await this.tailscale.mintAuthKey({ tag: naming.nodeTag });
+    // Key ID only (never the secret) — so failure-reap/offboard can revoke it.
+    await this.repo.recordTsKeyId(reservation.friendId, friendKey.keyId);
     log.info("step: create bucket + user", { bucket: naming.bucket });
     yield* this.createBucketAndUserSteps(
       mc,
@@ -366,8 +402,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     // MinIO root creds + the serve auth key: written to an env-file for
     // `docker run` (baked into the container), removed after. The auth key
     // rides the env-file too — never the docker argv (host-visible via ps).
-    // The root creds are then used to configure the mc alias so the manager
-    // can admin the instance over the docker network.
+    // Admin access needs no further setup: every mc call derives the same
+    // root cred and carries it in its own MC_HOST env var.
     const rootCred = this.keyGen.rootCredentialFor(reservation.tsHostname);
     const envFile = await this.tempFiles.write(
       `MINIO_ROOT_USER=${rootCred.accessKeyId}\n` +
@@ -391,10 +427,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       tsHostname: reservation.tsHostname,
     });
     await this.runtime.waitUntilHealthy(reservation.tsHostname);
-    const endpoint =
-      `http://${this.config.instanceHost}:${reservation.hostPort}`;
-    log.debug("configuring mc alias", { alias: reservation.alias, endpoint });
-    await this.mc.setAlias(reservation.alias, endpoint, rootCred);
   }
 
   private async *createBucketAndUserSteps(
@@ -428,8 +460,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "smoke" };
     // Smoke-test over the ADMIN endpoint (same MinIO), not the Tailscale URL —
     // the manager isn't on the tailnet and can't reach `<host>.<tailnet>:443`.
-    const adminEndpoint =
-      `http://${this.config.instanceHost}:${reservation.hostPort}`;
+    const adminEndpoint = this.mc.adminEndpoint({
+      alias: reservation.alias,
+      minioPort: reservation.hostPort,
+    });
     log.debug("running smoke test", {
       bucket: naming.bucket,
       endpoint: adminEndpoint,
@@ -489,7 +523,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     ctx: FriendProvisionContext,
     log: Logger,
   ): AsyncGenerator<StepEvent<OffboardStepKey>, void> {
-    const mc = this.mc.forInstance({ alias: ctx.alias });
+    const mc = this.mc.forInstance({
+      alias: ctx.alias,
+      minioPort: ctx.minioPort,
+    });
     yield { type: "step", step: "storage" };
     if (ctx.s3AccessKeyId) await mc.removeUser(ctx.s3AccessKeyId);
     // Also sweep users a failed rotation may have left attached to the
@@ -501,6 +538,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     await mc.removeBucket(ctx.bucket); // force; deletes all versions
     yield { type: "step", step: "nodes" };
     await this.revokeFriendNodes(ctx.nodeTag);
+    // The enrollment key too — unused it stays live for ~90 days. Absent ID
+    // (pre-column friend) is a no-op; already-revoked is success.
+    if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
     yield { type: "step", step: "acl" };
     await this.removeAclOrAdvise(ctx.nodeTag, log);
   }
@@ -534,12 +574,14 @@ export class ProvisioningService implements ProvisioningServiceContract {
     ctx: FriendProvisionContext,
     log: Logger,
   ): Promise<void> {
-    const remaining = await this.repo.friendsOnInstance(ctx.instanceId);
-    const shouldReap = ctx.isolationMode === "dedicated" || remaining === 0;
-    if (!shouldReap) {
+    // Count + mark in one transaction; a false return means friends remain
+    // (or a concurrent add just reserved onto the pool) — leave it alone.
+    const marked = await this.repo.markInstanceReaping(ctx.instanceId, {
+      requireEmpty: ctx.isolationMode !== "dedicated",
+    });
+    if (!marked) {
       log.debug("instance still has friends; not reaping", {
         instanceId: ctx.instanceId,
-        remaining,
       });
       return;
     }
@@ -608,7 +650,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
       });
     if (locked) return;
     rlog.info("reaping failed friend");
-    const mc = this.mc.forInstance({ alias: ctx.alias });
+    const mc = this.mc.forInstance({
+      alias: ctx.alias,
+      minioPort: ctx.minioPort,
+    });
     const ak = ctx.s3AccessKeyId;
     // Resource teardown first — each helper treats "already absent" as
     // success, so partially-provisioned friends converge.
@@ -638,6 +683,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
         "revokeNodes",
         () => this.revokeFriendNodes(ctx.nodeTag),
       ),
+      revokeAuthKey: await this.attempt(rlog, "revokeAuthKey", async () => {
+        if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
+      }),
     };
     const pending = Object.keys(results).filter((k) => !results[k]);
     if (pending.length > 0) {
@@ -708,7 +756,11 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return names;
   }
 
-  async sweepFailed(): Promise<number> {
+  sweepFailed(): Promise<number> {
+    return this.mutex.run(() => this.sweepFailedLocked());
+  }
+
+  private async sweepFailedLocked(): Promise<number> {
     const log = this.logger.child({ op: "sweepFailed" });
     const friendIds = await this.repo.failedFriendIds();
     // Sequential (Promise chain, not a loop) — each reap frees its instance.
@@ -746,7 +798,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     ctx: FriendProvisionContext,
   ): Promise<void> {
     if (ctx.lockMode !== "COMPLIANCE") return;
-    const mc = this.mc.forInstance({ alias: ctx.alias });
+    const mc = this.mc.forInstance({
+      alias: ctx.alias,
+      minioPort: ctx.minioPort,
+    });
     const usage = await mc.du(ctx.bucket).catch(() => null);
     if (!usage || usage.objectCount === 0) return;
     const earliest = new Date(

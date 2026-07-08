@@ -130,7 +130,13 @@ export class Env {
     return {
       instanceImage: this.#str("INSTANCE_IMAGE", "p0rt1on-instance:latest"),
       network: this.#str("P0RT1ON_NETWORK", "p0rt1on-net"),
-      instanceHost: this.#str("INSTANCE_HOST", "127.0.0.1"),
+      // `host` (default): host-run manager reaches the loopback-published
+      // port. `network`: containerized manager reaches instances by container
+      // name over the shared docker network — published loopback ports are
+      // unreachable cross-container on Linux (host.docker.internal included).
+      instanceAddressing: this.#str("INSTANCE_ADDRESSING", "host") === "network"
+        ? "network"
+        : "host",
       region: this.#str("S3_REGION", "us-east-1"),
       portRange: {
         min: this.#num("MINIO_PORT_MIN", 9100),

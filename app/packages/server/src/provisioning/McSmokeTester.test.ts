@@ -22,7 +22,7 @@ describe("McSmokeTester", () => {
   const happy = (written: string[]) => (args: string[]) =>
     args[0] === "cat" ? cmdOk(written[0]) : cmdOk();
 
-  it("runs alias set → cp → cat → rm → alias remove", async () => {
+  it("runs cp → cat → rm with the friend's creds in MC_HOST env, never argv", async () => {
     const cmds: RecordedCommand[] = [];
     const written: string[] = [];
     await new McSmokeTester(
@@ -31,15 +31,35 @@ describe("McSmokeTester", () => {
     )
       .run(PARAMS);
 
-    const verbs = cmds.map((c) =>
-      c.args[0] === "alias" ? `alias ${c.args[1]}` : c.args[0]
-    );
-    expect(verbs).toEqual(["alias set", "cp", "cat", "rm", "alias remove"]);
-    // alias set uses the friend's own creds + endpoint.
-    const set = cmds[0].args;
-    expect(set.slice(-3)).toEqual(["http://127.0.0.1:9100", "AK", "SK"]);
-    // cp / cat / rm all target the friend's bucket.
-    expect(cmds[1].args[2]).toContain("/alice/");
+    expect(cmds.map((c) => c.args[0])).toEqual(["cp", "cat", "rm"]);
+    cmds.forEach((cmd) => {
+      // The friend's creds ride a throwaway MC_HOST env var; argv stays
+      // secret-free.
+      const env = cmd.env ?? {};
+      const hostVar = Object.keys(env).find((k) =>
+        k.startsWith("MC_HOST_p0rt1on-smoke-")
+      );
+      expect(hostVar).toBeDefined();
+      expect(env[hostVar as string]).toBe("http://AK:SK@127.0.0.1:9100");
+      expect(cmd.args.join(" ")).not.toContain("SK");
+    });
+    // cp targets the friend's bucket under the throwaway alias.
+    expect(cmds[0].args[2]).toContain("/alice/");
+  });
+
+  it("failure never leaks the friend's secret in the error", async () => {
+    const respond = (args: string[]) =>
+      args[0] === "cp"
+        ? { code: 1, stdout: "", stderr: "denied for http://AK:SK@host SK" }
+        : cmdOk();
+    const err = await new McSmokeTester(
+      fakeRunner([], respond),
+      fakeTempFiles([]),
+    )
+      .run(PARAMS)
+      .then(() => null, (e: Error) => e.message);
+    expect(err).toContain("smoke-test step");
+    expect(err).not.toContain("SK");
   });
 
   it("throws when GET returns mismatched content", async () => {

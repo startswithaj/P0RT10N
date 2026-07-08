@@ -13,10 +13,11 @@ import { NotImplementedError, ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
 // ============================================================================
-// Real McClient: shells out to `mc` for one instance (by alias). Root creds are
-// configured out-of-band via `mc alias set` at instance startup, so this layer
-// holds no secret. Arg-building + parsing are unit-tested with a fake runner;
-// the actual `mc` behaviour is verified by the integration suite against a real
+// Real McClient: shells out to `mc` for one instance. Root creds ride a
+// per-call `MC_HOST_<alias>` env var (invisible in host `ps`, no `~/.mc`
+// state) — the factory derives them from the master key, so nothing here is
+// persisted. Arg-building + parsing are unit-tested with a fake runner; the
+// actual `mc` behaviour is verified by the integration suite against a real
 // MinIO container.
 // ============================================================================
 
@@ -52,6 +53,26 @@ function bucketScopedPolicy(bucket: string): string {
   });
 }
 
+/**
+ * Compose the `MC_HOST_<alias>` env var that makes an mc call self-contained:
+ * creds ride the child env (not visible in `ps`) instead of argv or `~/.mc`
+ * alias state. User/secret are URL-encoded — they can contain URL-significant
+ * chars.
+ */
+export function mcHostEnv(
+  alias: string,
+  endpoint: string,
+  cred: S3Credential,
+): Record<string, string> {
+  const url = endpoint.replace(
+    "://",
+    `://${encodeURIComponent(cred.accessKeyId)}:${
+      encodeURIComponent(cred.secretKey)
+    }@`,
+  );
+  return { [`MC_HOST_${alias}`]: url };
+}
+
 /** Parse the last JSON line of `mc du --json`. */
 function parseDu(stdout: string): DuResult {
   const lines = stdout.trim().split("\n").filter((l) => l.length > 0);
@@ -66,6 +87,8 @@ function parseDu(stdout: string): DuResult {
 export class McShellClient implements McClient {
   constructor(
     readonly target: McTarget,
+    private readonly rootCred: S3Credential,
+    private readonly endpoint: string,
     private readonly runner: CommandRunner,
     private readonly tempFiles: TempFiles,
     private readonly mcBin = "mc",
@@ -76,21 +99,31 @@ export class McShellClient implements McClient {
     return `${this.target.alias}/${bucket}`;
   }
 
+  private hostEnv(): Record<string, string> {
+    return mcHostEnv(this.target.alias, this.endpoint, this.rootCred);
+  }
+
   /**
    * Run an mc subcommand; throw on non-zero exit with the captured stderr.
    * `redact` values are masked out of the error message (argv echo AND mc's
-   * own output can both contain them), and argv after `--` is structurally
-   * omitted (see lib/redact.ts) — secrets never reach logs/UI.
+   * own output can both contain them) — the root cred (raw and URL-encoded,
+   * since mc may echo the composed MC_HOST URL) is always on the list — and
+   * argv after `--` is structurally omitted (see lib/redact.ts), so secrets
+   * never reach logs/UI.
    */
   private async exec(args: string[], redact: string[] = []): Promise<string> {
-    const res = await this.runner.run(this.mcBin, args);
+    const res = await this.runner.run(this.mcBin, args, this.hostEnv());
     if (res.code !== 0) {
       const raw = `mc ${safeArgs(args)} failed (${res.code}): ${
         res.stderr.trim() || res.stdout.trim()
       }`;
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        maskSecrets(raw, redact),
+        maskSecrets(raw, [
+          ...redact,
+          this.rootCred.secretKey,
+          encodeURIComponent(this.rootCred.secretKey),
+        ]),
       );
     }
     return res.stdout;
@@ -316,46 +349,38 @@ export class McShellClient implements McClient {
   }
 }
 
-/** Builds an McShellClient per instance, sharing one runner + temp-file impl. */
+/** Derives an instance's root credential (master-key HMAC, never stored). */
+export interface RootCredSource {
+  rootCredentialFor(instanceHost: string): S3Credential;
+}
+
+/**
+ * Builds an McShellClient per instance, sharing one runner + temp-file impl.
+ * Owns admin-plane endpoint composition (via the injected addressing-mode
+ * composer) and root-cred derivation, so callers pass only
+ * `{ alias, minioPort }`.
+ */
 export class McShellClientFactory implements McClientFactory {
   constructor(
     private readonly runner: CommandRunner,
     private readonly tempFiles: TempFiles,
+    private readonly keyGen: RootCredSource,
+    private readonly endpointFor: (target: McTarget) => string,
     private readonly mcBin = "mc",
   ) {}
 
-  forInstance(target: McTarget): McClient {
-    return new McShellClient(target, this.runner, this.tempFiles, this.mcBin);
+  adminEndpoint(target: McTarget): string {
+    return this.endpointFor(target);
   }
 
-  async setAlias(
-    alias: string,
-    endpoint: string,
-    cred: S3Credential,
-  ): Promise<void> {
-    // Root creds are on argv here (loopback/docker-network admin plane only).
-    // `--` terminates flag parsing so a secret starting with `-` isn't read as a flag.
-    const res = await this.runner.run(this.mcBin, [
-      "alias",
-      "set",
-      "--",
-      alias,
-      endpoint,
-      cred.accessKeyId,
-      cred.secretKey,
-    ]);
-    if (res.code !== 0) {
-      // The message already omits argv; masking covers mc echoing the secret
-      // in its own stderr, and documents the declaration for future refactors.
-      throw new ServiceError(
-        "INTERNAL_SERVER_ERROR",
-        maskSecrets(
-          `mc alias set ${alias} failed (${res.code}): ${
-            res.stderr.trim() || res.stdout.trim()
-          }`,
-          [cred.secretKey],
-        ),
-      );
-    }
+  forInstance(target: McTarget): McClient {
+    return new McShellClient(
+      target,
+      this.keyGen.rootCredentialFor(target.alias),
+      this.adminEndpoint(target),
+      this.runner,
+      this.tempFiles,
+      this.mcBin,
+    );
   }
 }

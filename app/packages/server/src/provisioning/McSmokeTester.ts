@@ -1,6 +1,8 @@
 import type { SmokeTester, SmokeTestParams } from "./deps.ts";
 import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
+import { maskSecrets } from "../lib/redact.ts";
+import { mcHostEnv } from "../minio/McShellClient.ts";
 
 // ============================================================================
 // SmokeTester via `mc`, exercising the FRIEND's freshly-issued key end-to-end
@@ -22,41 +24,41 @@ export class McSmokeTester implements SmokeTester {
     const objectPath = `${alias}/${bucket}/.p0rt1on-smoke-${suffix}`;
     const token = crypto.randomUUID();
     const file = await this.tempFiles.write(token);
+    // A throwaway MC_HOST env var scopes the friend's creds to each call —
+    // nothing on argv (host-visible via `ps`), no alias config to clean up.
+    const env = mcHostEnv(alias, endpoint, cred);
     try {
-      // Configure a throwaway alias with the friend's own creds. `--` guards a
-      // secret that starts with `-` from being parsed as a flag.
-      await this.exec([
-        "alias",
-        "set",
-        "--",
-        alias,
-        endpoint,
-        cred.accessKeyId,
-        cred.secretKey,
-      ]);
-      await this.exec(["cp", file, objectPath]); // PutObject
-      const got = await this.exec(["cat", objectPath]); // GetObject
+      await this.exec(["cp", file, objectPath], env, cred.secretKey); // PutObject
+      const got = await this.exec(["cat", objectPath], env, cred.secretKey); // GetObject
       if (got.trim() !== token) {
         throw new ServiceError(
           "INTERNAL_SERVER_ERROR",
           "smoke-test GET returned unexpected content",
         );
       }
-      await this.exec(["rm", objectPath]); // DeleteObject
+      await this.exec(["rm", objectPath], env, cred.secretKey); // DeleteObject
     } finally {
-      await this.exec(["alias", "remove", alias]).catch(() => undefined);
       await this.tempFiles.remove(file);
     }
   }
 
-  private async exec(args: string[]): Promise<string> {
-    const res = await this.runner.run(this.mcBin, args);
+  private async exec(
+    args: string[],
+    env: Record<string, string>,
+    secret: string,
+  ): Promise<string> {
+    const res = await this.runner.run(this.mcBin, args, env);
     if (res.code !== 0) {
+      // mc can echo the MC_HOST URL in its own stderr — mask the secret in
+      // both its raw and URL-encoded forms.
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        `smoke-test step \`mc ${args[0]}\` failed (${res.code}): ${
-          res.stderr.trim() || res.stdout.trim()
-        }`,
+        maskSecrets(
+          `smoke-test step \`mc ${args[0]}\` failed (${res.code}): ${
+            res.stderr.trim() || res.stdout.trim()
+          }`,
+          [secret, encodeURIComponent(secret)],
+        ),
       );
     }
     return res.stdout;

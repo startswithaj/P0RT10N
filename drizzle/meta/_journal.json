@@ -15,6 +15,13 @@
       "when": 1782893560116,
       "tag": "0001_huge_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783505647741,
+      "tag": "0002_classy_garia",
+      "breakpoints": true
     }
   ]
 }

@@ -2,17 +2,70 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   buildMcShellClient as client,
+  fakeRunner,
+  fakeTempFiles,
   type RecordedCommand,
 } from "../test-helpers/mocks.ts";
+import { McShellClient } from "./McShellClient.ts";
 
 describe("McShellClient arg-building", () => {
   it("makeBucketWithLock issues `mc mb --with-lock alias/bucket`", async () => {
     const cmds: RecordedCommand[] = [];
     await client(cmds).makeBucketWithLock("backup");
-    expect(cmds[0]).toEqual({
-      command: "mc",
-      args: ["mb", "--with-lock", "alice/backup"],
+    expect(cmds[0].command).toBe("mc");
+    expect(cmds[0].args).toEqual(["mb", "--with-lock", "alice/backup"]);
+  });
+
+  it("every call carries the root cred via MC_HOST env, never argv", async () => {
+    const cmds: RecordedCommand[] = [];
+    const c = client(cmds);
+    await c.makeBucketWithLock("backup");
+    await c.du("backup");
+    await c.listUsers();
+    cmds.forEach((cmd) => {
+      // TEST_CRED rides the env URL; argv stays secret-free.
+      expect(cmd.env).toEqual({
+        MC_HOST_alice: "http://AKIATEST:secret123@127.0.0.1:9100",
+      });
+      expect(cmd.args.join(" ")).not.toContain("secret123");
+      expect(cmd.args[0]).not.toBe("alias");
     });
+  });
+
+  it("MC_HOST URL-encodes credentials with URL-significant chars", async () => {
+    const cmds: RecordedCommand[] = [];
+    const c = new McShellClient(
+      { alias: "alice", minioPort: 9100 },
+      { accessKeyId: "AK/1", secretKey: "s:e@c/r?t#" },
+      "http://127.0.0.1:9100",
+      fakeRunner(cmds),
+      fakeTempFiles([]),
+      "mc",
+    );
+    await c.du("backup");
+    expect(cmds[0].env).toEqual({
+      MC_HOST_alice: "http://AK%2F1:s%3Ae%40c%2Fr%3Ft%23@127.0.0.1:9100",
+    });
+  });
+
+  it("failure never leaks the root cred — raw or URL-encoded", async () => {
+    const failing = new McShellClient(
+      { alias: "alice", minioPort: 9100 },
+      { accessKeyId: "AK", secretKey: "r00t/s3cr3t" },
+      "http://127.0.0.1:9100",
+      fakeRunner([], () => ({
+        code: 1,
+        stdout: "",
+        stderr:
+          "cannot reach http://AK:r00t%2Fs3cr3t@127.0.0.1:9100 r00t/s3cr3t",
+      })),
+      fakeTempFiles([]),
+      "mc",
+    );
+    const err = await failing.du("backup")
+      .then(() => null, (e: Error) => e.message);
+    expect(err).not.toContain("r00t/s3cr3t");
+    expect(err).not.toContain("r00t%2Fs3cr3t");
   });
 
   it("setDefaultRetention passes mode + Nd + path", async () => {
@@ -126,8 +179,8 @@ describe("McShellClient arg-building", () => {
   });
 
   it("args after -- are omitted from errors even with no declared secrets", async () => {
-    // setAlias goes through the runner too, but exec's structural rule is the
-    // backstop: createUser's argv tail never appears in the message.
+    // exec's structural rule is the backstop: createUser's argv tail never
+    // appears in the message.
     const failing = client([], () => ({ code: 1, stdout: "", stderr: "boom" }));
     const err = await failing
       .createUser({ accessKeyId: "AK-visible-id", secretKey: "SK" })

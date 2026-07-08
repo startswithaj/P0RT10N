@@ -1,6 +1,6 @@
 import type { ContainerHandle, ContainerRuntime } from "../runtime/runtime.ts";
 import { containerNames } from "../runtime/names.ts";
-import type { KeyGen, ProvisioningRepo } from "../provisioning/deps.ts";
+import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import type { McClientFactory } from "../minio/mc.ts";
 import type { Logger } from "../services/types.ts";
 
@@ -30,7 +30,6 @@ export interface ReconcileSummary {
 
 /** Config subset the reconcile needs to re-align an instance. */
 export interface ReconcileConfig {
-  instanceHost: string;
   auditWebhookUrl: string;
   auditWebhookToken: string;
 }
@@ -53,7 +52,6 @@ export class BootReconciler {
     private readonly repo: ProvisioningRepo,
     private readonly runtime: ContainerRuntime,
     private readonly mc: McClientFactory,
-    private readonly keyGen: KeyGen,
     private readonly config: ReconcileConfig,
     private readonly logger: Logger,
     // Containers may still be starting right after a host boot (tailscaled +
@@ -151,19 +149,16 @@ export class BootReconciler {
   }
 
   /**
-   * Healthy instances get their admin alias and audit-webhook config
-   * re-issued from derived material — this is what makes a manager rebuild
-   * (fresh ~/.mc, rotated master-key-derived token) recover with no manual
-   * steps. Idempotent.
+   * Healthy instances get their audit-webhook config re-issued from derived
+   * material (the mc factory derives root creds per call) — this is what
+   * makes a manager rebuild (rotated master-key-derived token) recover with
+   * no manual steps. Idempotent.
    */
   private async realign(row: InstanceRow): Promise<void> {
-    const alias = row.tsHostname;
-    await this.mc.setAlias(
-      alias,
-      `http://${this.config.instanceHost}:${row.minioPort}`,
-      this.keyGen.rootCredentialFor(row.tsHostname),
-    );
-    await this.mc.forInstance({ alias }).setAuditWebhook(
+    await this.mc.forInstance({
+      alias: row.tsHostname,
+      minioPort: row.minioPort,
+    }).setAuditWebhook(
       this.config.auditWebhookUrl,
       this.config.auditWebhookToken,
     );

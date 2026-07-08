@@ -11,14 +11,24 @@ export interface CommandResult {
 }
 
 export interface CommandRunner {
-  run(command: string, args: string[]): Promise<CommandResult>;
+  /** `env` vars are merged over the child's inherited environment. */
+  run(
+    command: string,
+    args: string[],
+    env?: Record<string, string>,
+  ): Promise<CommandResult>;
 }
 
 /** Runs a real subprocess via Deno.Command. Requires --allow-run. */
 export class DenoCommandRunner implements CommandRunner {
-  async run(command: string, args: string[]): Promise<CommandResult> {
+  async run(
+    command: string,
+    args: string[],
+    env?: Record<string, string>,
+  ): Promise<CommandResult> {
     const output = await new Deno.Command(command, {
       args,
+      env,
       stdout: "piped",
       stderr: "piped",
     }).output();

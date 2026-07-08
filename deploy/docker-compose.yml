@@ -30,12 +30,25 @@ services:
     environment:
       DB_PATH: /data/p0rt1on.db
       PORT: "8080"
+      # Containerized manager: reach instances by container name over the
+      # shared docker network — their loopback-published ports are unreachable
+      # cross-container on Linux (host.docker.internal included).
+      INSTANCE_ADDRESSING: network
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - manager-data:/data
+    networks:
+      - default
+      - p0rt1on-net
     depends_on:
       - minio
+
+networks:
+  # The network instances join (P0RT1ON_NETWORK). Created out-of-band:
+  #   docker network create p0rt1on-net
+  p0rt1on-net:
+    external: true
 
 volumes:
   minio-data:

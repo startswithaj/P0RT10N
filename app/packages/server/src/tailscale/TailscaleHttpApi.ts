@@ -138,7 +138,13 @@ export class TailscaleHttpApi implements TailscaleApi {
   }
 
   async revokeAuthKey(keyId: string): Promise<void> {
-    await this.request("DELETE", `/tailnet/${this.tn()}/keys/${keyId}`);
+    try {
+      await this.request("DELETE", `/tailnet/${this.tn()}/keys/${keyId}`);
+    } catch (err) {
+      // Already revoked/expired is success (teardown idempotency house rule).
+      if (err instanceof ServiceError && /\(404\)/.test(err.message)) return;
+      throw err;
+    }
   }
 
   async nodesByTag(tag: string): Promise<TailnetNode[]> {

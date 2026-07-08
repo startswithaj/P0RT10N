@@ -2,15 +2,18 @@ import type { LockMode } from "@p0rt1on/shared/domain";
 
 // ============================================================================
 // `mc` (MinIO Client) admin wrapper — the only place that shells out to mc.
-// Every method targets one instance by its configured `alias`. Root creds are
-// set out-of-band (`mc alias set <alias> …` from a mounted secret at boot), so
-// this layer references the alias only and never holds or persists a secret —
-// keeping the no-secrets-in-DB / zero-knowledge invariants.
+// Every method targets one instance by `alias`. Root creds are derived from
+// the master key per call and ride a `MC_HOST_<alias>` env var (never argv,
+// never `~/.mc` state, never persisted) — keeping the no-secrets-in-DB /
+// zero-knowledge invariants and hiding secrets from host `ps`.
 // ============================================================================
 
-/** A configured mc alias pointing at one MinIO instance (root creds out-of-band). */
+/** One MinIO instance as an mc target (root creds derived per call). */
 export interface McTarget {
+  /** = the instance's tailnet hostname; also the root-cred derivation input. */
   alias: string;
+  /** Host-published admin-plane port (composes the MC_HOST endpoint). */
+  minioPort: number;
 }
 
 /** Result of `mc du` on a bucket. */
@@ -124,15 +127,14 @@ export interface TraceEvent {
   callStats?: { rx: number; tx: number; duration: string };
 }
 
-/** Builds an McClient for a given instance alias. */
+/** Builds an McClient for a given instance target (derives root creds itself). */
 export interface McClientFactory {
   forInstance(target: McTarget): McClient;
 
   /**
-   * Configure the `mc` alias for an instance (`mc alias set`), pointing at its
-   * MinIO over the admin plane (docker network) with the root creds. Called once
-   * when an instance's container is first created; subsequent `forInstance`
-   * clients reuse the alias.
+   * The admin-plane MinIO endpoint for an instance — the ONE place it is
+   * composed (provisioning, smoke test, du, and webhook config all consume
+   * it). Addressing-mode aware; see runtime/adminEndpoint.ts.
    */
-  setAlias(alias: string, endpoint: string, cred: S3Credential): Promise<void>;
+  adminEndpoint(target: McTarget): string;
 }
