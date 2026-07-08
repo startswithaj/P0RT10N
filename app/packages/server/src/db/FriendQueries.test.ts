@@ -109,4 +109,24 @@ describe("FriendQueries", () => {
   it("detail: returns null for an unknown friend", async () => {
     expect(await queries.detail(999)).toBeNull();
   });
+
+  it("pruneUsage deletes only samples older than the retention cutoff", async () => {
+    const res = await addFriend("alice");
+    // NOW is 2026-06-29; the 90-day cutoff falls on 2026-03-31.
+    seedUsage(database.db, res.friendId, 100, 1, "2026-03-01T00:00:00Z"); // stale
+    seedUsage(database.db, res.friendId, 200, 2, "2026-06-01T00:00:00Z"); // kept
+    seedUsage(database.db, res.friendId, 300, 3, "2026-06-29T09:00:00Z"); // kept
+
+    expect(await queries.pruneUsage()).toBe(1);
+
+    const remaining = database.driver
+      .prepare("SELECT checked_at c FROM usage ORDER BY checked_at").all();
+    expect(remaining.map((r) => r.c)).toEqual([
+      "2026-06-01T00:00:00Z",
+      "2026-06-29T09:00:00Z",
+    ]);
+    // The latest sample still surfaces on the dashboard.
+    const list = await queries.list();
+    expect(list[0].usage.bytesUsed).toBe(300);
+  });
 });

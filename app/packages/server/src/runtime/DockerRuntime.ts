@@ -10,6 +10,7 @@ import type {
 import { containerNames } from "./names.ts";
 import type { CommandRunner } from "../lib/CommandRunner.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
+import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
 // ============================================================================
 // ContainerRuntime over the `docker` (or compatible) CLI. Each instance is ONE
@@ -107,14 +108,14 @@ export class DockerRuntime implements ContainerRuntime {
       "host.docker.internal:host-gateway",
       "-p",
       `127.0.0.1:${spec.minioPort}:${spec.minioPort}`,
-      // One -v per data volume, mounted at /data/d1..dN (erasure drives).
-      ...spec.dataVolumes.flatMap((vol, i) => ["-v", `${vol}:/data/d${i + 1}`]),
+      "-v",
+      `${spec.dataVolume}:/data`,
       "-v",
       `${spec.stateVolume}:/var/lib/tailscale`,
+      // The env-file also carries TAILSCALE_AUTHKEY — an enrollment credential
+      // must never ride the argv (visible to every process via `ps`).
       "--env-file",
       spec.rootCredSecretRef,
-      "-e",
-      `TAILSCALE_AUTHKEY=${spec.authKey}`,
       "-e",
       `TAILSCALE_HOSTNAME=${spec.tsHostname}`,
       "-e",
@@ -267,15 +268,24 @@ export class DockerRuntime implements ContainerRuntime {
     return { state: mapState(status ?? ""), id: id ?? "" };
   }
 
-  /** Run a docker subcommand; throw on non-zero exit. Returns stdout. */
-  private async checked(args: string[]): Promise<string> {
+  /**
+   * Run a docker subcommand; throw on non-zero exit. Returns stdout.
+   * Same redaction rules as McShellClient.exec (lib/redact.ts): declared
+   * `secrets` are masked and argv after `--` is never interpolated — no
+   * docker failure can put a secret into an error/log.
+   */
+  private async checked(
+    args: string[],
+    secrets: string[] = [],
+  ): Promise<string> {
     const res = await this.runner.run(this.bin, args);
     if (res.code !== 0) {
+      const raw = `${this.bin} ${safeArgs(args)} failed (${res.code}): ${
+        res.stderr.trim() || res.stdout.trim()
+      }`;
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        `${this.bin} ${args.join(" ")} failed (${res.code}): ${
-          res.stderr.trim() || res.stdout.trim()
-        }`,
+        maskSecrets(raw, secrets),
       );
     }
     return res.stdout;
@@ -332,8 +342,11 @@ export class DockerInstanceRuntime implements InstanceRuntime {
       removeVolume: opts.removeVolumes,
     });
     if (opts.removeVolumes) {
+      // Legacy 4-volume names included so pre-SNSD instances reap fully;
+      // removeVolumes ignores absent names.
       await this.runtime.removeVolumes([
-        ...names.dataVolumes,
+        names.dataVolume,
+        ...names.legacyDataVolumes,
         names.stateVolume,
       ]);
     }

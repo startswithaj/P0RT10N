@@ -38,15 +38,11 @@ describe("DockerRuntime.ensureInstance", () => {
       "-p",
       "127.0.0.1:9100:9100",
       "-v",
-      "p0rt1on-data-alice-1:/data/d1",
-      "-v",
-      "p0rt1on-data-alice-2:/data/d2",
+      "p0rt1on-data-alice:/data",
       "-v",
       "p0rt1on-tsstate-alice:/var/lib/tailscale",
       "--env-file",
       "/run/secrets/minio-alice.env",
-      "-e",
-      "TAILSCALE_AUTHKEY=tskey-abc",
       "-e",
       "TAILSCALE_HOSTNAME=alice",
       "-e",
@@ -57,6 +53,25 @@ describe("DockerRuntime.ensureInstance", () => {
     ]);
     // MinIO is published to host loopback so the manager reaches it for admin.
     expect(run?.args).toContain("127.0.0.1:9100:9100");
+  });
+
+  it("never puts the auth key on the docker argv, and a failed run can't leak it", async () => {
+    const cmds: RecordedCommand[] = [];
+    await new DockerRuntime(fakeRunner(cmds, absentInspect))
+      .ensureInstance(INSTANCE);
+    // The key travels only in the env-file named by rootCredSecretRef.
+    const run = cmds.find((c) => c.args[0] === "run");
+    expect(run?.args.some((a) => a.includes("AUTHKEY"))).toBe(false);
+
+    const failing = (args: string[]) =>
+      args[0] === "inspect"
+        ? { code: 1, stdout: "", stderr: "no such object" }
+        : { code: 125, stdout: "", stderr: "docker: cannot start" };
+    const err = await new DockerRuntime(fakeRunner([], failing))
+      .ensureInstance(INSTANCE)
+      .then(() => null, (e: Error) => e.message);
+    expect(err).toContain("docker run");
+    expect(err).not.toContain("tskey");
   });
 
   it("adopts a running container without starting a second", async () => {
@@ -285,8 +300,11 @@ describe("DockerInstanceRuntime", () => {
     expect(calls).toEqual([
       "stop:p0rt1on-instance-alice",
       "remove:p0rt1on-instance-alice:true",
-      "removeVolumes:p0rt1on-data-alice-1,p0rt1on-data-alice-2," +
-      "p0rt1on-data-alice-3,p0rt1on-data-alice-4,p0rt1on-tsstate-alice",
+      // Current single volume + the legacy 4-volume names (pre-SNSD
+      // instances) + state — removeVolumes ignores whichever are absent.
+      "removeVolumes:p0rt1on-data-alice,p0rt1on-data-alice-1," +
+      "p0rt1on-data-alice-2,p0rt1on-data-alice-3,p0rt1on-data-alice-4," +
+      "p0rt1on-tsstate-alice",
     ]);
   });
 });

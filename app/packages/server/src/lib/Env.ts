@@ -15,8 +15,31 @@ export interface EnvSource {
 const denoSource: EnvSource = { get: (k) => Deno.env.get(k) };
 const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
+/**
+ * Vars the app cannot run without, validated at construction. Master key:
+ * every instance root credential (and the audit token) derives from it.
+ * Tailscale OAuth secret: every add/suspend/offboard calls the API — no
+ * stub, no fallback; a manager without it could only fail later and worse.
+ */
+const REQUIRED_VARS = [
+  "P0RT1ON_MASTER_KEY",
+  "TAILSCALE_OAUTH_CLIENT_SECRET",
+] as const;
+
 export class Env {
-  constructor(private readonly src: EnvSource = denoSource) {}
+  constructor(private readonly src: EnvSource = denoSource) {
+    const missing = REQUIRED_VARS.filter((k) => this.#opt(k) === undefined);
+    if (missing.length > 0) {
+      throw new Error(`${missing.join(", ")} is not set`);
+    }
+  }
+
+  /** A REQUIRED_VARS value — the constructor guarantees it exists. */
+  #required(key: string): string {
+    const v = this.#opt(key);
+    if (v === undefined) throw new Error(`${key} is not set`);
+    return v;
+  }
 
   #str(key: string, fallback: string): string {
     const v = this.src.get(key);
@@ -24,7 +47,14 @@ export class Env {
   }
   #num(key: string, fallback: number): number {
     const v = this.src.get(key);
-    return v && v.length > 0 ? Number(v) : fallback;
+    if (!v || v.length === 0) return fallback;
+    const n = Number(v);
+    // Fail loudly at boot — a NaN here surfaces later as an unrelated crash
+    // (e.g. MINIO_PORT_MIN=abc reads as "no free port" on every add).
+    if (!Number.isFinite(n)) {
+      throw new Error(`${key} must be a number, got "${v}"`);
+    }
+    return n;
   }
   #opt(key: string): string | undefined {
     const v = this.src.get(key);
@@ -56,27 +86,18 @@ export class Env {
 
   // ---- secrets ----
   /**
-   * Master key all instance root creds derive from. REQUIRED — throws on boot if
-   * unset, because a missing/insecure key silently breaks admin access to every
-   * instance. Set it (K8s secret / mounted file) and never lose or change it.
+   * Master key all instance root creds (and the audit token) derive from.
+   * Keep it stable + backed up — losing or changing it loses admin access
+   * to every instance.
    */
-  requireMasterKey(): string {
-    const key = this.#opt("P0RT1ON_MASTER_KEY");
-    if (!key) {
-      throw new Error(
-        "P0RT1ON_MASTER_KEY is required: every instance's MinIO root credential " +
-          "is derived from it. Set it (K8s secret / mounted file) and keep it " +
-          "stable + backed up — losing or changing it loses admin access to all " +
-          "instances.",
-      );
-    }
-    return key;
+  get masterKey(): string {
+    return this.#required("P0RT1ON_MASTER_KEY");
   }
 
   // ---- Tailscale ----
-  /** OAuth client secret; undefined ⇒ run with the stub. */
-  get tailscaleOauthClientSecret(): string | undefined {
-    return this.#opt("TAILSCALE_OAUTH_CLIENT_SECRET");
+  /** OAuth client secret for the Tailscale API. */
+  get tailscaleOauthClientSecret(): string {
+    return this.#required("TAILSCALE_OAUTH_CLIENT_SECRET");
   }
   get tagOwner(): string | undefined {
     return this.#opt("TAILSCALE_TAG_OWNER");

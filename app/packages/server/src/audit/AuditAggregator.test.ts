@@ -80,6 +80,62 @@ describe("AuditAggregator", () => {
     expect(act.requestsByOp.PutObject).toBe(1);
   });
 
+  it("counts ops under their raw MinIO name", async () => {
+    const res = await seed("alice");
+    await agg().ingest({
+      bucket: "alice",
+      op: "CompleteMultipartUpload",
+      statusCode: 200,
+      rx: 0,
+      tx: 0,
+      time: "2026-06-30T10:00:00Z",
+    });
+
+    const act = await queries.activityFor(res.friendId);
+    expect(act.requestsByOp.CompleteMultipartUpload).toBe(1);
+    expect(act.lastOp).toBe("CompleteMultipartUpload");
+  });
+
+  it("counts 401 as denied", async () => {
+    const res = await seed("alice");
+    await agg().ingest({
+      bucket: "alice",
+      op: "GetObject",
+      statusCode: 401,
+      rx: 0,
+      tx: 0,
+      time: "2026-06-30T10:00:00Z",
+    });
+
+    const act = await queries.activityFor(res.friendId);
+    expect(act.deniedCount).toBe(1);
+  });
+
+  it("lastRequestAt is monotonic under out-of-order events", async () => {
+    const res = await seed("alice");
+    const newer = "2026-06-30T10:05:00Z";
+    await agg().ingest({
+      bucket: "alice",
+      op: "PutObject",
+      statusCode: 200,
+      rx: 0,
+      tx: 0,
+      time: newer,
+    });
+    // A back-dated event arrives after the newer one.
+    await agg().ingest({
+      bucket: "alice",
+      op: "GetObject",
+      statusCode: 200,
+      rx: 0,
+      tx: 0,
+      time: "2026-06-30T10:00:00Z",
+    });
+
+    const act = await queries.activityFor(res.friendId);
+    expect(act.lastRequestAt).toBe(newer);
+  });
+
   it("ignores unknown buckets and unparseable payloads", async () => {
     await agg().ingest({
       bucket: "ghost",

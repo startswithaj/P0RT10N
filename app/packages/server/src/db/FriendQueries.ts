@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt, max } from "drizzle-orm";
 import type {
   ActivityView,
   FriendDetail,
@@ -193,15 +193,25 @@ export class FriendQueries {
     }).from(instances).all();
   }
 
-  /** Map of friendId → newest usage sample (one pass, ascending then overwrite). */
+  /** Map of friendId → newest usage sample, computed in SQL (O(friends), not
+   * O(history) — the usage table is append-only and grows unboundedly). */
   private latestUsageByFriend(): Map<number, UsageSample> {
+    const latest = this.db.select({
+      friendId: usage.friendId,
+      checkedAt: max(usage.checkedAt).as("latest_checked_at"),
+    }).from(usage).groupBy(usage.friendId).as("latest");
     const rows = this.db.select({
       friendId: usage.friendId,
       bytesUsed: usage.bytesUsed,
       objectCount: usage.objectCount,
       checkedAt: usage.checkedAt,
-    }).from(usage).orderBy(usage.checkedAt).all();
-    // Ascending order means the last write for each key wins (= newest).
+    }).from(usage).innerJoin(
+      latest,
+      and(
+        eq(usage.friendId, latest.friendId),
+        eq(usage.checkedAt, latest.checkedAt),
+      ),
+    ).all();
     return new Map(
       rows.map((r) => [r.friendId, {
         bytesUsed: r.bytesUsed,
@@ -210,7 +220,21 @@ export class FriendQueries {
       }]),
     );
   }
+
+  /** Delete usage samples older than the retention cutoff (bounded work: one
+   * DELETE). Piggybacks on the periodic sweep. Returns rows deleted. */
+  // deno-lint-ignore require-await
+  async pruneUsage(): Promise<number> {
+    const cutoff = new Date(
+      new Date(this.now()).getTime() - USAGE_RETENTION_DAYS * 24 * 3_600_000,
+    ).toISOString();
+    return this.db.delete(usage).where(lt(usage.checkedAt, cutoff)).run()
+      .changes;
+  }
 }
+
+/** Days of usage-sample history kept for the history screen. */
+export const USAGE_RETENTION_DAYS = 90;
 
 /** Build a UsageView from a sample (or zeros) against the friend's quota. */
 function usageView(

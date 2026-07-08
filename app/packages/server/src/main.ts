@@ -4,6 +4,7 @@ import { ConsoleLogger } from "./lib/ConsoleLogger.ts";
 import { CryptoKeyGen } from "./provisioning/CryptoKeyGen.ts";
 import { Env } from "./lib/Env.ts";
 import { AuditAggregator } from "./audit/AuditAggregator.ts";
+import { FriendQueries } from "./db/FriendQueries.ts";
 import { buildApp } from "./app.ts";
 import { runBoot } from "./boot/boot.ts";
 import { startServer } from "./server.ts";
@@ -14,21 +15,25 @@ import { startServer } from "./server.ts";
 // design — the Deno.serve glue isn't unit-tested; app.ts wiring and the HTTP
 // path have their own tests.
 
-const env = new Env();
+const env = new Env(); // validates required vars — refuses to boot without them
 const logger = new ConsoleLogger({ level: env.logLevel });
 logger.info("p0rt1on starting", { level: env.logLevel, pid: Deno.pid });
 
 logger.debug("opening database", { dbPath: env.dbPath });
 const database = openDatabase(env.dbPath);
 
-const app = buildApp(database, env, logger); // throws if master key unset
+const app = buildApp(database, env, logger);
 const context = app.context;
 const aggregator = new AuditAggregator(database.db, logger);
 
+const queries = new FriendQueries(database.db);
 const sweep = () =>
-  context.provisioningService.sweepFailed().catch((err) =>
-    logger.error("cleanup sweep failed", { error: String(err) })
-  );
+  context.provisioningService.sweepFailed()
+    // Same cadence: cap the append-only usage-sample history.
+    .then(() => queries.pruneUsage())
+    .catch((err) =>
+      logger.error("cleanup sweep failed", { error: String(err) })
+    );
 
 await runBoot({
   migrate: () => runMigrations(database.driver, logger),
@@ -53,7 +58,7 @@ await runBoot({
       audit: {
         // Derived from the master key — same value buildApp wires into
         // setAuditWebhook, so instances and listener always agree.
-        token: new CryptoKeyGen(env.requireMasterKey()).auditWebhookToken(),
+        token: new CryptoKeyGen(env.masterKey).auditWebhookToken(),
         onEvent: (raw) => aggregator.ingestRaw(raw),
       },
       onListen: ({ port }) =>

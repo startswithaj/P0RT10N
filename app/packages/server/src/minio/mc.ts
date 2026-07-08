@@ -74,6 +74,9 @@ export interface McClient {
   putBucketScopedPolicy(policyName: string, bucket: string): Promise<void>;
   attachPolicy(accessKeyId: string, policyName: string): Promise<void>;
 
+  /** `mc admin policy rm` — offboard; "already absent" is success. */
+  removePolicy(policyName: string): Promise<void>;
+
   /** `mc admin user disable/enable` — suspend / resume without deleting. */
   disableUser(accessKeyId: string): Promise<void>;
   enableUser(accessKeyId: string): Promise<void>;

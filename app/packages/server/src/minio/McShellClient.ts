@@ -9,6 +9,7 @@ import type {
 import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import type { LockMode } from "@p0rt1on/shared/domain";
 import { NotImplementedError, ServiceError } from "../lib/ServiceError.ts";
+import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
 // ============================================================================
 // Real McClient: shells out to `mc` for one instance (by alias). Root creds are
@@ -77,17 +78,18 @@ export class McShellClient implements McClient {
   /**
    * Run an mc subcommand; throw on non-zero exit with the captured stderr.
    * `redact` values are masked out of the error message (argv echo AND mc's
-   * own output can both contain them) — secrets never reach logs/UI.
+   * own output can both contain them), and argv after `--` is structurally
+   * omitted (see lib/redact.ts) — secrets never reach logs/UI.
    */
   private async exec(args: string[], redact: string[] = []): Promise<string> {
     const res = await this.runner.run(this.mcBin, args);
     if (res.code !== 0) {
-      const raw = `mc ${args.join(" ")} failed (${res.code}): ${
+      const raw = `mc ${safeArgs(args)} failed (${res.code}): ${
         res.stderr.trim() || res.stdout.trim()
       }`;
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        redact.reduce((m, r) => m.replaceAll(r, "«redacted»"), raw),
+        maskSecrets(raw, redact),
       );
     }
     return res.stdout;
@@ -160,7 +162,7 @@ export class McShellClient implements McClient {
       this.target.alias,
       cred.accessKeyId,
       cred.secretKey,
-    ]).then(() => {});
+    ], [cred.secretKey]).then(() => {});
   }
 
   async putBucketScopedPolicy(
@@ -192,6 +194,13 @@ export class McShellClient implements McClient {
       "--user",
       accessKeyId,
     ]).then(() => {});
+  }
+
+  removePolicy(policyName: string): Promise<void> {
+    return this.execRemove(
+      ["admin", "policy", "rm", this.target.alias, policyName],
+      /does not exist/i,
+    );
   }
 
   disableUser(accessKeyId: string): Promise<void> {
@@ -286,11 +295,16 @@ export class McShellClientFactory implements McClientFactory {
       cred.secretKey,
     ]);
     if (res.code !== 0) {
+      // The message already omits argv; masking covers mc echoing the secret
+      // in its own stderr, and documents the declaration for future refactors.
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        `mc alias set ${alias} failed (${res.code}): ${
-          res.stderr.trim() || res.stdout.trim()
-        }`,
+        maskSecrets(
+          `mc alias set ${alias} failed (${res.code}): ${
+            res.stderr.trim() || res.stdout.trim()
+          }`,
+          [cred.secretKey],
+        ),
       );
     }
   }

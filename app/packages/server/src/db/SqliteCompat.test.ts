@@ -60,4 +60,18 @@ describe("CompatDatabase", () => {
     expect(() => bad.deferred(null)).toThrow("boom");
     expect(db.prepare("SELECT COUNT(*) c FROM t").get()?.c).toBe(0);
   });
+
+  it("opens with WAL and busy_timeout set", () => {
+    // WAL needs a file-backed DB (:memory: reports journal_mode=memory).
+    const dir = Deno.makeTempDirSync();
+    const fileDb = new CompatDatabase(`${dir}/t.db`);
+    try {
+      expect(fileDb.prepare("PRAGMA journal_mode").get()?.journal_mode)
+        .toBe("wal");
+      expect(fileDb.prepare("PRAGMA busy_timeout").get()?.timeout).toBe(5000);
+    } finally {
+      fileDb.close();
+      Deno.removeSync(dir, { recursive: true });
+    }
+  });
 });

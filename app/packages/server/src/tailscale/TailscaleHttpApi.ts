@@ -60,6 +60,30 @@ function sameSrc(grant: AclGrant, tag: string): boolean {
   return grant.src.length === 1 && grant.src[0] === tag;
 }
 
+function sameList(a: string[] = [], b: string[] = []): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** Full semantic match (src + dst + ip) — a host-only match would let a
+ * friend whose endpoint changed keep the stale grant AND gain a new one. */
+function matchesGrant(g: AclGrant, want: AclGrant): boolean {
+  return sameList(g.src, want.src) && sameList(g.dst, want.dst) &&
+    sameList(g.ip, want.ip);
+}
+
+/** Bounded attempts for the ETag compare-and-swap on policy writes. */
+const POLICY_CAS_ATTEMPTS = 3;
+
+/** HTTP status → ServiceError code. 412 = ETag mismatch on a policy write
+ * (concurrent edit) → CONFLICT, which updatePolicy treats as retryable. */
+function codeForStatus(
+  status: number,
+): "FORBIDDEN" | "CONFLICT" | "INTERNAL_SERVER_ERROR" {
+  if (status === 403) return "FORBIDDEN";
+  if (status === 412) return "CONFLICT";
+  return "INTERNAL_SERVER_ERROR";
+}
+
 /**
  * Split `host:port` for a grant. In Tailscale's grants model `dst` is a bare
  * hostname (a colon is rejected) and the port lives in `ip` as `proto:port`.
@@ -145,28 +169,33 @@ export class TailscaleHttpApi implements TailscaleApi {
     await this.request("DELETE", `/device/${nodeId}`);
   }
 
-  /** Grant `tag` access to ONLY `endpointHostPort`; own the tag. Idempotent. */
+  /** Grant `tag` access to ONLY `endpointHostPort`; own the tag. Idempotent.
+   * A stale grant for the same friend (endpoint changed) is replaced, not
+   * left to accumulate beside the new one. */
   async ensureFriendAcl(tag: string, endpointHostPort: string): Promise<void> {
     try {
       const { host, port } = splitHostPort(endpointHostPort);
-      const { policy, etag } = await this.getPolicy();
-      const grants = policy.grants ?? [];
-      const hasGrant = grants.some((g) =>
-        sameSrc(g, tag) && (g.dst ?? []).includes(host)
-      );
-      const hasOwner = Boolean(policy.tagOwners?.[tag]);
-      if (hasGrant && hasOwner) return; // already in place
-      const next: AclPolicy = {
-        ...policy,
-        tagOwners: {
-          ...policy.tagOwners,
-          [tag]: policy.tagOwners?.[tag] ?? [this.tagOwner()],
-        },
-        grants: hasGrant
-          ? grants
-          : [...grants, { src: [tag], dst: [host], ip: [`tcp:${port}`] }],
+      const desired: AclGrant = {
+        src: [tag],
+        dst: [host],
+        ip: [`tcp:${port}`],
       };
-      await this.setPolicy(next, etag);
+      await this.updatePolicy((policy) => {
+        const grants = policy.grants ?? [];
+        const hasGrant = grants.some((g) => matchesGrant(g, desired));
+        const hasOwner = Boolean(policy.tagOwners?.[tag]);
+        if (hasGrant && hasOwner) return null; // already in place
+        return {
+          ...policy,
+          tagOwners: {
+            ...policy.tagOwners,
+            [tag]: policy.tagOwners?.[tag] ?? [this.tagOwner()],
+          },
+          grants: hasGrant
+            ? grants
+            : [...grants.filter((g) => !sameSrc(g, tag)), desired],
+        };
+      });
     } catch (err) {
       // No policy_file write scope → tell the admin exactly what to paste.
       if (err instanceof ServiceError && err.code === "FORBIDDEN") {
@@ -180,11 +209,12 @@ export class TailscaleHttpApi implements TailscaleApi {
 
   /** Drop the friend's grant + tag ownership (offboard). Idempotent. */
   async removeFriendAcl(tag: string): Promise<void> {
-    const { policy, etag } = await this.getPolicy();
-    const grants = (policy.grants ?? []).filter((g) => !sameSrc(g, tag));
-    const tagOwners = { ...policy.tagOwners };
-    delete tagOwners[tag];
-    await this.setPolicy({ ...policy, grants, tagOwners }, etag);
+    await this.updatePolicy((policy) => {
+      const grants = (policy.grants ?? []).filter((g) => !sameSrc(g, tag));
+      const tagOwners = { ...policy.tagOwners };
+      delete tagOwners[tag];
+      return { ...policy, grants, tagOwners };
+    });
   }
 
   // ---- helpers ----
@@ -197,6 +227,32 @@ export class TailscaleHttpApi implements TailscaleApi {
 
   private tagOwner(): string {
     return this.config.tagOwner ?? "autogroup:admin";
+  }
+
+  /**
+   * Read-modify-write on the policy, guarded by the ETag. On 412 (someone
+   * else edited the policy between our GET and POST) re-fetch, re-apply the
+   * mutation, and retry — bounded, then the conflict surfaces as-is.
+   * `mutate` returning null means "nothing to change" (no POST).
+   */
+  private async updatePolicy(
+    mutate: (policy: AclPolicy) => AclPolicy | null,
+    attemptsLeft = POLICY_CAS_ATTEMPTS,
+  ): Promise<void> {
+    const { policy, etag } = await this.getPolicy();
+    const next = mutate(policy);
+    if (next === null) return;
+    try {
+      await this.setPolicy(next, etag);
+    } catch (err) {
+      if (
+        err instanceof ServiceError && err.code === "CONFLICT" &&
+        attemptsLeft > 1
+      ) {
+        return this.updatePolicy(mutate, attemptsLeft - 1);
+      }
+      throw err;
+    }
   }
 
   /** GET the policy as JSON plus its ETag (for optimistic concurrency). */
@@ -238,7 +294,7 @@ export class TailscaleHttpApi implements TailscaleApi {
     if (res.ok) return;
     const text = await res.text().catch(() => "");
     throw new ServiceError(
-      res.status === 403 ? "FORBIDDEN" : "INTERNAL_SERVER_ERROR",
+      codeForStatus(res.status),
       `tailscale ${method} ${path} failed (${res.status}): ${text}`,
     );
   }

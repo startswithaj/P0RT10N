@@ -312,16 +312,19 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const serveKey = await this.tailscale.mintAuthKey({
       tag: this.config.serveNodeTag,
     });
-    // MinIO root creds: generated, written to an env-file for `docker run`
-    // (baked into the container), removed after, then used to configure the mc
-    // alias so the manager can admin the instance over the docker network.
+    // MinIO root creds + the serve auth key: written to an env-file for
+    // `docker run` (baked into the container), removed after. The auth key
+    // rides the env-file too — never the docker argv (host-visible via ps).
+    // The root creds are then used to configure the mc alias so the manager
+    // can admin the instance over the docker network.
     const rootCred = this.keyGen.rootCredentialFor(reservation.tsHostname);
     const envFile = await this.tempFiles.write(
       `MINIO_ROOT_USER=${rootCred.accessKeyId}\n` +
-        `MINIO_ROOT_PASSWORD=${rootCred.secretKey}\n`,
+        `MINIO_ROOT_PASSWORD=${rootCred.secretKey}\n` +
+        `TAILSCALE_AUTHKEY=${serveKey.key}\n`,
     );
     try {
-      const spec = this.specFor(reservation, serveKey.key, envFile);
+      const spec = this.specFor(reservation, envFile);
       log.debug("starting instance container", {
         container: spec.name,
         minioPort: spec.minioPort,
@@ -437,6 +440,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const mc = this.mc.forInstance({ alias: ctx.alias });
     yield { type: "step", step: "storage" };
     if (ctx.s3AccessKeyId) await mc.removeUser(ctx.s3AccessKeyId);
+    // The bucket-scoped IAM policy (named after the bucket) would otherwise
+    // live in MinIO forever; absent is success.
+    await mc.removePolicy(ctx.bucket);
     await mc.removeBucket(ctx.bucket); // force; deletes all versions
     yield { type: "step", step: "nodes" };
     await this.revokeFriendNodes(ctx.nodeTag);
@@ -513,6 +519,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const mc = this.mc.forInstance({ alias: ctx.alias });
     const ak = ctx.s3AccessKeyId;
     if (ak) await this.attempt(rlog, "removeUser", () => mc.removeUser(ak));
+    await this.attempt(rlog, "removePolicy", () => mc.removePolicy(ctx.bucket));
     await this.attempt(rlog, "removeBucket", () => mc.removeBucket(ctx.bucket));
     await this.attempt(
       rlog,
@@ -632,7 +639,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   private specFor(
     reservation: InstanceReservation,
-    serveAuthKey: string,
     rootCredSecretRef: string,
   ): InstanceSpec {
     const names = containerNames(reservation.tsHostname);
@@ -641,9 +647,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
       image: this.config.instanceImage,
       tsHostname: reservation.tsHostname,
       tag: this.config.serveNodeTag,
-      authKey: serveAuthKey,
       minioPort: reservation.hostPort,
-      dataVolumes: names.dataVolumes,
+      dataVolume: names.dataVolume,
       stateVolume: names.stateVolume,
       rootCredSecretRef,
       network: this.config.network,

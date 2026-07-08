@@ -222,6 +222,77 @@ describe("TailscaleHttpApi", () => {
     expect(reqs.map((r) => r.method)).toEqual(["GET"]); // no POST
   });
 
+  it("ensureFriendAcl replaces a stale grant when the endpoint changed", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, (req) => {
+      if (req.method !== "GET") return { status: 200 };
+      return {
+        json: {
+          // Same friend, but the instance moved: old port 443 → now 9443.
+          grants: [{
+            src: ["tag:p0rt1on-friend-alice"],
+            dst: ["alice.example.ts.net"],
+            ip: ["tcp:443"],
+          }],
+          tagOwners: { "tag:p0rt1on-friend-alice": ["autogroup:admin"] },
+        },
+        headers: { ETag: "v1" },
+      };
+    });
+
+    await client.ensureFriendAcl(
+      "tag:p0rt1on-friend-alice",
+      "alice.example.ts.net:9443",
+    );
+
+    const body = JSON.parse(reqs[1].body ?? "{}");
+    // Old grant gone, new one present — not both.
+    expect(body.grants).toEqual([{
+      src: ["tag:p0rt1on-friend-alice"],
+      dst: ["alice.example.ts.net"],
+      ip: ["tcp:9443"],
+    }]);
+  });
+
+  it("retries a policy write once on 412 (concurrent edit), then succeeds", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, (req) => {
+      if (req.method === "GET") {
+        return { json: { grants: [], tagOwners: {} }, headers: { ETag: "v1" } };
+      }
+      // First POST hits the CAS conflict; the retry (after re-GET) succeeds.
+      const priorPosts = reqs.filter((r) => r.method === "POST").length;
+      return priorPosts <= 1 ? { status: 412, json: {} } : { status: 200 };
+    });
+
+    await client.ensureFriendAcl(
+      "tag:p0rt1on-friend-alice",
+      "alice.example.ts.net:443",
+    );
+
+    expect(reqs.map((r) => r.method)).toEqual(["GET", "POST", "GET", "POST"]);
+  });
+
+  it("surfaces a persistent 412 after bounded retries", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(
+      reqs,
+      (req) =>
+        req.method === "GET"
+          ? { json: { grants: [], tagOwners: {} }, headers: { ETag: "v1" } }
+          : { status: 412, json: {} },
+    );
+
+    await expect(
+      client.ensureFriendAcl(
+        "tag:p0rt1on-friend-alice",
+        "alice.example.ts.net:443",
+      ),
+    ).rejects.toThrow("failed (412)");
+    // 3 attempts, no more.
+    expect(reqs.filter((r) => r.method === "POST")).toHaveLength(3);
+  });
+
   it("removeFriendAcl drops the friend's grant + tag ownership", async () => {
     const reqs: RecordedRequest[] = [];
     const client = api(reqs, (req) => {

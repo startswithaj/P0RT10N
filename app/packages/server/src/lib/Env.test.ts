@@ -3,15 +3,20 @@ import { expect } from "@std/expect";
 import { Env } from "./Env.ts";
 
 describe("Env", () => {
-  const env = (map: Record<string, string>) => new Env({ get: (k) => map[k] });
+  // Required vars supplied by default; construction validates them.
+  const REQUIRED = {
+    P0RT1ON_MASTER_KEY: "k",
+    TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
+  };
+  const env = (map: Record<string, string>) =>
+    new Env({ get: (k) => ({ ...REQUIRED, ...map })[k] });
 
-  it("uses defaults when nothing is set", () => {
+  it("uses defaults when nothing optional is set", () => {
     const e = env({});
     expect(e.logLevel).toBe("info");
     expect(e.port).toBe(8080);
     expect(e.bindHost).toBe("127.0.0.1");
     expect(e.dbPath).toBe("./data/p0rt1on.db");
-    expect(e.tailscaleOauthClientSecret).toBeUndefined();
 
     const c = e.provisioningConfig();
     expect(c.instanceImage).toBe("p0rt1on-instance:latest");
@@ -43,12 +48,37 @@ describe("Env", () => {
     expect(e.provisioningConfig().portRange.min).toBe(9200);
   });
 
+  it("rejects non-numeric values for numeric vars, naming the variable", () => {
+    expect(() => env({ PORT: "abc" }).port).toThrow(
+      'PORT must be a number, got "abc"',
+    );
+    expect(() => env({ MINIO_PORT_MIN: "abc" }).provisioningConfig())
+      .toThrow("MINIO_PORT_MIN");
+  });
+
   it("falls back to info for an unknown log level", () => {
     expect(env({ LOG_LEVEL: "bogus" }).logLevel).toBe("info");
   });
 
-  it("requireMasterKey throws when unset and returns it when set", () => {
-    expect(() => env({}).requireMasterKey()).toThrow("P0RT1ON_MASTER_KEY");
-    expect(env({ P0RT1ON_MASTER_KEY: "k" }).requireMasterKey()).toBe("k");
+  it("construction fails naming every missing required var", () => {
+    expect(() => new Env({ get: () => undefined })).toThrow(
+      "P0RT1ON_MASTER_KEY, TAILSCALE_OAUTH_CLIENT_SECRET is not set",
+    );
+    expect(() =>
+      new Env({
+        get: (k) => ({ P0RT1ON_MASTER_KEY: "k" } as Record<string, string>)[k],
+      })
+    ).toThrow("TAILSCALE_OAUTH_CLIENT_SECRET is not set");
+    // Empty string counts as unset.
+    expect(() =>
+      new Env({
+        get: (k) => ({ ...REQUIRED, P0RT1ON_MASTER_KEY: "" })[k],
+      })
+    ).toThrow("P0RT1ON_MASTER_KEY is not set");
+  });
+
+  it("exposes the required secrets once constructed", () => {
+    expect(env({}).masterKey).toBe("k");
+    expect(env({}).tailscaleOauthClientSecret).toBe("tok");
   });
 });

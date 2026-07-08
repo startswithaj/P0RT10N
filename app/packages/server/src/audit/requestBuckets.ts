@@ -50,12 +50,19 @@ export function bump(
   return prune(next, now);
 }
 
-/** Drop buckets whose hour is older than the window ending at `now`. */
+/**
+ * Drop buckets outside the window ending at `now` — older than the window OR
+ * future-dated (a skewed event timestamp would otherwise be counted in every
+ * 24h sum until the clock catches up to it).
+ */
 export function prune(buckets: RequestBuckets, now: string): RequestBuckets {
   const oldest = cutoff(now);
   if (oldest === null) return { ...buckets };
+  const newest = oldest + WINDOW_HOURS - 1;
   return Object.fromEntries(
-    Object.entries(buckets).filter(([hour]) => Number(hour) >= oldest),
+    Object.entries(buckets).filter(([hour]) =>
+      Number(hour) >= oldest && Number(hour) <= newest
+    ),
   );
 }
 

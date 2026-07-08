@@ -41,21 +41,20 @@ export interface InstanceDiagnostics {
 
 /**
  * Spec for one instance container (MinIO + tailscaled in a single image — see
- * `instance/`). `authKey` is the just-minted, single-use serve key (transient,
- * never persisted). `rootCredSecretRef` names a mounted env-file with the MinIO
- * root creds (path only — no secret in args, kept out of the DB). `image` is
- * pinned. The container joins `network` (the admin plane: the manager reaches
- * MinIO at `http://<name>:<minioPort>`); friends reach it over Tailscale.
+ * `instance/`). `rootCredSecretRef` names a mounted env-file carrying the
+ * MinIO root creds AND the just-minted single-use TAILSCALE_AUTHKEY (path
+ * only — no secret ever on argv or in the DB). `image` is pinned. The
+ * container joins `network` (the admin plane: the manager reaches MinIO at
+ * `http://<name>:<minioPort>`); friends reach it over Tailscale.
  */
 export interface InstanceSpec {
   name: string;
   image: string;
   tsHostname: string;
   tag: string;
-  authKey: string;
   minioPort: number;
-  /** 4 data volumes mounted at /data/d1..d4 (erasure set → object lock). */
-  dataVolumes: string[];
+  /** Single data volume mounted at /data (MinIO SNSD — lock-capable). */
+  dataVolume: string;
   stateVolume: string;
   rootCredSecretRef: string;
   network: string;

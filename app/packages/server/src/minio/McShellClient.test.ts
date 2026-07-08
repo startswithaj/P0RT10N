@@ -68,6 +68,21 @@ describe("McShellClient arg-building", () => {
     ]);
   });
 
+  it("removePolicy issues admin policy rm and tolerates an absent policy", async () => {
+    const cmds: RecordedCommand[] = [];
+    await client(cmds).removePolicy("backup");
+    expect(cmds[0].args).toEqual(["admin", "policy", "rm", "alice", "backup"]);
+
+    const respond = () => ({
+      code: 1,
+      stdout: "",
+      stderr:
+        "mc: <ERROR> Unable to remove policy. Policy `backup` does not exist.",
+    });
+    await expect(client([], respond).removePolicy("backup")).resolves
+      .toBeUndefined();
+  });
+
   it("disable/enable/removeUser issue the matching admin user verb", async () => {
     const cmds: RecordedCommand[] = [];
     const c = client(cmds);
@@ -99,6 +114,32 @@ describe("McShellClient arg-building", () => {
     expect(cmds[1].args).toEqual(
       ["admin", "service", "restart", "--json", "alice"],
     );
+  });
+
+  it("createUser failure never leaks the secret key in the error", async () => {
+    // The secret sits after `--` (structurally omitted) AND is declared for
+    // masking — the failure must be loggable without leaking it.
+    const failing = client([], () => ({
+      code: 1,
+      stdout: "",
+      stderr: "unable to add user with secret SK-s3cr3t",
+    }));
+    const err = await failing
+      .createUser({ accessKeyId: "AK", secretKey: "SK-s3cr3t" })
+      .then(() => null, (e: Error) => e.message);
+    expect(err).toContain("admin user add");
+    expect(err).not.toContain("SK-s3cr3t");
+  });
+
+  it("args after -- are omitted from errors even with no declared secrets", async () => {
+    // setAlias goes through the runner too, but exec's structural rule is the
+    // backstop: createUser's argv tail never appears in the message.
+    const failing = client([], () => ({ code: 1, stdout: "", stderr: "boom" }));
+    const err = await failing
+      .createUser({ accessKeyId: "AK-visible-id", secretKey: "SK" })
+      .then(() => null, (e: Error) => e.message);
+    expect(err).toContain("…<3 args>");
+    expect(err).not.toContain("AK-visible-id");
   });
 
   it("setAuditWebhook failure never leaks the token in the error", async () => {

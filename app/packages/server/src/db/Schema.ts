@@ -90,7 +90,7 @@ export const activity = sqliteTable("activity", {
     .primaryKey()
     .references(() => friends.id),
   requestsTotal: integer("requests_total").notNull().default(0),
-  // JSON object of S3Op -> count. `mode: "json"` makes drizzle parse/serialize
+  // JSON object of raw MinIO op name -> count. `mode: "json"` makes drizzle parse/serialize
   // automatically (reads return the object, not the raw text); the column is
   // still `text`, so SQLite's JSON operators (-> / ->> / json_each) still apply
   // and no migration changes. Raw SQL default for the text literal '{}'.

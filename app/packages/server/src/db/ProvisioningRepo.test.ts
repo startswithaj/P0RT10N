@@ -90,6 +90,23 @@ describe("DrizzleProvisioningRepo", () => {
     expect(second.hostPort).toBe(first.hostPort);
   });
 
+  it("shared: adopting an existing pool returns its STORED hostname, not config's", async () => {
+    // Pool created under the hostname "pool"...
+    await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared", "pool"),
+    );
+    // ...then SHARED_INSTANCE_NAME changes in config before carol is added.
+    const carol = await repo.reserveFriend(
+      makeAddInput("carol", "shared"),
+      namingFor("carol", "shared", "renamed-pool"),
+    );
+
+    expect(carol.instanceExisted).toBe(true);
+    expect(carol.tsHostname).toBe("pool"); // the endpoint that actually exists
+    expect(carol.alias).toBe("pool");
+  });
+
   it("records the access key ID and activates", async () => {
     const res = await repo.reserveFriend(
       makeAddInput("alice", "dedicated"),
@@ -286,6 +303,43 @@ describe("DrizzleProvisioningRepo", () => {
     expect((await repo.failedFriendIds()).length).toBe(2);
     // ...and repeating it is a no-op (already failed).
     expect(await repo.failInstanceMissing(bob.instanceId)).toBe(0);
+  });
+
+  it("activate is atomic: a failure on the instance update rolls back the friend update", async () => {
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    // Inject a failure between the two statements: the friend update runs
+    // first, then the instance update trips this trigger.
+    database.driver.exec(
+      `CREATE TRIGGER inject_fail BEFORE UPDATE ON instances
+       BEGIN SELECT RAISE(ABORT, 'injected'); END`,
+    );
+
+    await expect(repo.activate(res.friendId, res.instanceId)).rejects
+      .toThrow("injected");
+
+    // Neither update persisted — the friend is still provisioning.
+    const row = database.driver.prepare("SELECT status s FROM friends").get();
+    expect(row?.s).toBe("provisioning");
+  });
+
+  it("markFailed is atomic: a failure on the instance update rolls back the friend update", async () => {
+    // A lone dedicated friend, so failFriendRow also fails the instance row.
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    database.driver.exec(
+      `CREATE TRIGGER inject_fail BEFORE UPDATE ON instances
+       BEGIN SELECT RAISE(ABORT, 'injected'); END`,
+    );
+
+    await expect(repo.markFailed(res.friendId)).rejects.toThrow("injected");
+
+    const row = database.driver.prepare("SELECT status s FROM friends").get();
+    expect(row?.s).toBe("provisioning");
   });
 
   it("deleteInstance frees the port for reuse", async () => {

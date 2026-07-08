@@ -51,17 +51,6 @@ export const LOCK_MODE_VALUES = ["GOVERNANCE", "COMPLIANCE"] as const;
 export type LockMode = (typeof LOCK_MODE_VALUES)[number];
 export const lockModeSchema = z.enum(LOCK_MODE_VALUES);
 
-/** S3 op names we bucket activity by (the audit webhook reports the raw op). */
-export const S3_OP_VALUES = [
-  "PutObject",
-  "GetObject",
-  "DeleteObject",
-  "ListObjects",
-  "HeadObject",
-  "Other",
-] as const;
-export type S3Op = (typeof S3_OP_VALUES)[number];
-
 // ---- Primitives ----
 
 /** Friend display name: also the basis for bucket + tag, so keep it tame.
@@ -207,8 +196,10 @@ export type TsKeyBundle = {
   tailscaleUpCommand: string;
 };
 
-/** Per-op request counts; serialized to JSON in the `activity.requestsByOp` column. */
-export type RequestsByOp = Partial<Record<S3Op, number>>;
+/** Request counts keyed by MinIO's raw API op name (bounded by MinIO's API
+ * surface, ~130 names); serialized to JSON in the `activity.requestsByOp`
+ * column. Any display-time grouping happens where it's rendered, not here. */
+export type RequestsByOp = Record<string, number>;
 
 // ---- View models (client-facing; joins across friend/instance/activity/usage) ----
 // Defined structurally here (not imported from the server Schema) so the client

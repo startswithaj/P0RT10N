@@ -74,6 +74,7 @@ export const TEST_CONFIG: ProvisioningConfig = {
 export function testEnv(overrides: Record<string, string> = {}): Env {
   const base: Record<string, string> = {
     P0RT1ON_MASTER_KEY: "test-master-key",
+    TAILSCALE_OAUTH_CLIENT_SECRET: "test-oauth-secret",
     ...overrides,
   };
   return new Env({ get: (k) => base[k] });
@@ -128,9 +129,8 @@ export const INSTANCE_SPEC: InstanceSpec = {
   image: "p0rt1on-instance:x",
   tsHostname: "alice",
   tag: "tag:p0rt1on-serve",
-  authKey: "tskey-abc",
   minioPort: 9100,
-  dataVolumes: ["p0rt1on-data-alice-1", "p0rt1on-data-alice-2"],
+  dataVolume: "p0rt1on-data-alice",
   stateVolume: "p0rt1on-tsstate-alice",
   rootCredSecretRef: "/run/secrets/minio-alice.env",
   network: "p0rt1on-net",
@@ -222,6 +222,7 @@ export function mockMcClient(calls: Calls): McClient {
     createUser: note("createUser"),
     putBucketScopedPolicy: note("putBucketScopedPolicy"),
     attachPolicy: note("attachPolicy"),
+    removePolicy: note("removePolicy"),
     disableUser: note("disableUser"),
     enableUser: note("enableUser"),
     removeUser: note("removeUser"),
@@ -454,6 +455,8 @@ export interface ProvisioningParts {
   smoke?: () => Promise<void>;
   nodes?: TailnetNode[];
   config?: Partial<ProvisioningConfig>;
+  /** Captures env-file contents the service writes (secret-handling tests). */
+  written?: string[];
 }
 
 /** A ProvisioningService wired to all mocks, recording into `calls`. */
@@ -472,7 +475,7 @@ export function buildProvisioningService(
       generateS3Credential: () => TEST_CRED,
       rootCredentialFor: () => TEST_CRED,
     },
-    fakeTempFiles([]),
+    fakeTempFiles(parts.written ?? []),
     {
       run: parts.smoke ?? (() => {
         calls.push("smoke:run");

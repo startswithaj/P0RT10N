@@ -43,7 +43,8 @@
     "coverage:check": "deno task test:coverage && deno task coverage:lcov && deno run --allow-read --allow-env devtools/coverage-threshold.ts",
     "coverage:check:client": "deno task test:client:coverage && deno run --allow-read --allow-env devtools/client-coverage-threshold.ts",
     "check:client": "deno run -A npm:typescript/bin/tsc --noEmit -p app/packages/client/tsconfig.json",
-    "check:all": "deno fmt && deno fmt --check && deno lint && deno task check && deno task check:client && deno task coverage:check && deno task coverage:check:client"
+    "verify": "deno fmt --check && deno lint && deno task check && deno task check:client && deno task coverage:check && deno task coverage:check:client",
+    "check:all": "deno fmt && deno task verify"
   },
   "lint": {
     "plugins": [

@@ -38,6 +38,20 @@ describe("requestBuckets", () => {
     expect(sumLast24h(b, "2026-06-30T10:00:00Z")).toBe(1);
   });
 
+  it("prune drops future-dated buckets (skewed webhook timestamps)", () => {
+    const buckets = {
+      [hourKey("2026-06-30T09:00:00Z")]: 5, // in window
+      [hourKey("2026-07-01T12:00:00Z")]: 7, // +26h in the future
+    };
+    const now = "2026-06-30T10:00:00Z";
+    expect(prune(buckets, now)).toEqual({
+      [hourKey("2026-06-30T09:00:00Z")]: 5,
+    });
+    // And a future-dated event bumped in never survives the write-path prune.
+    const b = bump({}, "2026-07-01T12:00:00Z", now);
+    expect(sumLast24h(b, now)).toBe(0);
+  });
+
   it("tolerates an unparseable clock without dropping data", () => {
     const buckets = { [hourKey("2026-06-30T10:00:00Z")]: 2 };
     expect(prune(buckets, "not-a-date")).toEqual(buckets);

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import type { RequestsByOp, S3Op } from "@p0rt1on/shared/domain";
+import type { RequestsByOp } from "@p0rt1on/shared/domain";
 import type { Db } from "../db/Database.ts";
 import { activity, friends } from "../db/Schema.ts";
 import type { Logger } from "../services/types.ts";
@@ -64,9 +64,9 @@ export class AuditAggregator {
     const existing = this.db.select().from(activity)
       .where(eq(activity.friendId, friend.id)).get();
     const byOp: RequestsByOp = { ...existing?.requestsByOp };
-    const op = event.op as S3Op;
-    byOp[op] = (byOp[op] ?? 0) + 1;
-    const denied = event.statusCode === 403 ? 1 : 0;
+    byOp[event.op] = (byOp[event.op] ?? 0) + 1;
+    // Denied = failed auth: 401 (bad/expired creds) as well as 403.
+    const denied = event.statusCode === 401 || event.statusCode === 403 ? 1 : 0;
     const now = this.now();
     // Bucket this request by its own time, then keep requests24h as a synced
     // cache of the in-window sum (reads recompute, but this stays sensible too).
@@ -82,7 +82,11 @@ export class AuditAggregator {
         requests24h: sumLast24h(requestBuckets, now),
         requestBuckets,
         requestsByOp: byOp,
-        lastRequestAt: event.time,
+        // Monotonic: an out-of-order event must not move "last seen" backwards.
+        lastRequestAt:
+          existing.lastRequestAt && existing.lastRequestAt > event.time
+            ? existing.lastRequestAt
+            : event.time,
         lastOp: event.op,
         bytesInTotal: existing.bytesInTotal + event.rx,
         bytesOutTotal: existing.bytesOutTotal + event.tx,

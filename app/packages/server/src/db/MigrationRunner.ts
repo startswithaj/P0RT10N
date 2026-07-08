@@ -1,11 +1,15 @@
 /// <reference lib="deno.ns" />
 import { readMigrationFiles } from "drizzle-orm/migrator";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DatabaseDriver } from "./driver.ts";
 import type { Logger } from "../services/types.ts";
 
-/** Path to the generated drizzle migrations folder, resolved from cwd. */
-const MIGRATIONS_FOLDER = resolve(Deno.cwd(), "drizzle");
+/** Path to the generated drizzle migrations folder at the repo root, resolved
+ * from this module (NOT cwd) so boot works no matter where the server is
+ * launched from. The Docker image copies `drizzle/` at the same relative spot. */
+const MIGRATIONS_FOLDER = fileURLToPath(
+  new URL("../../../../../drizzle", import.meta.url),
+);
 
 /**
  * Apply generated Drizzle migrations directly via @db/sqlite. Tracks applied
@@ -15,10 +19,33 @@ const MIGRATIONS_FOLDER = resolve(Deno.cwd(), "drizzle");
  * from chargeHA.)
  */
 export function runMigrations(sqlite: DatabaseDriver, logger?: Logger): void {
-  const migrations = readMigrationFiles({
-    migrationsFolder: MIGRATIONS_FOLDER,
-  });
+  applyMigrations(
+    sqlite,
+    readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER }),
+    logger,
+  );
+}
 
+/** The subset of drizzle's migration metadata the runner applies. */
+export interface MigrationEntry {
+  hash: string;
+  sql: string[];
+  folderMillis: number;
+}
+
+/**
+ * Each migration's statements AND its journal insert commit in one
+ * transaction (BEGIN IMMEDIATE — take the write lock up front at boot), so a
+ * crash or failing statement can never leave the schema half-applied with no
+ * journal row. A failure aborts the run; later migrations are not attempted.
+ * Exported separately from runMigrations so tests can apply synthetic
+ * fixtures instead of the app's real migration files.
+ */
+export function applyMigrations(
+  sqlite: DatabaseDriver,
+  migrations: MigrationEntry[],
+  logger?: Logger,
+): void {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS __drizzle_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     hash TEXT NOT NULL,
@@ -33,11 +60,36 @@ export function runMigrations(sqlite: DatabaseDriver, logger?: Logger): void {
     "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
   );
 
+  // A throw inside forEach propagates, so a failed migration aborts the run
+  // and later pending migrations are not attempted.
   migrations
     .filter((migration) => !applied.has(migration.hash))
     .forEach((migration) => {
-      migration.sql.forEach((stmt) => sqlite.exec(stmt));
-      insert.run(migration.hash, String(migration.folderMillis));
+      sqlite.exec("BEGIN IMMEDIATE");
+      try {
+        migration.sql.forEach((stmt, stmtIndex) => {
+          try {
+            sqlite.exec(stmt);
+          } catch (e) {
+            throw new Error(
+              `statement ${stmtIndex}: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+              { cause: e },
+            );
+          }
+        });
+        insert.run(migration.hash, String(migration.folderMillis));
+        sqlite.exec("COMMIT");
+      } catch (e) {
+        sqlite.exec("ROLLBACK");
+        throw new Error(
+          `Migration ${migration.hash} failed at ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+          { cause: e },
+        );
+      }
       logger?.info(`Applied migration ${migration.hash}`);
     });
 }

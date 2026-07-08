@@ -78,6 +78,12 @@ export class CompatDatabase implements DatabaseDriver {
 
   constructor(path: string) {
     this.native = new NativeDatabase(path, { int64: true });
+    // The timer-driven sweep and tRPC request handlers share this DB: WAL
+    // lets readers overlap a writer, and busy_timeout waits out short lock
+    // contention instead of failing immediately with SQLITE_BUSY.
+    // journal_mode returns a row, so it must go through the query path.
+    this.native.prepare("PRAGMA journal_mode = WAL").get();
+    this.native.exec("PRAGMA busy_timeout = 5000");
   }
 
   prepare(sql: string): DatabaseStatement {

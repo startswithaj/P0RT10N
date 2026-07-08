@@ -36,6 +36,18 @@ describe("ProvisioningService.addFriend", () => {
     expect(bundle.s3Endpoint).toBe("https://p0rt1on-alice.tailnet.ts.net");
   });
 
+  it("delivers TAILSCALE_AUTHKEY via the env-file alongside the root creds", async () => {
+    const calls: Calls = [];
+    const written: string[] = [];
+    await buildProvisioningService(calls, DEDICATED_RES, { written })
+      .addFriend(ADD_INPUT);
+
+    const envFile = written.find((w) => w.includes("MINIO_ROOT_USER="));
+    expect(envFile).toContain("MINIO_ROOT_PASSWORD=");
+    // The serve key rides the env-file, never the docker argv.
+    expect(envFile).toContain("TAILSCALE_AUTHKEY=tskey-tag:p0rt1on-serve");
+  });
+
   it("auto ACL mode edits the tailnet policy; no manual instructions", async () => {
     const calls: Calls = [];
     const bundle = await buildProvisioningService(calls, DEDICATED_RES)
@@ -148,6 +160,8 @@ describe("ProvisioningService.offboard", () => {
     }).offboard(1);
 
     expect(calls).toContain("mc:removeBucket");
+    // The bucket-scoped IAM policy must not outlive the friend.
+    expect(calls).toContain("mc:removePolicy");
     expect(calls).toContain("ts:deleteNode:n1");
     expect(calls).toContain("runtime:removeInstance");
     expect(calls).toContain("repo:deleteInstance");

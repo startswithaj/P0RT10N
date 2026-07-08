@@ -67,15 +67,20 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
 
   // deno-lint-ignore require-await
   async activate(friendId: number, instanceId: number): Promise<void> {
-    this.db.update(friends).set({ status: "active" })
-      .where(eq(friends.id, friendId)).run();
-    this.db.update(instances).set({ status: "active" })
-      .where(eq(instances.id, instanceId)).run();
+    // Two-row status flip must be atomic — a crash between the friend and
+    // instance updates leaves a state the boot sweep cannot interpret.
+    this.db.transaction((tx) => {
+      tx.update(friends).set({ status: "active" })
+        .where(eq(friends.id, friendId)).run();
+      tx.update(instances).set({ status: "active" })
+        .where(eq(instances.id, instanceId)).run();
+    });
   }
 
   // deno-lint-ignore require-await
   async markFailed(friendId: number): Promise<void> {
-    this.failFriendRow(this.db, friendId);
+    // Atomic for the same reason as activate (friend + possibly instance row).
+    this.db.transaction((tx) => this.failFriendRow(tx, friendId));
   }
 
   // deno-lint-ignore require-await
@@ -222,12 +227,16 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       ? this.resolveSharedInstance(tx, naming)
       : this.createInstance(tx, "dedicated", naming);
     const friendId = this.insertFriend(tx, input, naming, instance.instanceId);
+    // Use the instance row's PERSISTED hostname, not the config-derived one:
+    // when adopting an existing shared instance they can differ (config
+    // changed since the pool was created) and the bundle must point at the
+    // endpoint that actually exists.
     return {
       friendId,
       instanceId: instance.instanceId,
-      alias: naming.tsHostname,
+      alias: instance.tsHostname,
       hostPort: instance.hostPort,
-      tsHostname: naming.tsHostname,
+      tsHostname: instance.tsHostname,
       instanceExisted: instance.instanceExisted,
     };
   }
@@ -235,10 +244,16 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   private resolveSharedInstance(
     tx: Tx,
     naming: FriendNaming,
-  ): { instanceId: number; hostPort: number; instanceExisted: boolean } {
+  ): {
+    instanceId: number;
+    hostPort: number;
+    tsHostname: string;
+    instanceExisted: boolean;
+  } {
     const existing = tx.select({
       instanceId: instances.id,
       hostPort: instances.minioPort,
+      tsHostname: instances.tsHostname,
     }).from(instances)
       .where(and(eq(instances.kind, "shared"), ne(instances.status, "failed")))
       .get();
@@ -250,7 +265,12 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     tx: Tx,
     kind: "dedicated" | "shared",
     naming: FriendNaming,
-  ): { instanceId: number; hostPort: number; instanceExisted: boolean } {
+  ): {
+    instanceId: number;
+    hostPort: number;
+    tsHostname: string;
+    instanceExisted: boolean;
+  } {
     const hostPort = this.allocatePort(tx);
     const inserted = tx.insert(instances).values({
       kind,
@@ -258,7 +278,12 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       tsHostname: naming.tsHostname,
       tsTag: this.config.serveNodeTag,
     }).returning({ id: instances.id }).all();
-    return { instanceId: inserted[0].id, hostPort, instanceExisted: false };
+    return {
+      instanceId: inserted[0].id,
+      hostPort,
+      tsHostname: naming.tsHostname,
+      instanceExisted: false,
+    };
   }
 
   private allocatePort(tx: Tx): number {
