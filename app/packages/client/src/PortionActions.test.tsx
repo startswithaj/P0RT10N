@@ -208,6 +208,64 @@ describe("ActionDialog", () => {
       expect(await screen.findByText(/mc rb failed/)).toBeInTheDocument();
     });
 
+    it("offboard done with manual ACL cleanup shows a dismissible advisory", async () => {
+      const friend = makeFriend({ id: 7, name: "alice" });
+      const { onClose } = renderDialog({ friend, kind: "offboard" });
+      mutateOf(trpc.friends.offboardStart.mutate).mockResolvedValue({
+        jobId: "j1",
+      });
+      let handlers: { onData: (ev: unknown) => void } | undefined;
+      mutateOf(trpc.jobs.progress.subscribe).mockImplementation(
+        (_input: unknown, h: typeof handlers) => {
+          handlers = h;
+          return { unsubscribe: vi.fn() };
+        },
+      );
+
+      fireEvent.input(screen.getByRole("textbox"), {
+        target: { value: "alice" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Offboard" }));
+      await waitFor(() => expect(handlers).toBeDefined());
+
+      // The offboard is complete; the advice keeps the dialog open instead of
+      // closing it, and dismissing has no side effects beyond closing.
+      handlers?.onData({
+        type: "done",
+        bundleReady: false,
+        manualAclCleanup: 'remove the "tagOwners" entry for "tag:x"',
+      });
+      expect(await screen.findByText(/tagOwners/)).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("offboard done WITHOUT cleanup advice just closes (auto ACL mode)", async () => {
+      const friend = makeFriend({ id: 7, name: "alice" });
+      const { onClose } = renderDialog({ friend, kind: "offboard" });
+      mutateOf(trpc.friends.offboardStart.mutate).mockResolvedValue({
+        jobId: "j1",
+      });
+      let handlers: { onData: (ev: unknown) => void } | undefined;
+      mutateOf(trpc.jobs.progress.subscribe).mockImplementation(
+        (_input: unknown, h: typeof handlers) => {
+          handlers = h;
+          return { unsubscribe: vi.fn() };
+        },
+      );
+
+      fireEvent.input(screen.getByRole("textbox"), {
+        target: { value: "alice" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Offboard" }));
+      await waitFor(() => expect(handlers).toBeDefined());
+
+      handlers?.onData({ type: "done", bundleReady: false });
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    });
+
     it("does not call any mutation when the dialog is cancelled", () => {
       const friend = makeFriend();
       const { onClose } = renderDialog({ friend, kind: "rotate-s3" });

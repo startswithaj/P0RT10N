@@ -125,7 +125,10 @@ type ActionResult =
 type OffboardState =
   | { kind: "idle" }
   | { kind: "running"; step: OffboardStepKey | null }
-  | { kind: "error"; message: string; step: OffboardStepKey | null };
+  | { kind: "error"; message: string; step: OffboardStepKey | null }
+  // Manual ACL mode: teardown finished; the admin should remove the friend's
+  // policy entries by hand (advisory, dismissible — never blocking).
+  | { kind: "advice"; cleanup: string };
 
 /** Fire the mutation for an action; returns what the dialog should do next. */
 async function dispatchAction(
@@ -277,7 +280,13 @@ function subscribeOffboard(
             fail(ev.message, ev.step as OffboardStepKey | null);
           } else {
             invalidate();
-            onDone();
+            // Manual ACL mode: keep the dialog open with the cleanup advice
+            // instead of closing — the offboard itself is already complete.
+            if (ev.manualAclCleanup) {
+              setOffboard({ kind: "advice", cleanup: ev.manualAclCleanup });
+            } else {
+              onDone();
+            }
           }
         },
         // Transport-level backstop (e.g. server unreachable mid-observe).
@@ -291,6 +300,48 @@ function subscribeOffboard(
 }
 
 const OFFBOARD_LABELS = OFFBOARD_STEPS.map((s) => s.label);
+
+/**
+ * Manual ACL mode: the offboard already completed; advise which policy
+ * entries the admin should remove by hand. Dismiss just closes — no side
+ * effects, nothing depends on the cleanup being done.
+ */
+function AclCleanupBody(props: {
+  name: string;
+  cleanup: string;
+  copied: () => boolean;
+  onCopy: (v: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <>
+      <p class={desc}>
+        {props.name}{" "}
+        is offboarded. You should remove these entries from your tailnet policy
+        — the manager can't edit it in manual ACL mode:
+      </p>
+      <div class={codeWrap}>
+        <pre class={codeBlock}>{props.cleanup}</pre>
+        <IconButton
+          variant="outline"
+          size="sm"
+          class={copyPos}
+          aria-label="Copy"
+          onClick={() => props.onCopy(props.cleanup)}
+        >
+          <Show when={props.copied()} fallback={<Copy size={14} />}>
+            <Check size={14} />
+          </Show>
+        </IconButton>
+      </div>
+      <div class={actionsRow}>
+        <Button variant="outline" onClick={props.onDismiss}>
+          Dismiss
+        </Button>
+      </div>
+    </>
+  );
+}
 
 /** Live teardown checklist shown in the dialog once offboarding starts. */
 function OffboardProgressBody(props: {
@@ -459,6 +510,11 @@ function confirmOnEnter(allowed: () => boolean, confirm: () => void) {
   };
 }
 
+/** The ACL cleanup advice, when the offboard finished in manual ACL mode. */
+function aclCleanupOf(s: OffboardState): string | null {
+  return s.kind === "advice" ? s.cleanup : null;
+}
+
 /** The dialog's inner body: confirm form, or offboard progress, or a TS key. */
 function DialogBody(props: {
   p: Pending;
@@ -503,6 +559,17 @@ function DialogBody(props: {
           />
         }
       >
+        <Match when={aclCleanupOf(props.offboard())}>
+          {(cleanup) => (
+            <AclCleanupBody
+              name={props.p.friend.name}
+              cleanup={cleanup()}
+              copied={props.copied}
+              onCopy={props.copy}
+              onDismiss={props.onClose}
+            />
+          )}
+        </Match>
         <Match when={props.offboard().kind !== "idle"}>
           <OffboardProgressBody
             name={props.p.friend.name}

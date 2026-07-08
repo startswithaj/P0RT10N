@@ -80,8 +80,8 @@ export const friendsRouter = router({
   offboard: publicProcedure
     .input(offboardFriendInput)
     .mutation(async ({ ctx, input }) => {
-      await ctx.provisioningService.offboard(input.friendId);
-      return { ok: true as const };
+      const result = await ctx.provisioningService.offboard(input.friendId);
+      return { ok: true as const, ...result };
     }),
 
   /**
@@ -94,6 +94,8 @@ export const friendsRouter = router({
       jobId: ctx.jobService.start(
         "offboard",
         ctx.provisioningService.offboardStream(input.friendId),
+        undefined,
+        (result) => result.manualAclCleanup,
       ),
     })),
 });

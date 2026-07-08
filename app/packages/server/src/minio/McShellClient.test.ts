@@ -48,12 +48,6 @@ describe("McShellClient arg-building", () => {
     );
   });
 
-  it("removeBucket force-deletes", async () => {
-    const cmds: RecordedCommand[] = [];
-    await client(cmds).removeBucket("backup");
-    expect(cmds[0].args).toEqual(["rb", "--force", "alice/backup"]);
-  });
-
   it("attachPolicy targets the user", async () => {
     const cmds: RecordedCommand[] = [];
     await client(cmds).attachPolicy("AK", "backup");
@@ -199,6 +193,25 @@ describe("McShellClient parsing + errors", () => {
       .rejects.toThrow("bucket exists");
   });
 
+  it("removeBucket purges locked versions with --bypass before rb", async () => {
+    // `rb --force` alone cannot delete GOVERNANCE-locked versions (every
+    // active friend has some) — the version purge with the root bypass must
+    // come first, then the bucket removal.
+    const cmds: RecordedCommand[] = [];
+    await client(cmds).removeBucket("backup");
+    expect(cmds.map((c) => c.args)).toEqual([
+      [
+        "rm",
+        "--recursive",
+        "--versions",
+        "--force",
+        "--bypass",
+        "alice/backup",
+      ],
+      ["rb", "--force", "alice/backup"],
+    ]);
+  });
+
   // Teardown idempotency: "already absent" (or a name that could never exist,
   // like a bucket below MinIO's 3-char minimum) is success, not an error.
   it("removeBucket succeeds when the bucket does not exist", async () => {
@@ -236,6 +249,32 @@ describe("McShellClient parsing + errors", () => {
       stderr: "mc: <ERROR> The specified user does not exist.",
     });
     await expect(client([], respond).removeUser("AK")).resolves.toBeUndefined();
+  });
+
+  it("listUsers parses one JSON line per user and splits attached policies", async () => {
+    const cmds: RecordedCommand[] = [];
+    const respond = () => ({
+      code: 0,
+      stdout: [
+        '{"status":"success","accessKey":"AKIAONE","policyName":"alice","userStatus":"enabled"}',
+        '{"status":"success","accessKey":"AKIATWO","policyName":"alice,extra","userStatus":"enabled"}',
+        '{"status":"success","accessKey":"AKIABARE","userStatus":"enabled"}',
+      ].join("\n"),
+      stderr: "",
+    });
+    const users = await client(cmds, respond).listUsers();
+    expect(cmds[0].args).toEqual(["admin", "user", "list", "--json", "alice"]);
+    expect(users).toEqual([
+      { accessKeyId: "AKIAONE", policies: ["alice"] },
+      { accessKeyId: "AKIATWO", policies: ["alice", "extra"] },
+      { accessKeyId: "AKIABARE", policies: [] },
+    ]);
+  });
+
+  it("listUsers returns empty for no users (empty output)", async () => {
+    const users = await client([], () => ({ code: 0, stdout: "", stderr: "" }))
+      .listUsers();
+    expect(users).toEqual([]);
   });
 
   it("trace throws NOT_IMPLEMENTED on iteration", () => {

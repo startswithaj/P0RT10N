@@ -34,6 +34,23 @@ describe("Bundle", () => {
     });
   });
 
+  describe("server warnings", () => {
+    it("renders each warning from the bundle", () => {
+      renderBundle({
+        warnings: ["The old credential could not be removed and stays live."],
+      });
+
+      expect(
+        screen.getByText(/old credential could not be removed/i),
+      ).toBeInTheDocument();
+    });
+
+    it("renders no warning block when the bundle has none", () => {
+      renderBundle();
+      expect(screen.queryByText(/could not be removed/i)).toBeNull();
+    });
+  });
+
   describe("copy all", () => {
     it("copies every section on the screen, not just the S3 fields", () => {
       const writeText = vi.fn(() => Promise.resolve());

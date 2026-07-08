@@ -60,6 +60,21 @@ describe("JobService", () => {
     ]);
   });
 
+  it("passes advisory text (manual ACL cleanup) on the done event", async () => {
+    const svc = new JobService(noopLogger());
+    const id = svc.start(
+      "offboard",
+      fakeGen<{ manualAclCleanup?: string }>([
+        { type: "done", result: { manualAclCleanup: "remove tag:x" } },
+      ]),
+      undefined,
+      (r) => r.manualAclCleanup,
+    );
+    expect(await Array.fromAsync(svc.progress(id))).toEqual([
+      { type: "done", bundleReady: false, manualAclCleanup: "remove tag:x" },
+    ]);
+  });
+
   it("captures the bundle for exactly one claim, then wipes it", async () => {
     const svc = new JobService(noopLogger());
     const id = svc.start(

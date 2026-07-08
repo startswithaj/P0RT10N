@@ -4,6 +4,20 @@
 // would have written. Shared by TailscaleHttpApi (auto-mode 403) and the
 // provisioning flow (manual mode) so the instructions never drift.
 
+/**
+ * The offboard twin: what the admin should remove from their policy once the
+ * friend is gone. Advisory only — the offboard has already completed. Names
+ * the same entries manualAclInstructions told them to add, keyed by tag.
+ */
+export function manualAclRemovalInstructions(tag: string): string {
+  return [
+    `Remove from your Tailscale policy (https://login.tailscale.com/admin/acls):`,
+    ``,
+    `- the "tagOwners" entry for "${tag}"`,
+    `- any "grants" entry with "src": ["${tag}"]`,
+  ].join("\n");
+}
+
 export function manualAclInstructions(
   tag: string,
   endpointHostPort: string,

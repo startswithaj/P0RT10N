@@ -31,11 +31,13 @@ export type ProvisionStepKey = (typeof PROVISION_STEPS)[number]["key"];
  * of a background job, so a dropped connection can safely reconnect and replay
  * without re-running or losing work. `done` never carries the bundle; secrets
  * are handed over exactly once via the `jobs.claimBundle` mutation.
+ * `manualAclCleanup` is advisory plain text (manual ACL mode offboards only),
+ * not a secret — it may ride the event.
  */
 export type JobProgressEvent =
   | { type: "step"; step: string }
   | { type: "error"; message: string; step: string | null }
-  | { type: "done"; bundleReady: boolean };
+  | { type: "done"; bundleReady: boolean; manualAclCleanup?: string };
 
 /** Offboard teardown steps, in execution order. */
 export const OFFBOARD_STEPS = [

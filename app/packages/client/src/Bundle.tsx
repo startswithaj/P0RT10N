@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { Check, Copy, Eye, EyeOff, Mail, ShieldAlert } from "lucide-solid";
 import { Wordmark } from "./components/brand.tsx";
@@ -157,6 +157,25 @@ function CopyButton(
         <Check size={15} />
       </Show>
     </IconButton>
+  );
+}
+
+/** Non-fatal degradations from the server (e.g. rotate couldn't remove the
+ * old credential) — must be visible, not buried in server logs. */
+function ServerWarnings(props: { warnings?: string[] }) {
+  return (
+    <Show when={props.warnings?.length}>
+      <For each={props.warnings}>
+        {(warning) => (
+          <div class={warn}>
+            <span class={warnIcon}>
+              <ShieldAlert size={18} />
+            </span>
+            <span class={warnText}>{warning}</span>
+          </div>
+        )}
+      </For>
+    </Show>
   );
 }
 
@@ -378,6 +397,8 @@ export function Bundle(
             key to issue a new one.
           </span>
         </div>
+
+        <ServerWarnings warnings={props.bundle.warnings} />
 
         <CredentialsCard
           accessKey={props.bundle.s3AccessKeyId}

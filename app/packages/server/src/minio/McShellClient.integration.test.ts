@@ -41,9 +41,49 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
       await client.attachPolicy("itkey", bucket);
       await client.setDefaultRetention(bucket, "GOVERNANCE", 1);
       await client.setHardQuota(bucket, 1024 * 1024);
+
+      // Grounds the listUsers parsing against the pinned mc version: the user
+      // must be reported with its attached bucket policy.
+      const users = await client.listUsers();
+      const itUser = users.find((u) => u.accessKeyId === "itkey");
+      expect(itUser?.policies).toContain(bucket);
     } finally {
       await client.removeUser("itkey").catch(() => undefined);
       await client.removeBucket(bucket).catch(() => undefined);
     }
   });
+
+  maybe(
+    "removeBucket deletes GOVERNANCE-locked objects (root bypass)",
+    async () => {
+      // The offboard-blocker regression: `rb --force` alone cannot delete
+      // versions still under retention; removeBucket must purge with --bypass
+      // first. Grounds the flag set against the pinned mc release.
+      const endpoint = Deno.env.get("MINIO_ENDPOINT") ??
+        "http://127.0.0.1:9000";
+      const user = Deno.env.get("MINIO_ROOT_USER") ?? "p0rtadmin";
+      const pass = Deno.env.get("MINIO_ROOT_PASSWORD") ?? "p0rtadmin123";
+      await runner.run("mc", ["alias", "set", alias, endpoint, user, pass]);
+      await runner.run("mc", ["ready", alias]);
+
+      const bucket = `it-lock-${crypto.randomUUID().slice(0, 8)}`;
+      const client = new McShellClient({ alias }, runner, new DenoTempFiles());
+
+      await client.makeBucketWithLock(bucket);
+      await client.setDefaultRetention(bucket, "GOVERNANCE", 1);
+      // Write an object AFTER retention is armed so it is genuinely locked.
+      const tmp = await new DenoTempFiles().write("locked-data");
+      try {
+        const put = await runner.run("mc", ["cp", tmp, `${alias}/${bucket}/x`]);
+        expect(put.code).toBe(0);
+      } finally {
+        await new DenoTempFiles().remove(tmp);
+      }
+
+      await client.removeBucket(bucket); // fails without the --bypass purge
+
+      // Also idempotent: removing the now-absent bucket is success.
+      await client.removeBucket(bucket);
+    },
+  );
 });

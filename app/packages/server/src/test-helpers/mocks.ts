@@ -226,6 +226,10 @@ export function mockMcClient(calls: Calls): McClient {
     disableUser: note("disableUser"),
     enableUser: note("enableUser"),
     removeUser: note("removeUser"),
+    listUsers: () => {
+      calls.push("mc:listUsers");
+      return Promise.resolve([]);
+    },
     setAuditWebhook: note("setAuditWebhook"),
     trace: async function* () {/* no events */},
   };
@@ -452,6 +456,8 @@ export const CTX: FriendProvisionContext = {
 export interface ProvisioningParts {
   repo?: Partial<ProvisioningRepo>;
   runtime?: Partial<InstanceRuntime>;
+  /** Override individual mc operations (e.g. inject teardown failures). */
+  mc?: Partial<McClient>;
   smoke?: () => Promise<void>;
   nodes?: TailnetNode[];
   config?: Partial<ProvisioningConfig>;
@@ -468,7 +474,7 @@ export function buildProvisioningService(
   return new ProvisioningService(
     { ...TEST_CONFIG, ...parts.config },
     mockProvisioningRepo(calls, reservation, parts.repo),
-    mockMcFactory(mockMcClient(calls), calls),
+    mockMcFactory({ ...mockMcClient(calls), ...parts.mc }, calls),
     { ...mockInstanceRuntime(calls), ...parts.runtime },
     mockTailscaleApi(calls, parts.nodes),
     {

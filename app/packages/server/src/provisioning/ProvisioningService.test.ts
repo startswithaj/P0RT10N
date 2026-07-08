@@ -134,6 +134,74 @@ describe("ProvisioningService.rotateKey", () => {
   });
 });
 
+describe("ProvisioningService.rotateKey (gap-free)", () => {
+  it("creates and records the new credential BEFORE removing the old", async () => {
+    // Regression: remove-then-create left the friend credential-less when
+    // createUser failed. Order must be create → attach → persist → remove.
+    const calls: Calls = [];
+    const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+    }).rotateKey(1);
+
+    expect(calls.indexOf("mc:createUser")).toBeLessThan(
+      calls.indexOf("mc:removeUser"),
+    );
+    expect(calls.indexOf("repo:recordAccessKey")).toBeLessThan(
+      calls.indexOf("mc:removeUser"),
+    );
+    expect(bundle.warnings).toBeUndefined();
+  });
+
+  it("createUser failure leaves the old credential and DB untouched", async () => {
+    const calls: Calls = [];
+    const svc = buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+      mc: { createUser: () => Promise.reject(new Error("minio down")) },
+    });
+
+    await expect(svc.rotateKey(1)).rejects.toThrow("minio down");
+    expect(calls).not.toContain("repo:recordAccessKey");
+    expect(calls).not.toContain("mc:removeUser");
+  });
+
+  it("old-credential removal failure succeeds WITH a warning in the bundle", async () => {
+    const calls: Calls = [];
+    const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+      mc: { removeUser: () => Promise.reject(new Error("flaky")) },
+    }).rotateKey(1);
+
+    expect(calls).toContain("repo:recordAccessKey");
+    expect(bundle.s3SecretKey).toBe(TEST_CRED.secretKey);
+    expect(bundle.warnings?.join(" ")).toContain("could not be removed");
+  });
+
+  it("sweeps stale policy-attached users first and reports it", async () => {
+    // A stale user from a previously failed rotation (MinIO knows it, the DB
+    // doesn't) is removed; the recorded and unrelated users are kept.
+    const calls: Calls = [];
+    const removed: string[] = [];
+    const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+      mc: {
+        listUsers: () =>
+          Promise.resolve([
+            { accessKeyId: "AKIASTALE", policies: ["alice"] },
+            { accessKeyId: "AKIAOLD", policies: ["alice"] },
+            { accessKeyId: "AKIAUNRELATED", policies: ["other"] },
+          ]),
+        removeUser: (id) => {
+          removed.push(id);
+          return Promise.resolve();
+        },
+      },
+    }).rotateKey(1);
+
+    expect(removed).toEqual(["AKIASTALE", "AKIAOLD"]);
+    expect(bundle.warnings?.join(" ")).toContain("stale credential");
+  });
+});
+
 describe("ProvisioningService.reissueTsKey", () => {
   it("mints a fresh auth key for the friend's node tag", async () => {
     const calls: Calls = [];
@@ -165,6 +233,106 @@ describe("ProvisioningService.offboard", () => {
     expect(calls).toContain("ts:deleteNode:n1");
     expect(calls).toContain("runtime:removeInstance");
     expect(calls).toContain("repo:deleteInstance");
+  });
+
+  it("removes stale policy-attached users during teardown", async () => {
+    // No credential may outlive the friend — including ones a failed rotation
+    // left behind that only MinIO knows about.
+    const calls: Calls = [];
+    const removed: string[] = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+      mc: {
+        listUsers: () =>
+          Promise.resolve([{ accessKeyId: "AKIASTALE", policies: ["alice"] }]),
+        removeUser: (id) => {
+          removed.push(id);
+          return Promise.resolve();
+        },
+      },
+    }).offboard(1);
+
+    expect(removed).toEqual(["AKIAOLD", "AKIASTALE"]);
+  });
+
+  it("a retried offboard completes after a partial first attempt", async () => {
+    // Idempotency: every destructive step tolerates "already absent", so the
+    // retry runs cleanly from the top.
+    const calls: Calls = [];
+    let bucketGone = false;
+    const svc = buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+      mc: {
+        removeBucket: () => {
+          if (!bucketGone) {
+            bucketGone = true;
+            return Promise.reject(new Error("minio down"));
+          }
+          return Promise.resolve();
+        },
+      },
+    });
+
+    await expect(svc.offboard(1)).rejects.toThrow("minio down");
+    expect(calls).not.toContain("repo:deleteFriend");
+    await svc.offboard(1);
+    expect(calls).toContain("repo:deleteFriend");
+  });
+
+  it("refuses a COMPLIANCE friend with data BEFORE any destructive step", async () => {
+    // COMPLIANCE-locked objects are undeletable by anyone until retention
+    // lapses — failing up-front beats failing opaquely mid-teardown with the
+    // user and policy already gone.
+    const calls: Calls = [];
+    const svc = buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        context: () =>
+          Promise.resolve({ ...CTX, lockMode: "COMPLIANCE" as const }),
+      },
+      mc: { du: () => Promise.resolve({ bytesUsed: 10, objectCount: 3 }) },
+    });
+
+    await expect(svc.offboard(1)).rejects.toThrow(/COMPLIANCE retention/);
+    expect(calls).not.toContain("mc:removeUser");
+    expect(calls).not.toContain("mc:removeBucket");
+    expect(calls).not.toContain("repo:deleteFriend");
+  });
+
+  it("offboards an EMPTY COMPLIANCE bucket normally (no locks exist)", async () => {
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        context: () =>
+          Promise.resolve({ ...CTX, lockMode: "COMPLIANCE" as const }),
+      },
+    }).offboard(1); // mock du reports zero objects
+
+    expect(calls).toContain("repo:deleteFriend");
+  });
+
+  it("manual ACL mode: never calls the policy API, returns cleanup advice", async () => {
+    // The token can't edit the policy in manual mode — a 403 mid-teardown
+    // would strand the friend row after the user/bucket are already gone.
+    const calls: Calls = [];
+    const result = await buildProvisioningService(calls, DEDICATED_RES, {
+      config: { aclMode: "manual" },
+      repo: { context: () => Promise.resolve(CTX) },
+    }).offboard(1);
+
+    expect(calls).not.toContain("ts:removeFriendAcl");
+    expect(calls).toContain("repo:deleteFriend");
+    expect(result.manualAclCleanup).toContain("tag:p0rt1on-friend-alice");
+    expect(result.manualAclCleanup).toContain("Remove");
+  });
+
+  it("auto ACL mode: calls the policy API and returns no advice", async () => {
+    const calls: Calls = [];
+    const result = await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+    }).offboard(1);
+
+    expect(calls).toContain("ts:removeFriendAcl");
+    expect(result.manualAclCleanup).toBeUndefined();
   });
 
   it("records the offboard audit BEFORE deleting the friend row", async () => {
@@ -247,6 +415,79 @@ describe("ProvisioningService.sweepFailed", () => {
     const n = await svc.sweepFailed();
     expect(n).toBe(1);
     expect(calls).toContain("repo:deleteFriend");
+  });
+
+  it("keeps the tombstone when a resource step fails (no deleteFriend)", async () => {
+    // Regression: reap during a MinIO outage must NOT delete the friend row —
+    // the row is the only record the bucket/user exist.
+    const calls: Calls = [];
+    const n = await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failedFriendIds: () => Promise.resolve([1]),
+        context: () => Promise.resolve(CTX),
+      },
+      mc: { removeBucket: () => Promise.reject(new Error("minio down")) },
+    }).sweepFailed();
+
+    expect(n).toBe(1);
+    expect(calls).not.toContain("repo:deleteFriend");
+    expect(calls).not.toContain("runtime:removeInstance");
+    expect(calls).not.toContain("repo:deleteInstance");
+  });
+
+  it("converges on the next sweep once teardown succeeds again", async () => {
+    // First sweep fails on removeBucket; second (healthy) completes the reap.
+    const calls: Calls = [];
+    let minioDown = true;
+    const svc = buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failedFriendIds: () => Promise.resolve([1]),
+        context: () => Promise.resolve(CTX),
+      },
+      mc: {
+        removeBucket: () =>
+          minioDown
+            ? Promise.reject(new Error("minio down"))
+            : Promise.resolve(),
+      },
+    });
+
+    await svc.sweepFailed();
+    expect(calls).not.toContain("repo:deleteFriend");
+    minioDown = false;
+    await svc.sweepFailed();
+    expect(calls).toContain("repo:deleteFriend");
+    expect(calls).toContain("repo:deleteInstance");
+  });
+
+  it("keeps an orphan instance row when the container removal fails", async () => {
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failedInstances: () =>
+          Promise.resolve([{ instanceId: 10, tsHostname: "ghost" }]),
+      },
+      runtime: {
+        removeInstance: () => Promise.reject(new Error("docker down")),
+      },
+    }).sweepFailed();
+
+    expect(calls).not.toContain("repo:deleteInstance");
+  });
+
+  it("skips reaping a COMPLIANCE friend with data; tombstone kept", async () => {
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failedFriendIds: () => Promise.resolve([1]),
+        context: () =>
+          Promise.resolve({ ...CTX, lockMode: "COMPLIANCE" as const }),
+      },
+      mc: { du: () => Promise.resolve({ bytesUsed: 10, objectCount: 3 }) },
+    }).sweepFailed();
+
+    expect(calls).not.toContain("mc:removeBucket");
+    expect(calls).not.toContain("repo:deleteFriend");
   });
 
   it("returns 0 when there are no tombstones", async () => {

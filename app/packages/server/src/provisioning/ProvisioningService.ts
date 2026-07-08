@@ -2,6 +2,7 @@ import type {
   AddFriendInput,
   FriendBundle,
   IsolationMode,
+  OffboardResult,
   OffboardStepKey,
   ProvisionStepKey,
   TsKeyBundle,
@@ -13,8 +14,11 @@ import type { InstanceRuntime, InstanceSpec } from "../runtime/runtime.ts";
 import type { TempFiles } from "../lib/CommandRunner.ts";
 import { containerNames } from "../runtime/names.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
-import { manualAclInstructions } from "../tailscale/manualAcl.ts";
-import { ServiceError } from "../lib/ServiceError.ts";
+import {
+  manualAclInstructions,
+  manualAclRemovalInstructions,
+} from "../tailscale/manualAcl.ts";
+import { ConflictError, ServiceError } from "../lib/ServiceError.ts";
 import { drainForResult } from "../lib/drainGenerator.ts";
 import type { ProgressEvent, StepEvent } from "../lib/progress.ts";
 import type {
@@ -137,19 +141,56 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log.info("rotating S3 key");
     const ctx = await this.repo.context(friendId);
     const mc = this.mc.forInstance({ alias: ctx.alias });
+    const warnings: string[] = [];
+    // Self-heal first: a previously failed rotation can have left a stale user
+    // attached to the bucket policy that no DB row records.
+    const swept = await this.removeStaleUsers(
+      mc,
+      ctx.bucket,
+      ctx.s3AccessKeyId,
+      log,
+    );
+    if (swept.length > 0) {
+      warnings.push(
+        `Removed ${swept.length} stale credential(s) left by a previously failed rotation.`,
+      );
+    }
     const cred = this.keyGen.generateS3Credential();
     log.debug("replacing S3 user", {
       bucket: ctx.bucket,
       newAccessKeyId: cred.accessKeyId,
       oldAccessKeyId: ctx.s3AccessKeyId,
     });
-    // Replace the user; the bucket-scoped policy already exists, just reattach.
-    await this.replaceUser(mc, ctx, cred);
+    // Create-before-remove: the friend must never be credential-less, and the
+    // DB must never record a key ID MinIO doesn't have. Key IDs are random,
+    // so old and new coexist during the overlap. The bucket-scoped policy
+    // already exists — just attach it to the new user.
+    await mc.createUser(cred);
+    await mc.attachPolicy(cred.accessKeyId, ctx.bucket);
     await this.repo.recordAccessKey(friendId, cred.accessKeyId);
+    if (ctx.s3AccessKeyId) {
+      try {
+        await mc.removeUser(ctx.s3AccessKeyId); // not-found-tolerant
+      } catch (err) {
+        // The new cred is live and recorded; the stale old user is swept by
+        // the next rotate or by offboard (removeStaleUsers) — never lost.
+        log.warn(
+          "old credential removal failed; swept on next rotate/offboard",
+          {
+            oldAccessKeyId: ctx.s3AccessKeyId,
+            error: String(err),
+          },
+        );
+        warnings.push(
+          "The old credential could not be removed and stays live until the " +
+            "next rotate or offboard. The new credential is active.",
+        );
+      }
+    }
     await this.repo.audit(friendId, "rotate_key");
     log.info("S3 key rotated");
     // No tsAuthKey: the node is already enrolled (see FriendBundle docs).
-    return this.buildRotateBundle(ctx, cred);
+    return this.buildRotateBundle(ctx, cred, warnings);
   }
 
   async reissueTsKey(friendId: number): Promise<TsKeyBundle> {
@@ -167,7 +208,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
   }
 
   /** Non-streaming offboard: drains the teardown stream to completion. */
-  offboard(friendId: number): Promise<void> {
+  offboard(friendId: number): Promise<OffboardResult> {
     return drainForResult(this.offboardStream(friendId));
   }
 
@@ -178,15 +219,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
    */
   async *offboardStream(
     friendId: number,
-  ): AsyncGenerator<ProgressEvent<OffboardStepKey, void>> {
+  ): AsyncGenerator<ProgressEvent<OffboardStepKey, OffboardResult>> {
     const log = this.logger.child({ op: "offboard", friendId });
     log.info("offboarding friend");
     const ctx = await this.repo.context(friendId);
+    await this.guardComplianceLock(ctx);
     log.debug("tearing down friend resources", {
       bucket: ctx.bucket,
       nodeTag: ctx.nodeTag,
     });
-    yield* this.tearDownSteps(ctx);
+    yield* this.tearDownSteps(ctx, log);
     yield { type: "step", step: "record" };
     // Record the offboard BEFORE deleting the friend row: the audit FK points at
     // friends.id, so inserting after the delete trips a FOREIGN KEY constraint.
@@ -201,7 +243,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "reap" };
     await this.reapInstanceIfEmpty(ctx, log);
     log.info("offboard complete", { isolationMode: ctx.isolationMode });
-    yield { type: "done", result: undefined };
+    // Manual ACL mode: the manager never touched the policy, so tell the
+    // admin which entries are now stale — advisory, the offboard is done.
+    // Manual ACL mode: the manager never touched the policy, so tell the
+    // admin which entries are now stale — advisory, the offboard is done.
+    yield {
+      type: "done",
+      result: this.config.aclMode === "manual"
+        ? { manualAclCleanup: manualAclRemovalInstructions(ctx.nodeTag) }
+        : {},
+    };
   }
 
   // ---- provisioning steps (PLAN "Add friend" flow) ----
@@ -436,10 +487,14 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   private async *tearDownSteps(
     ctx: FriendProvisionContext,
+    log: Logger,
   ): AsyncGenerator<StepEvent<OffboardStepKey>, void> {
     const mc = this.mc.forInstance({ alias: ctx.alias });
     yield { type: "step", step: "storage" };
     if (ctx.s3AccessKeyId) await mc.removeUser(ctx.s3AccessKeyId);
+    // Also sweep users a failed rotation may have left attached to the
+    // policy — no credential may outlive the friend.
+    await this.removeStaleUsers(mc, ctx.bucket, null, log);
     // The bucket-scoped IAM policy (named after the bucket) would otherwise
     // live in MinIO forever; absent is success.
     await mc.removePolicy(ctx.bucket);
@@ -447,7 +502,24 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "nodes" };
     await this.revokeFriendNodes(ctx.nodeTag);
     yield { type: "step", step: "acl" };
-    await this.tailscale.removeFriendAcl(ctx.nodeTag);
+    await this.removeAclOrAdvise(ctx.nodeTag, log);
+  }
+
+  /**
+   * Remove the friend's policy entries — except in manual ACL mode, where the
+   * token can't edit the policy (the add path skipped the write too): calling
+   * the API would 403 AFTER the user/bucket are gone, wedging the friend row.
+   * Removal is then the admin's job; offboard advises via OffboardResult, the
+   * sweep can only log.
+   */
+  private async removeAclOrAdvise(tag: string, log: Logger): Promise<void> {
+    if (this.config.aclMode === "manual") {
+      log.info("manual ACL mode — admin should remove the policy entries", {
+        tag,
+      });
+      return;
+    }
+    await this.tailscale.removeFriendAcl(tag);
   }
 
   private async revokeFriendNodes(tag: string): Promise<void> {
@@ -488,16 +560,25 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   // ---- cleanup sweep (reap failed-provision tombstones) ----
 
-  /** Run `fn`, logging + swallowing any error — teardown must be best-effort. */
+  /**
+   * Run `fn`, logging + swallowing any error — teardown must be best-effort.
+   * Returns whether it succeeded so callers can gate tombstone deletion on
+   * resource teardown (a DB row must never be deleted while a resource it
+   * records may still exist).
+   */
   private async attempt(
     log: Logger,
     step: string,
     fn: () => Promise<void>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await fn();
+      return true;
     } catch (err) {
-      log.warn(`reap: ${step} failed (ignored)`, { error: String(err) });
+      log.warn(`reap: ${step} failed (will retry next sweep)`, {
+        error: String(err),
+      });
+      return false;
     }
   }
 
@@ -515,22 +596,58 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const ctx = await this.repo.context(friendId).catch(() => null);
     if (!ctx) return; // already reaped
     const rlog = log.child({ reapFriendId: friendId, name: ctx.name });
+    // A COMPLIANCE bucket with data is untouchable until retention lapses —
+    // skip the whole reap (keeping the tombstone) rather than half-tearing
+    // the friend down around an undeletable bucket.
+    const locked = await this.guardComplianceLock(ctx).then(() => false)
+      .catch((err) => {
+        rlog.warn("reap skipped: COMPLIANCE retention", {
+          error: String(err),
+        });
+        return true;
+      });
+    if (locked) return;
     rlog.info("reaping failed friend");
     const mc = this.mc.forInstance({ alias: ctx.alias });
     const ak = ctx.s3AccessKeyId;
-    if (ak) await this.attempt(rlog, "removeUser", () => mc.removeUser(ak));
-    await this.attempt(rlog, "removePolicy", () => mc.removePolicy(ctx.bucket));
-    await this.attempt(rlog, "removeBucket", () => mc.removeBucket(ctx.bucket));
-    await this.attempt(
-      rlog,
-      "removeAcl",
-      () => this.tailscale.removeFriendAcl(ctx.nodeTag),
-    );
-    await this.attempt(
-      rlog,
-      "revokeNodes",
-      () => this.revokeFriendNodes(ctx.nodeTag),
-    );
+    // Resource teardown first — each helper treats "already absent" as
+    // success, so partially-provisioned friends converge.
+    const results: Record<string, boolean> = {
+      removeUser: await this.attempt(rlog, "removeUser", async () => {
+        if (ak) await mc.removeUser(ak);
+        // Stale users from a failed rotation die with the friend too.
+        await this.removeStaleUsers(mc, ctx.bucket, null, rlog);
+      }),
+      removePolicy: await this.attempt(
+        rlog,
+        "removePolicy",
+        () => mc.removePolicy(ctx.bucket),
+      ),
+      removeBucket: await this.attempt(
+        rlog,
+        "removeBucket",
+        () => mc.removeBucket(ctx.bucket),
+      ),
+      removeAcl: await this.attempt(
+        rlog,
+        "removeAcl",
+        () => this.removeAclOrAdvise(ctx.nodeTag, rlog),
+      ),
+      revokeNodes: await this.attempt(
+        rlog,
+        "revokeNodes",
+        () => this.revokeFriendNodes(ctx.nodeTag),
+      ),
+    };
+    const pending = Object.keys(results).filter((k) => !results[k]);
+    if (pending.length > 0) {
+      // The row is the only record these resources exist — deleting it now
+      // would orphan them forever. Keep the tombstone; the next sweep retries.
+      rlog.warn("reap incomplete; keeping tombstone for next sweep", {
+        pending,
+      });
+      return;
+    }
     await this.attempt(
       rlog,
       "deleteFriend",
@@ -549,16 +666,25 @@ export class ProvisioningService implements ProvisioningServiceContract {
     tsHostname: string,
     log: Logger,
   ): Promise<void> {
-    await this.attempt(
+    const removed = await this.attempt(
       log,
       "removeInstance",
       () => this.runtime.removeInstance(tsHostname, { removeVolumes: true }),
     );
-    await this.attempt(
+    const revoked = await this.attempt(
       log,
       "revokeServeNode",
       () => this.revokeServeNode(tsHostname),
     );
+    if (!removed || !revoked) {
+      // Same gating as reapFriend: the row is the record — keep it so the
+      // next sweep retries the container/node teardown.
+      log.warn("orphan instance reap incomplete; keeping row for next sweep", {
+        instanceId,
+        tsHostname,
+      });
+      return;
+    }
     await this.attempt(
       log,
       "deleteInstance",
@@ -606,14 +732,61 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return total;
   }
 
-  private async replaceUser(
-    mc: McClient,
+  /**
+   * COMPLIANCE-locked objects cannot be deleted by anyone — root bypass
+   * included — until their retention lapses. Refuse BEFORE any destructive
+   * step, or the teardown fails opaquely halfway with the user/policy already
+   * gone. Earliest-offboard estimate is conservative: every lock expires at
+   * most retentionDays after its write, and writes can't be in the future,
+   * so now + retentionDays always suffices. An empty bucket has no locks —
+   * proceed. A failed usage check proceeds too: the rm step will surface a
+   * genuine lock, and retries stay safe (all steps are idempotent).
+   */
+  private async guardComplianceLock(
     ctx: FriendProvisionContext,
-    cred: S3Credential,
   ): Promise<void> {
-    if (ctx.s3AccessKeyId) await mc.removeUser(ctx.s3AccessKeyId);
-    await mc.createUser(cred);
-    await mc.attachPolicy(cred.accessKeyId, ctx.bucket);
+    if (ctx.lockMode !== "COMPLIANCE") return;
+    const mc = this.mc.forInstance({ alias: ctx.alias });
+    const usage = await mc.du(ctx.bucket).catch(() => null);
+    if (!usage || usage.objectCount === 0) return;
+    const earliest = new Date(
+      Date.now() + ctx.lockRetentionDays * 24 * 60 * 60 * 1000,
+    );
+    throw new ConflictError(
+      `${ctx.name}'s bucket holds ${usage.objectCount} object(s) under ` +
+        `COMPLIANCE retention — nothing can delete them until retention ` +
+        `lapses. Offboard will be possible by ${
+          earliest.toISOString().slice(0, 10)
+        } at the latest.`,
+    );
+  }
+
+  /**
+   * Remove every IAM user attached to the friend's bucket-scoped policy except
+   * `keep`. MinIO is the source of truth for which users belong to a friend:
+   * a failed rotation can leave a live user no DB row records, and this sweep
+   * is how it converges (run at the start of rotate and during teardown).
+   */
+  private async removeStaleUsers(
+    mc: McClient,
+    policyName: string,
+    keep: string | null,
+    log: Logger,
+  ): Promise<string[]> {
+    const users = await mc.listUsers();
+    const stale = users.filter((u) =>
+      u.policies.includes(policyName) && u.accessKeyId !== keep
+    );
+    if (stale.length === 0) return [];
+    log.warn("removing stale credentials attached to bucket policy", {
+      policyName,
+      accessKeyIds: stale.map((u) => u.accessKeyId),
+    });
+    await stale.reduce(
+      (p, u) => p.then(() => mc.removeUser(u.accessKeyId)),
+      Promise.resolve(),
+    );
+    return stale.map((u) => u.accessKeyId);
   }
 
   // ---- pure derivations (no I/O) ----
@@ -687,9 +860,11 @@ export class ProvisioningService implements ProvisioningServiceContract {
   private buildRotateBundle(
     ctx: FriendProvisionContext,
     cred: S3Credential,
+    warnings: string[],
   ): FriendBundle {
     const endpoint = this.endpointFor(ctx.tsHostname);
     return {
+      warnings: warnings.length > 0 ? warnings : undefined,
       name: ctx.name,
       s3Endpoint: endpoint,
       region: this.config.region,

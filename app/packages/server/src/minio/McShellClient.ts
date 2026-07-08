@@ -5,6 +5,7 @@ import type {
   McTarget,
   S3Credential,
   TraceEvent,
+  UserEntry,
 } from "./mc.ts";
 import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import type { LockMode } from "@p0rt1on/shared/domain";
@@ -113,11 +114,26 @@ export class McShellClient implements McClient {
     }
   }
 
-  removeBucket(bucket: string): Promise<void> {
-    return this.execRemove(
-      ["rb", "--force", this.path(bucket)],
-      /does not exist|bucket name cannot be|invalid bucket name/i,
+  async removeBucket(bucket: string): Promise<void> {
+    const absent = /does not exist|bucket name cannot be|invalid bucket name/i;
+    // Two steps because `rb --force` cannot delete versions still under
+    // GOVERNANCE retention (it sends no bypass header) — and every active
+    // friend has in-retention data; that's the product. `rm --bypass` uses
+    // the root alias's BypassGovernanceRetention right (friend creds are
+    // explicitly denied it). COMPLIANCE-locked versions still — correctly —
+    // fail here: nothing can delete those until retention lapses.
+    await this.execRemove(
+      [
+        "rm",
+        "--recursive",
+        "--versions",
+        "--force",
+        "--bypass",
+        this.path(bucket),
+      ],
+      absent,
     );
+    await this.execRemove(["rb", "--force", this.path(bucket)], absent);
   }
 
   setDefaultRetention(
@@ -230,6 +246,40 @@ export class McShellClient implements McClient {
       ["admin", "user", "remove", this.target.alias, accessKeyId],
       /does not exist/i,
     );
+  }
+
+  async listUsers(): Promise<UserEntry[]> {
+    // One JSON object per line; `policyName` is comma-separated when a user
+    // has several policies attached, and absent when it has none.
+    const out = await this.exec([
+      "admin",
+      "user",
+      "list",
+      "--json",
+      this.target.alias,
+    ]).catch((err) => {
+      // A never-configured alias has no users. Teardown of a friend whose
+      // instance never came up must converge, not wedge on the listing.
+      if (err instanceof ServiceError && /does not exist/i.test(err.message)) {
+        return "";
+      }
+      throw err;
+    });
+    return out
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) =>
+        JSON.parse(line) as { accessKey?: string; policyName?: string }
+      )
+      .filter((p) => typeof p.accessKey === "string" && p.accessKey.length > 0)
+      .map((p) => ({
+        accessKeyId: p.accessKey as string,
+        policies: (p.policyName ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      }));
   }
 
   async setAuditWebhook(endpoint: string, authToken: string): Promise<void> {

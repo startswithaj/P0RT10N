@@ -21,17 +21,18 @@ describe("DockerRuntime (integration: real docker + instance image)", () => {
     "starts an instance container, is idempotent + healthy, then tears it down",
     async () => {
       const id = crypto.randomUUID().slice(0, 8);
+      // The auth key rides the env-file like the root creds — never the argv.
       const envFile = await tmp.write(
-        "MINIO_ROOT_USER=p0rtadmin\nMINIO_ROOT_PASSWORD=p0rtadmin123\n",
+        "MINIO_ROOT_USER=p0rtadmin\nMINIO_ROOT_PASSWORD=p0rtadmin123\n" +
+          `TAILSCALE_AUTHKEY=${Deno.env.get("TAILSCALE_AUTHKEY") ?? ""}\n`,
       );
       const spec: InstanceSpec = {
         name: `p0rt1on-it-${id}`,
         image: Deno.env.get("INSTANCE_IMAGE") ?? "p0rt1on-instance:latest",
         tsHostname: `p0rtit${id}`,
         tag: Deno.env.get("SERVE_NODE_TAG") ?? "tag:p0rt1on-serve",
-        authKey: Deno.env.get("TAILSCALE_AUTHKEY") ?? "",
         minioPort: 9000,
-        dataVolumes: [1, 2, 3, 4].map((n) => `p0rt1on-it-data-${id}-${n}`),
+        dataVolume: `p0rt1on-it-data-${id}`,
         stateVolume: `p0rt1on-it-state-${id}`,
         rootCredSecretRef: envFile,
         network: Deno.env.get("P0RT1ON_NETWORK") ?? "bridge",

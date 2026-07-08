@@ -25,6 +25,13 @@ export interface S3Credential {
   secretKey: string;
 }
 
+/** One IAM user as reported by `mc admin user list` (no secret material). */
+export interface UserEntry {
+  accessKeyId: string;
+  /** Policy names attached to the user (mc reports them comma-separated). */
+  policies: string[];
+}
+
 /**
  * MinIO admin operations, scoped to a single instance. Implementations run the
  * corresponding `mc` command and parse `--json` output. All throw a ServiceError
@@ -83,6 +90,14 @@ export interface McClient {
 
   /** `mc admin user remove` — offboard, and the old half of a key rotation. */
   removeUser(accessKeyId: string): Promise<void>;
+
+  /**
+   * `mc admin user list --json <alias>` — every IAM user with its attached
+   * policy names. MinIO is the source of truth for which users belong to a
+   * friend (users attached to the friend's bucket-scoped policy), so stale
+   * credentials from a failed rotation are discoverable without DB state.
+   */
+  listUsers(): Promise<UserEntry[]>;
 
   // ---- Observability ----
 

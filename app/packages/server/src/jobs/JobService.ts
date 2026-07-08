@@ -43,6 +43,7 @@ class Job {
   async run<K extends string, R>(
     gen: AsyncGenerator<ProgressEvent<K, R>>,
     captureBundle?: (result: R) => FriendBundle,
+    adviceOf?: (result: R) => string | undefined,
   ): Promise<void> {
     try {
       // The generator IS the running work — consuming it as a stream is the
@@ -53,7 +54,13 @@ class Job {
           this.emit({ type: "step", step: ev.step });
         } else {
           if (captureBundle) this.bundle = captureBundle(ev.result);
-          this.emit({ type: "done", bundleReady: this.bundle !== null });
+          this.emit({
+            type: "done",
+            bundleReady: this.bundle !== null,
+            // Advisory plain text (manual-ACL offboard) — not a secret, so
+            // it may ride the event, unlike the claim-only bundle.
+            manualAclCleanup: adviceOf?.(ev.result),
+          });
         }
       }
     } catch (err) {
@@ -124,12 +131,13 @@ export class JobService {
     kind: string,
     gen: AsyncGenerator<ProgressEvent<K, R>>,
     captureBundle?: (result: R) => FriendBundle,
+    adviceOf?: (result: R) => string | undefined,
   ): string {
     this.prune();
     const job = new Job(crypto.randomUUID(), kind, this.logger);
     this.jobs.set(job.id, job);
     // Deliberately not awaited: the job outlives the starting request.
-    job.run(gen, captureBundle);
+    job.run(gen, captureBundle, adviceOf);
     return job.id;
   }
 

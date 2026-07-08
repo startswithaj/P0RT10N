@@ -4,6 +4,7 @@ import type {
   FriendBundle,
   FriendDetail,
   FriendListItem,
+  OffboardResult,
   OffboardStepKey,
   ProvisionStepKey,
   StatusView,
@@ -43,11 +44,11 @@ export interface ProvisioningService {
   rotateKey(friendId: number): Promise<FriendBundle>;
   /** Mint a fresh Tailscale enrollment key for the friend's node tag. */
   reissueTsKey(friendId: number): Promise<TsKeyBundle>;
-  offboard(friendId: number): Promise<void>;
+  offboard(friendId: number): Promise<OffboardResult>;
   /** Streaming offboard: per-step teardown progress then a `done` event. */
   offboardStream(
     friendId: number,
-  ): AsyncGenerator<ProgressEvent<OffboardStepKey, void>>;
+  ): AsyncGenerator<ProgressEvent<OffboardStepKey, OffboardResult>>;
   /** Reap failed-provision tombstones (partial resources + rows). Returns count. */
   sweepFailed(): Promise<number>;
   /** Boot recovery: fail stale `provisioning` rows; returns names. */

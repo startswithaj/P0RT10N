@@ -179,6 +179,12 @@ export type FriendBundle = {
   /** Manual-ACL mode: grant lines the admin must paste into their policy. */
   manualAclInstructions?: string; // addFriend only, when aclMode="manual"
   kopiaQuickstart: string;
+  /**
+   * Non-fatal degradations the admin should know about (e.g. rotate could not
+   * remove the old credential; it stays live until the next rotate/offboard).
+   * The operation still succeeded — these must be surfaced, not hidden in logs.
+   */
+  warnings?: string[];
 };
 
 // Progress-step definitions live in ./steps (no zod dep, so the client can
@@ -190,6 +196,15 @@ export {
   PROVISION_STEPS,
   type ProvisionStepKey,
 } from "./steps.ts";
+
+/**
+ * Offboard outcome. `manualAclCleanup` (manual ACL mode only) lists the policy
+ * entries the admin should remove by hand — advisory: the offboard already
+ * completed, and the manager can't edit the policy in that mode.
+ */
+export type OffboardResult = {
+  manualAclCleanup?: string;
+};
 
 /** The re-issued Tailscale enrollment key hand-off (shown once). */
 export type TsKeyBundle = {
