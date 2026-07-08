@@ -14,8 +14,14 @@ die() {
 }
 
 # --- env ---------------------------------------------------------------------
-: "${TAILSCALE_AUTHKEY:?TAILSCALE_AUTHKEY is required (the instance's serve auth key)}"
-: "${TAILSCALE_HOSTNAME:?TAILSCALE_HOSTNAME is required (this instance's tailnet hostname)}"
+# TAILSCALE_DISABLED=1: MinIO-only mode for INTEGRATION TESTS (CI clusters
+# have no tailnet). Never set in production — without tailscaled no friend
+# can reach the instance.
+TAILSCALE_DISABLED="${TAILSCALE_DISABLED:-}"
+if [ "$TAILSCALE_DISABLED" != "1" ]; then
+  : "${TAILSCALE_AUTHKEY:?TAILSCALE_AUTHKEY is required (the instance's serve auth key)}"
+  : "${TAILSCALE_HOSTNAME:?TAILSCALE_HOSTNAME is required (this instance's tailnet hostname)}"
+fi
 : "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
 : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
 export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
@@ -44,6 +50,9 @@ shutdown() {
 trap shutdown TERM INT
 
 # --- tailscaled --------------------------------------------------------------
+if [ "$TAILSCALE_DISABLED" = "1" ]; then
+  log "TAILSCALE_DISABLED=1 — skipping tailscaled/serve (integration tests only)"
+else
 log "starting tailscaled (userspace networking)"
 tailscaled \
   --tun=userspace-networking \
@@ -71,6 +80,7 @@ log "tailnet is up"
 # --- serve MinIO over the tailnet (https:443 -> localhost:MINIO_PORT) ---------
 log "publishing MinIO via tailscale serve"
 tailscale serve --bg --https=443 "http://localhost:${MINIO_PORT}"
+fi
 
 # --- MinIO -------------------------------------------------------------------
 log "starting minio on :${MINIO_PORT} (drives: ${MINIO_DRIVES})"

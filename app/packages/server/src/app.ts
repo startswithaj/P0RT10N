@@ -10,6 +10,8 @@ import {
   DockerInstanceRuntime,
   DockerRuntime,
 } from "./runtime/DockerRuntime.ts";
+import { KubernetesRuntime } from "./runtime/KubernetesRuntime.ts";
+import type { InstanceRuntime } from "./runtime/runtime.ts";
 import { DenoCommandRunner, DenoTempFiles } from "./lib/CommandRunner.ts";
 import { denoPortProbe } from "./lib/net.ts";
 import type { Env } from "./lib/Env.ts";
@@ -35,6 +37,32 @@ export interface App {
   bootReconciler: BootReconciler;
   /** Shared mc factory (the usage sampler in main.ts needs per-instance clients). */
   mcFactory: McShellClientFactory;
+}
+
+/** RUNTIME=docker (default) or kubernetes — the only place this branches. */
+function buildInstanceRuntime(
+  env: Env,
+  runner: DenoCommandRunner,
+  tempFiles: DenoTempFiles,
+): InstanceRuntime {
+  if (env.runtimeKind === "kubernetes") {
+    const settings = env.kubeSettings();
+    // ServiceAccount token from env (dev) or the in-cluster mounted file.
+    const token = settings.tokenInline ??
+      Deno.readTextFileSync(settings.tokenFile).trim();
+    return new KubernetesRuntime({
+      namespace: settings.namespace,
+      token,
+      apiBase: settings.apiBase,
+      dataSize: settings.dataSize,
+      stateSize: settings.stateSize,
+      storageClass: settings.storageClass,
+    });
+  }
+  return new DockerInstanceRuntime(new DockerRuntime(runner), tempFiles, {
+    network: env.dockerNetwork,
+    addressing: env.provisioningConfig().instanceAddressing,
+  });
 }
 
 /** Request-scoped wiring only — the common case for routers and tests. */
@@ -63,21 +91,16 @@ export function buildApp(
     serveNodeTag: config.serveNodeTag,
     // Instances publish to the HOST loopback — a containerized manager's own
     // netns says nothing about those ports, so only probe when host-run.
-    probePort: config.instanceAddressing === "host"
-      ? denoPortProbe()
-      : undefined,
+    // Under k8s there are no host ports at all (the allocated port is just
+    // the in-pod MinIO listen port), so probing is meaningless there too.
+    probePort:
+      env.runtimeKind === "docker" && config.instanceAddressing === "host"
+        ? denoPortProbe()
+        : undefined,
   });
   const runner = new DenoCommandRunner();
   const tempFiles = new DenoTempFiles();
-  const containerRuntime = new DockerRuntime(runner);
-  const instanceRuntime = new DockerInstanceRuntime(
-    containerRuntime,
-    tempFiles,
-    {
-      network: env.dockerNetwork,
-      addressing: config.instanceAddressing,
-    },
-  );
+  const instanceRuntime = buildInstanceRuntime(env, runner, tempFiles);
   const mcFactory = new McShellClientFactory(
     runner,
     tempFiles,

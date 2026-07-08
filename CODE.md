@@ -48,6 +48,35 @@ mc CLI           │  McShellClient               │
     network (containerized manager; loopback publishes are unreachable
     cross-container on Linux).
 
+### Runtimes — `src/runtime/`
+
+`InstanceRuntime` is the only seam; callers speak domain language (a tripwire
+test bans docker literals outside `runtime/`). Selected by
+`RUNTIME=docker|kubernetes` (default docker) in `app.ts` only.
+
+- **docker** (`DockerRuntime.ts`) — one container per instance; volume
+  names/network/env-file secret transport all derived inside the runtime.
+- **kubernetes** (`KubernetesRuntime.ts`) — plain `fetch` + SA bearer token (no
+  kubectl); per instance: StatefulSet(1) + Service + Secret + 2 PVCs.
+  - Least privilege: userspace tailscaled (`TS_USERSPACE=true`, no
+    capabilities/devices) so the namespace enforces PSA `restricted`; instance
+    pods get `automountServiceAccountToken: false`; manager RBAC is one
+    namespace-scoped Role (see `deploy/k8s/p0rt1on.yaml`).
+  - Suspend = scale StatefulSet to 0 (kubelet owns restarts).
+  - The spent `TAILSCALE_AUTHKEY` is erased from the Secret once healthy (node
+    identity lives on the state PVC).
+  - TLS to the API: set `DENO_CERT` to the mounted cluster CA (manifest does
+    this). Config:
+    `K8S_NAMESPACE/K8S_TOKEN[_FILE]/K8S_API/
+    K8S_DATA_SIZE/K8S_STATE_SIZE/K8S_STORAGE_CLASS`.
+  - Verified on k3d by `deploy/k8s/run-integration.sh` (no secrets needed):
+    runtime tier (apply idempotency, key erasure, scale, PVC gating, RBAC
+    containment, PSA rejection) + portion tier (full tRPC
+    addStart→rotate→offboard with the real instance image, MinIO-only via
+    `TAILSCALE_DISABLED=1`, running as uid 1000 under PSA `restricted`).
+    Still pending the nightly tier: userspace `tailscale serve` over a real
+    tailnet.
+
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 
 - REST API v2 only (`TAILSCALE_OAUTH_CLIENT_SECRET`). No LocalAPI, no tsnet in

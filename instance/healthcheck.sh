@@ -8,8 +8,11 @@ set -eu
 
 MINIO_PORT="${MINIO_PORT:-9000}"
 
-tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"' ||
-  { echo "tailscale not Running" >&2; exit 1; }
+# Integration-test mode (see entrypoint.sh): MinIO-only, no tailnet check.
+if [ "${TAILSCALE_DISABLED:-}" != "1" ]; then
+  tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"' ||
+    { echo "tailscale not Running" >&2; exit 1; }
+fi
 
 wget -q -O /dev/null "http://localhost:${MINIO_PORT}/minio/health/live" ||
   { echo "minio not live" >&2; exit 1; }

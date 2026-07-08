@@ -1,0 +1,143 @@
+# p0rt1on on Kubernetes — everything lives in ONE namespace; the manager's
+# ServiceAccount has a single namespace-scoped Role (least privilege). PSA
+# `restricted` is enforced on the namespace: instance pods run userspace
+# tailscaled (TS_USERSPACE=true), so nothing needs capabilities or devices —
+# the cluster itself refuses privileged pods, even from a compromised manager.
+#
+#   kubectl apply -f deploy/k8s/p0rt1on.yaml
+#
+# Prereqs: build/push the manager + instance images somewhere the cluster can
+# pull; set P0RT1ON_MASTER_KEY + TAILSCALE_OAUTH_CLIENT_SECRET in the
+# `p0rt1on-manager-secrets` Secret below. StorageClass: reclaimPolicy Retain
+# recommended — offboard deletes the PVC but the PV survives until a human
+# confirms (kinder-than-docker semantics for a backup product).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: p0rt1on
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+---
+# The manager's ENTIRE permission surface. Nothing cluster-scoped; it cannot
+# escalate itself (no RBAC verbs) and is powerless outside this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets", "persistentvolumeclaims"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: p0rt1on-manager
+subjects:
+  - kind: ServiceAccount
+    name: p0rt1on-manager
+    namespace: p0rt1on
+---
+# Fill in before applying (or create via kubectl create secret).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: p0rt1on-manager-secrets
+  namespace: p0rt1on
+stringData:
+  P0RT1ON_MASTER_KEY: "CHANGE-ME"
+  TAILSCALE_OAUTH_CLIENT_SECRET: "CHANGE-ME"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: p0rt1on-manager-data
+  namespace: p0rt1on
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: p0rt1on-manager }
+  template:
+    metadata:
+      labels: { app: p0rt1on-manager }
+    spec:
+      serviceAccountName: p0rt1on-manager
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: manager
+          image: p0rt1on-manager:latest # pin before production use
+          envFrom:
+            - secretRef: { name: p0rt1on-manager-secrets }
+          env:
+            - name: RUNTIME
+              value: kubernetes
+            - name: K8S_NAMESPACE
+              value: p0rt1on
+            - name: DB_PATH
+              value: /data/p0rt1on.db
+            # Trust the cluster CA for API calls (Deno reads this PEM).
+            - name: DENO_CERT
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            # Instances POST audit events to the manager Service in-cluster —
+            # no host-gateway anywhere.
+            - name: AUDIT_WEBHOOK_URL
+              value: http://p0rt1on-manager.p0rt1on.svc:8081/internal/audit
+          ports:
+            - containerPort: 8080 # admin UI/API (loopback-only by design;
+            # reach it via `kubectl port-forward` — do NOT expose it)
+            - containerPort: 8081 # audit webhook listener
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: p0rt1on-manager-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+spec:
+  selector: { app: p0rt1on-manager }
+  ports:
+    - name: audit
+      port: 8081
+      targetPort: 8081

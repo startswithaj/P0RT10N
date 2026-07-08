@@ -99,6 +99,40 @@ export class Env {
   get dockerNetwork(): string {
     return this.#str("P0RT1ON_NETWORK", "p0rt1on-net");
   }
+
+  // ---- runtime selection ----
+  /** Which InstanceRuntime realizes instances. Docker stays the default. */
+  get runtimeKind(): "docker" | "kubernetes" {
+    return this.#str("RUNTIME", "docker") === "kubernetes"
+      ? "kubernetes"
+      : "docker";
+  }
+  /**
+   * Kubernetes runtime settings (token resolved by app.ts — reading the
+   * mounted ServiceAccount file is an fs concern, not an env one).
+   */
+  kubeSettings(): {
+    namespace: string;
+    apiBase?: string;
+    tokenInline?: string;
+    tokenFile: string;
+    dataSize: string;
+    stateSize: string;
+    storageClass?: string;
+  } {
+    return {
+      namespace: this.#str("K8S_NAMESPACE", "p0rt1on"),
+      apiBase: this.#opt("K8S_API"),
+      tokenInline: this.#opt("K8S_TOKEN"),
+      tokenFile: this.#str(
+        "K8S_TOKEN_FILE",
+        "/var/run/secrets/kubernetes.io/serviceaccount/token",
+      ),
+      dataSize: this.#str("K8S_DATA_SIZE", "50Gi"),
+      stateSize: this.#str("K8S_STATE_SIZE", "1Gi"),
+      storageClass: this.#opt("K8S_STORAGE_CLASS"),
+    };
+  }
   /**
    * Built SPA assets dir to serve (production image sets this). Unset in dev —
    * the Vite dev server serves the frontend instead, so the API only does tRPC.
