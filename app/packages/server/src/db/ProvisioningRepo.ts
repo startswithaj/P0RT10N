@@ -9,6 +9,7 @@ import {
   usage,
 } from "./Schema.ts";
 import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
+import { defer } from "../lib/defer.ts";
 import type {
   FriendNaming,
   FriendProvisionContext,
@@ -37,67 +38,80 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     private readonly config: RepoConfig,
   ) {}
 
-  // deno-lint-ignore require-await
-  async reserveFriend(
+  // The repo's methods are synchronous SQLite calls exposed as Promises
+  // (interface contract). Each body runs via defer() so any throw —
+  // exhausted port range, FK violation, NOT_FOUND — rejects instead of
+  // throwing synchronously; callers rely on `.catch()` semantics.
+
+  reserveFriend(
     input: AddFriendInput,
     naming: FriendNaming,
   ): Promise<InstanceReservation> {
-    // async so a transaction throw (e.g. exhausted port range) rejects rather
-    // than throwing synchronously.
-    return this.db.transaction((tx) => this.reserveTx(tx, input, naming));
+    return defer(() =>
+      this.db.transaction((tx) => this.reserveTx(tx, input, naming))
+    );
   }
 
-  // deno-lint-ignore require-await
-  async recordAccessKey(friendId: number, accessKeyId: string): Promise<void> {
-    this.db.update(friends).set({ s3AccessKeyId: accessKeyId })
-      .where(eq(friends.id, friendId)).run();
-  }
-
-  // deno-lint-ignore require-await
-  async setQuota(friendId: number, quotaBytes: number): Promise<void> {
-    this.db.update(friends).set({ quotaBytes })
-      .where(eq(friends.id, friendId)).run();
-  }
-
-  // deno-lint-ignore require-await
-  async setStatus(friendId: number, status: FriendStatus): Promise<void> {
-    this.db.update(friends).set({ status })
-      .where(eq(friends.id, friendId)).run();
-  }
-
-  // deno-lint-ignore require-await
-  async activate(friendId: number, instanceId: number): Promise<void> {
-    // Two-row status flip must be atomic — a crash between the friend and
-    // instance updates leaves a state the boot sweep cannot interpret.
-    this.db.transaction((tx) => {
-      tx.update(friends).set({ status: "active" })
+  recordAccessKey(friendId: number, accessKeyId: string): Promise<void> {
+    return defer(() => {
+      this.db.update(friends).set({ s3AccessKeyId: accessKeyId })
         .where(eq(friends.id, friendId)).run();
-      tx.update(instances).set({ status: "active" })
-        .where(eq(instances.id, instanceId)).run();
     });
   }
 
-  // deno-lint-ignore require-await
-  async markFailed(friendId: number): Promise<void> {
-    // Atomic for the same reason as activate (friend + possibly instance row).
-    this.db.transaction((tx) => this.failFriendRow(tx, friendId));
+  setQuota(friendId: number, quotaBytes: number): Promise<void> {
+    return defer(() => {
+      this.db.update(friends).set({ quotaBytes })
+        .where(eq(friends.id, friendId)).run();
+    });
   }
 
-  // deno-lint-ignore require-await
-  async failStaleProvisioning(): Promise<string[]> {
+  setStatus(friendId: number, status: FriendStatus): Promise<void> {
+    return defer(() => {
+      this.db.update(friends).set({ status })
+        .where(eq(friends.id, friendId)).run();
+    });
+  }
+
+  activate(friendId: number, instanceId: number): Promise<void> {
+    // Two-row status flip must be atomic — a crash between the friend and
+    // instance updates leaves a state the boot sweep cannot interpret.
+    return defer(() => {
+      this.db.transaction((tx) => {
+        tx.update(friends).set({ status: "active" })
+          .where(eq(friends.id, friendId)).run();
+        tx.update(instances).set({ status: "active" })
+          .where(eq(instances.id, instanceId)).run();
+      });
+    });
+  }
+
+  markFailed(friendId: number): Promise<void> {
+    // Atomic for the same reason as activate (friend + possibly instance row).
+    return defer(() => {
+      this.db.transaction((tx) => this.failFriendRow(tx, friendId));
+    });
+  }
+
+  failStaleProvisioning(): Promise<string[]> {
     // At boot any `provisioning` row is stale — provisioning only ever happens
     // inside the running process, so no cross-restart concurrency exists. One
     // transaction so a crash mid-flip can't leave a half-recovered set.
-    return this.db.transaction((tx) => {
-      const stale = tx.select({ id: friends.id, name: friends.name })
-        .from(friends).where(eq(friends.status, "provisioning")).all();
-      stale.forEach((row) => this.failFriendRow(tx, row.id));
-      return stale.map((r) => r.name);
-    });
+    return defer(() =>
+      this.db.transaction((tx) => {
+        const stale = tx.select({ id: friends.id, name: friends.name })
+          .from(friends).where(eq(friends.status, "provisioning")).all();
+        stale.forEach((row) => this.failFriendRow(tx, row.id));
+        return stale.map((r) => r.name);
+      })
+    );
   }
 
-  // deno-lint-ignore require-await
-  async context(friendId: number): Promise<FriendProvisionContext> {
+  context(friendId: number): Promise<FriendProvisionContext> {
+    return defer(() => this.contextSync(friendId));
+  }
+
+  private contextSync(friendId: number): FriendProvisionContext {
     const row = this.db.select({
       id: friends.id,
       name: friends.name,
@@ -121,19 +135,18 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     };
   }
 
-  // deno-lint-ignore require-await
-  async friendsOnInstance(instanceId: number): Promise<number> {
-    return this.liveFriendsOn(instanceId);
+  friendsOnInstance(instanceId: number): Promise<number> {
+    return defer(() => this.liveFriendsOn(instanceId));
   }
 
-  // deno-lint-ignore require-await
-  async failedFriendIds(): Promise<number[]> {
-    return this.db.select({ id: friends.id }).from(friends)
-      .where(eq(friends.status, "failed")).all().map((r) => r.id);
+  failedFriendIds(): Promise<number[]> {
+    return defer(() =>
+      this.db.select({ id: friends.id }).from(friends)
+        .where(eq(friends.status, "failed")).all().map((r) => r.id)
+    );
   }
 
-  // deno-lint-ignore require-await
-  async liveInstances(): Promise<
+  liveInstances(): Promise<
     {
       instanceId: number;
       tsHostname: string;
@@ -141,79 +154,84 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       status: string;
     }[]
   > {
-    return this.db.select({
-      instanceId: instances.id,
-      tsHostname: instances.tsHostname,
-      minioPort: instances.minioPort,
-      status: instances.status,
-    }).from(instances).where(ne(instances.status, "failed")).all();
+    return defer(() =>
+      this.db.select({
+        instanceId: instances.id,
+        tsHostname: instances.tsHostname,
+        minioPort: instances.minioPort,
+        status: instances.status,
+      }).from(instances).where(ne(instances.status, "failed")).all()
+    );
   }
 
-  // deno-lint-ignore require-await
-  async failInstanceMissing(instanceId: number): Promise<number> {
+  failInstanceMissing(instanceId: number): Promise<number> {
     // The instance's container is gone (host wipe, manual docker rm): fail the
     // instance and every non-failed friend on it in one transaction so the
     // sweep reaps the rows and frees the names. Data is already gone — this
     // only makes the DB stop lying about it.
-    return this.db.transaction((tx) => {
-      const live = tx.select({ id: friends.id }).from(friends)
-        .where(and(
-          eq(friends.instanceId, instanceId),
-          ne(friends.status, "failed"),
-        )).all();
-      live.forEach((row) =>
-        tx.update(friends).set({ status: "failed" })
-          .where(eq(friends.id, row.id)).run()
-      );
-      tx.update(instances).set({ status: "failed" })
-        .where(eq(instances.id, instanceId)).run();
-      return live.length;
-    });
+    return defer(() =>
+      this.db.transaction((tx) => {
+        const live = tx.select({ id: friends.id }).from(friends)
+          .where(and(
+            eq(friends.instanceId, instanceId),
+            ne(friends.status, "failed"),
+          )).all();
+        live.forEach((row) =>
+          tx.update(friends).set({ status: "failed" })
+            .where(eq(friends.id, row.id)).run()
+        );
+        tx.update(instances).set({ status: "failed" })
+          .where(eq(instances.id, instanceId)).run();
+        return live.length;
+      })
+    );
   }
 
-  // deno-lint-ignore require-await
-  async failedInstances(): Promise<
-    { instanceId: number; tsHostname: string }[]
-  > {
-    return this.db.select({
-      instanceId: instances.id,
-      tsHostname: instances.tsHostname,
-    }).from(instances).where(eq(instances.status, "failed")).all();
+  failedInstances(): Promise<{ instanceId: number; tsHostname: string }[]> {
+    return defer(() =>
+      this.db.select({
+        instanceId: instances.id,
+        tsHostname: instances.tsHostname,
+      }).from(instances).where(eq(instances.status, "failed")).all()
+    );
   }
 
-  // deno-lint-ignore require-await
-  async deleteFriend(friendId: number): Promise<void> {
+  deleteFriend(friendId: number): Promise<void> {
     // friends.id is referenced (with no ON DELETE CASCADE) by usage, activity,
     // and audit — deleting the friend while any of those rows exist trips a
     // FOREIGN KEY constraint. Drop the friend-scoped metric rows, but preserve
     // the audit trail by nulling its (nullable) friendId. One transaction so a
     // crash can't leave the friend deleted with orphaned children (or vice-versa).
-    this.db.transaction((tx) => {
-      tx.update(auditTable).set({ friendId: null })
-        .where(eq(auditTable.friendId, friendId)).run();
-      // no-param-mutation flags `.delete()` on the `tx` param as a Map/Set
-      // mutation — a false positive for drizzle's query builder.
-      // deno-lint-ignore custom-no-param-mutation/no-param-mutation
-      tx.delete(usage).where(eq(usage.friendId, friendId)).run();
-      // deno-lint-ignore custom-no-param-mutation/no-param-mutation
-      tx.delete(activity).where(eq(activity.friendId, friendId)).run();
-      // deno-lint-ignore custom-no-param-mutation/no-param-mutation
-      tx.delete(friends).where(eq(friends.id, friendId)).run();
+    return defer(() => {
+      this.db.transaction((tx) => {
+        tx.update(auditTable).set({ friendId: null })
+          .where(eq(auditTable.friendId, friendId)).run();
+        // no-param-mutation flags `.delete()` on the `tx` param as a Map/Set
+        // mutation — a false positive for drizzle's query builder.
+        // deno-lint-ignore custom-no-param-mutation/no-param-mutation
+        tx.delete(usage).where(eq(usage.friendId, friendId)).run();
+        // deno-lint-ignore custom-no-param-mutation/no-param-mutation
+        tx.delete(activity).where(eq(activity.friendId, friendId)).run();
+        // deno-lint-ignore custom-no-param-mutation/no-param-mutation
+        tx.delete(friends).where(eq(friends.id, friendId)).run();
+      });
     });
   }
 
-  // deno-lint-ignore require-await
-  async deleteInstance(instanceId: number): Promise<void> {
-    this.db.delete(instances).where(eq(instances.id, instanceId)).run();
+  deleteInstance(instanceId: number): Promise<void> {
+    return defer(() => {
+      this.db.delete(instances).where(eq(instances.id, instanceId)).run();
+    });
   }
 
-  // deno-lint-ignore require-await
-  async audit(
+  audit(
     friendId: number | null,
     action: string,
     detail?: string,
   ): Promise<void> {
-    this.db.insert(auditTable).values({ friendId, action, detail }).run();
+    return defer(() => {
+      this.db.insert(auditTable).values({ friendId, action, detail }).run();
+    });
   }
 
   // ---- transaction body + helpers ----
