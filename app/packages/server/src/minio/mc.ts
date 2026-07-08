@@ -127,14 +127,11 @@ export interface TraceEvent {
   callStats?: { rx: number; tx: number; duration: string };
 }
 
-/** Builds an McClient for a given instance target (derives root creds itself). */
+/**
+ * Builds an McClient for a given instance target (derives root creds itself).
+ * Endpoint composition is the RUNTIME's job (`InstanceRuntime.adminEndpoint`)
+ * — the factory is wired with it at boot.
+ */
 export interface McClientFactory {
   forInstance(target: McTarget): McClient;
-
-  /**
-   * The admin-plane MinIO endpoint for an instance — the ONE place it is
-   * composed (provisioning, smoke test, du, and webhook config all consume
-   * it). Addressing-mode aware; see runtime/adminEndpoint.ts.
-   */
-  adminEndpoint(target: McTarget): string;
 }

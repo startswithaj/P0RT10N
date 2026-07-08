@@ -1,8 +1,8 @@
 import type { ServiceStatus, StatusView } from "@p0rt1on/shared/domain";
 import type {
-  ContainerRuntime,
   InstanceDiagnostics,
   InstanceHealth,
+  InstanceRuntime,
 } from "../runtime/runtime.ts";
 import { containerNames } from "../runtime/names.ts";
 import type { InventoryService, Logger } from "./types.ts";
@@ -42,7 +42,7 @@ function serviceState(
 export class RuntimeInventoryService implements InventoryService {
   constructor(
     private readonly queries: StatusInstances,
-    private readonly runtime: ContainerRuntime,
+    private readonly runtime: InstanceRuntime,
     private readonly tailnetDomain: string,
     private readonly logger: Logger,
   ) {}
@@ -63,14 +63,17 @@ export class RuntimeInventoryService implements InventoryService {
 
   diagnose(instanceName: string): Promise<InstanceDiagnostics> {
     this.logger.debug("diagnosing instance", { instanceName });
-    return this.runtime.diagnose(containerNames(instanceName).container);
+    return this.runtime.diagnoseInstance(instanceName);
   }
 
   private async probe(
     inst: StatusInstanceRow,
   ): Promise<{ minio: ServiceStatus; tailscale: ServiceStatus }> {
+    // The container name stays as the row LABEL only (the status page shows
+    // the real resource name for debugging); health goes through the
+    // runtime-agnostic interface.
     const names = containerNames(inst.tsHostname);
-    const health = await this.runtime.health(names.container);
+    const health = await this.runtime.instanceHealth(inst.tsHostname);
     const state = serviceState(health, inst.status);
     return {
       minio: {

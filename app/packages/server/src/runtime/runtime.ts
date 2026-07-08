@@ -1,3 +1,5 @@
+import type { S3Credential } from "../minio/mc.ts";
+
 // ============================================================================
 // Container lifecycle — start/stop/remove the per-instance container. Each
 // instance is ONE container running MinIO + tailscaled together (see
@@ -40,14 +42,35 @@ export interface InstanceDiagnostics {
 }
 
 /**
- * Spec for one instance container (MinIO + tailscaled in a single image — see
- * `instance/`). `rootCredSecretRef` names a mounted env-file carrying the
- * MinIO root creds AND the just-minted single-use TAILSCALE_AUTHKEY (path
- * only — no secret ever on argv or in the DB). `image` is pinned. The
- * container joins `network` (the admin plane: the manager reaches MinIO at
- * `http://<name>:<minioPort>`); friends reach it over Tailscale.
+ * WHAT an instance is, in domain language — no volume names, no network, no
+ * env-file paths, no port publishing: each runtime realizes those itself
+ * (docker: named volumes + temp env-file; k8s: PVC + Secret). Secrets
+ * (`rootCred`, `tsAuthKey`) transit in memory only — derived/minted per
+ * request, never argv, logs, or the DB — and each runtime picks its own
+ * secret transport.
  */
 export interface InstanceSpec {
+  /** Instance name = its tailnet hostname (runtimes derive resource names). */
+  name: string;
+  /** Combined MinIO + tailscaled image (pinned). See `instance/`. */
+  image: string;
+  /** Server-side serve-node tag for the instance's own tailscaled. */
+  tag: string;
+  /** Port MinIO listens on for the admin plane (see runtime/adminEndpoint.ts). */
+  minioPort: number;
+  /** MinIO root credential — deterministically derived, never stored. */
+  rootCred: S3Credential;
+  /** Single-use tailnet enrollment key for the instance's serve node. */
+  tsAuthKey: string;
+}
+
+/**
+ * Docker-level run spec (the old docker-shaped InstanceSpec) — built by
+ * DockerInstanceRuntime from the domain `InstanceSpec`, never by callers.
+ * `rootCredSecretRef` names a mounted env-file carrying the MinIO root creds
+ * AND the TAILSCALE_AUTHKEY (path only — no secret ever on argv).
+ */
+export interface ContainerRunSpec {
   name: string;
   image: string;
   tsHostname: string;
@@ -66,7 +89,7 @@ export interface InstanceSpec {
  */
 export interface ContainerRuntime {
   /** Start the instance container if absent; adopt + ensure running if it exists. */
-  ensureInstance(spec: InstanceSpec): Promise<ContainerHandle>;
+  ensureInstance(spec: ContainerRunSpec): Promise<ContainerHandle>;
 
   /**
    * Adopt-only start: start an EXISTING container if stopped; no-op if
@@ -117,6 +140,14 @@ export interface InstanceRuntime {
   ensureInstance(spec: InstanceSpec): Promise<ContainerHandle>;
 
   /**
+   * The admin-plane MinIO endpoint for an instance — only the runtime knows
+   * how to address one (docker: loopback publish or container name over the
+   * shared network; k8s: cluster DNS). Consumed by the mc factory, smoke
+   * test, and webhook config; composed nowhere else.
+   */
+  adminEndpoint(instanceName: string, minioPort: number): string;
+
+  /**
    * Block until the instance's HEALTHCHECK reports healthy (MinIO live + tailnet
    * up), or throw after a timeout. MUST be awaited after `ensureInstance` before
    * any admin call — `docker run` returns before MinIO is accepting connections.
@@ -134,12 +165,26 @@ export interface InstanceRuntime {
   /** Diagnostics for an instance by its hostname (state + health + logs). */
   diagnoseInstance(instanceName: string): Promise<InstanceDiagnostics>;
 
+  /** Instance health by name — one probe, no bounded wait. */
+  instanceHealth(instanceName: string): Promise<InstanceHealth>;
+
+  /**
+   * Every runtime-managed instance (name = tailnet hostname) with its state.
+   * Lets the boot reconcile compare the DB against reality without knowing
+   * how instances are labelled or named by the engine.
+   */
+  listInstances(): Promise<{ name: string; state: ContainerState }[]>;
+
   /** Stop the instance container (dedicated suspend). */
   stopInstance(instanceName: string): Promise<void>;
 
-  /** Remove the instance container; `removeVolumes` for offboard teardown. */
+  /**
+   * The single teardown entry. `removeData` also destroys the instance's
+   * persistent data (offboard) — how that's realized (named volumes, PVCs)
+   * is the runtime's business. Idempotent: "already absent" is success.
+   */
   removeInstance(
     instanceName: string,
-    opts: { removeVolumes: boolean },
+    opts: { removeData: boolean },
   ): Promise<void>;
 }

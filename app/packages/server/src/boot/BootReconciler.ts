@@ -1,5 +1,4 @@
-import type { ContainerHandle, ContainerRuntime } from "../runtime/runtime.ts";
-import { containerNames } from "../runtime/names.ts";
+import type { ContainerState, InstanceRuntime } from "../runtime/runtime.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import type { McClientFactory } from "../minio/mc.ts";
 import type { Logger } from "../services/types.ts";
@@ -50,7 +49,7 @@ type InstanceRow = {
 export class BootReconciler {
   constructor(
     private readonly repo: ProvisioningRepo,
-    private readonly runtime: ContainerRuntime,
+    private readonly runtime: InstanceRuntime,
     private readonly mc: McClientFactory,
     private readonly config: ReconcileConfig,
     private readonly logger: Logger,
@@ -63,24 +62,24 @@ export class BootReconciler {
   async run(): Promise<ReconcileSummary> {
     const log = this.logger.child({ op: "bootReconcile" });
     const rows = await this.repo.liveInstances();
-    const containers = await this.runtime.list().then(
+    const instances = await this.runtime.listInstances().then(
       (list) => list,
       (err) => {
         // The admin UI must still come up to SHOW the problem — never fatal.
-        log.error("docker unreachable — skipping container reconcile", {
+        log.error("runtime unreachable — skipping instance reconcile", {
           error: String(err),
         });
         return null;
       },
     );
-    if (containers === null) {
+    if (instances === null) {
       return { started: 0, healthy: 0, failed: 0, orphaned: 0, degraded: 0 };
     }
 
-    const byName = new Map(containers.map((c) => [c.name, c]));
+    const byName = new Map(instances.map((c) => [c.name, c]));
     const outcomes = await Promise.all(
       rows.map((row) =>
-        this.reconcileOne(row, byName.get(this.containerOf(row)), log)
+        this.reconcileOne(row, byName.get(row.tsHostname), log)
           .catch((err): Outcome => {
             // One bad instance never aborts the others or the boot.
             log.error("reconcile failed for instance", {
@@ -92,11 +91,11 @@ export class BootReconciler {
       ),
     );
 
-    const known = new Set(rows.map((row) => this.containerOf(row)));
-    const orphans = containers.filter((c) => !known.has(c.name));
+    const known = new Set(rows.map((row) => row.tsHostname));
+    const orphans = instances.filter((c) => !known.has(c.name));
     orphans.forEach((o) =>
-      log.warn("orphan p0rt1on container with no DB row — left untouched", {
-        container: o.name,
+      log.warn("orphan p0rt1on instance with no DB row — left untouched", {
+        instance: o.name,
       })
     );
 
@@ -112,20 +111,16 @@ export class BootReconciler {
     return summary;
   }
 
-  private containerOf(row: InstanceRow): string {
-    return containerNames(row.tsHostname).container;
-  }
-
   private async reconcileOne(
     row: InstanceRow,
-    container: ContainerHandle | undefined,
+    instance: { name: string; state: ContainerState } | undefined,
     log: Logger,
   ): Promise<Outcome> {
-    if (!container) {
+    if (!instance) {
       const friendsFailed = await this.repo.failInstanceMissing(
         row.instanceId,
       );
-      log.warn("container missing — instance and its friends marked failed", {
+      log.warn("instance missing — it and its friends marked failed", {
         instance: row.tsHostname,
         friendsFailed,
       });
@@ -133,19 +128,19 @@ export class BootReconciler {
     }
     // Adopt regardless of state: starts it if stopped, and converges config
     // drift (e.g. the restart policy) even when it's already running.
-    await this.runtime.ensureStarted(container.name);
-    const healthy = await this.waitHealthy(container.name, this.wait.attempts);
+    await this.runtime.ensureRunning(row.tsHostname);
+    const healthy = await this.waitHealthy(row.tsHostname, this.wait.attempts);
     if (!healthy) {
       // Alive but not healthy: log only. Marking it failed would feed the
-      // sweep, which DELETES containers/volumes — boot never destroys. The
-      // status page surfaces it as down.
+      // sweep, which DELETES instances and their data — boot never destroys.
+      // The status page surfaces it as down.
       log.error("instance not healthy after bounded wait — left as-is", {
         instance: row.tsHostname,
       });
       return "unhealthy";
     }
     await this.realign(row);
-    return container.state === "stopped" ? "started" : "healthy";
+    return instance.state === "stopped" ? "started" : "healthy";
   }
 
   /**
@@ -164,12 +159,12 @@ export class BootReconciler {
     );
   }
 
-  /** Recursive bounded poll of the container HEALTHCHECK. */
+  /** Recursive bounded poll of the instance's health probe. */
   private async waitHealthy(
     name: string,
     attemptsLeft: number,
   ): Promise<boolean> {
-    const health = await this.runtime.health(name);
+    const health = await this.runtime.instanceHealth(name);
     if (health === "healthy") return true;
     if (attemptsLeft <= 1) return false;
     await new Promise((resolve) => setTimeout(resolve, this.wait.delayMs));

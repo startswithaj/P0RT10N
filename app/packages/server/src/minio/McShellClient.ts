@@ -369,15 +369,11 @@ export class McShellClientFactory implements McClientFactory {
     private readonly mcBin = "mc",
   ) {}
 
-  adminEndpoint(target: McTarget): string {
-    return this.endpointFor(target);
-  }
-
   forInstance(target: McTarget): McClient {
     return new McShellClient(
       target,
       this.keyGen.rootCredentialFor(target.alias),
-      this.adminEndpoint(target),
+      this.endpointFor(target),
       this.runner,
       this.tempFiles,
       this.mcBin,

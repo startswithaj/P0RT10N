@@ -1,5 +1,6 @@
 import type {
   ContainerHandle,
+  ContainerRunSpec,
   ContainerRuntime,
   ContainerState,
   InstanceDiagnostics,
@@ -8,7 +9,11 @@ import type {
   InstanceSpec,
 } from "./runtime.ts";
 import { containerNames } from "./names.ts";
-import type { CommandRunner } from "../lib/CommandRunner.ts";
+import {
+  adminEndpointComposer,
+  type InstanceAddressing,
+} from "./adminEndpoint.ts";
+import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
@@ -89,7 +94,7 @@ export class DockerRuntime implements ContainerRuntime {
    * Tailscale. Root creds come from a mounted env-file (path only — no secret in
    * args).
    */
-  ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
+  ensureInstance(spec: ContainerRunSpec): Promise<ContainerHandle> {
     return this.ensure(spec.name, () => [
       "run",
       "-d",
@@ -295,12 +300,52 @@ export class DockerRuntime implements ContainerRuntime {
 /**
  * Instance-level operations over a DockerRuntime, addressing the instance
  * container by its hostname (so provisioning/offboard don't build names).
+ * Owns every docker-ism the domain `InstanceSpec` no longer carries: derived
+ * container/volume names, the docker network, and the secret transport (a
+ * temp env-file written before `docker run`, removed in `finally`).
  */
 export class DockerInstanceRuntime implements InstanceRuntime {
-  constructor(private readonly runtime: ContainerRuntime) {}
+  constructor(
+    private readonly runtime: ContainerRuntime,
+    private readonly tempFiles: TempFiles,
+    private readonly config: {
+      network: string;
+      addressing: InstanceAddressing;
+    },
+  ) {}
 
-  ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
-    return this.runtime.ensureInstance(spec);
+  adminEndpoint(instanceName: string, minioPort: number): string {
+    return adminEndpointComposer(this.config.addressing)({
+      alias: instanceName,
+      minioPort,
+    });
+  }
+
+  async ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
+    const names = containerNames(spec.name);
+    // MinIO root creds + the serve auth key ride a short-lived env-file for
+    // `docker run` (baked into the container, file removed after) — an
+    // enrollment credential must never ride the argv (host-visible via ps).
+    const envFile = await this.tempFiles.write(
+      `MINIO_ROOT_USER=${spec.rootCred.accessKeyId}\n` +
+        `MINIO_ROOT_PASSWORD=${spec.rootCred.secretKey}\n` +
+        `TAILSCALE_AUTHKEY=${spec.tsAuthKey}\n`,
+    );
+    try {
+      return await this.runtime.ensureInstance({
+        name: names.container,
+        image: spec.image,
+        tsHostname: spec.name,
+        tag: spec.tag,
+        minioPort: spec.minioPort,
+        dataVolume: names.dataVolume,
+        stateVolume: names.stateVolume,
+        rootCredSecretRef: envFile,
+        network: this.config.network,
+      });
+    } finally {
+      await this.tempFiles.remove(envFile);
+    }
   }
 
   async waitUntilHealthy(instanceName: string): Promise<void> {
@@ -329,19 +374,35 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     return this.runtime.diagnose(containerNames(instanceName).container);
   }
 
+  instanceHealth(instanceName: string): Promise<InstanceHealth> {
+    return this.runtime.health(containerNames(instanceName).container);
+  }
+
+  async listInstances(): Promise<
+    { name: string; state: ContainerState }[]
+  > {
+    // Labelled containers are always named by containerNames(); strip the
+    // prefix back to the instance (tailnet-hostname) name.
+    const prefix = containerNames("").container;
+    return (await this.runtime.list()).map((c) => ({
+      name: c.name.startsWith(prefix) ? c.name.slice(prefix.length) : c.name,
+      state: c.state,
+    }));
+  }
+
   async stopInstance(instanceName: string): Promise<void> {
     await this.runtime.stop(containerNames(instanceName).container);
   }
 
   async removeInstance(
     instanceName: string,
-    opts: { removeVolumes: boolean },
+    opts: { removeData: boolean },
   ): Promise<void> {
     const names = containerNames(instanceName);
     await this.runtime.remove(names.container, {
-      removeVolume: opts.removeVolumes,
+      removeVolume: opts.removeData,
     });
-    if (opts.removeVolumes) {
+    if (opts.removeData) {
       // Legacy 4-volume names included so pre-SNSD instances reap fully;
       // removeVolumes ignores absent names.
       await this.runtime.removeVolumes([

@@ -94,6 +94,11 @@ export class Env {
   get dbPath(): string {
     return this.#str("DB_PATH", "./data/p0rt1on.db");
   }
+  /** Docker network instances join — a docker-runtime detail, so it feeds
+   * DockerInstanceRuntime directly, not ProvisioningConfig. */
+  get dockerNetwork(): string {
+    return this.#str("P0RT1ON_NETWORK", "p0rt1on-net");
+  }
   /**
    * Built SPA assets dir to serve (production image sets this). Unset in dev —
    * the Vite dev server serves the frontend instead, so the API only does tRPC.
@@ -129,7 +134,6 @@ export class Env {
   provisioningConfig(): Omit<ProvisioningConfig, "auditWebhookToken"> {
     return {
       instanceImage: this.#str("INSTANCE_IMAGE", "p0rt1on-instance:latest"),
-      network: this.#str("P0RT1ON_NETWORK", "p0rt1on-net"),
       // `host` (default): host-run manager reaches the loopback-published
       // port. `network`: containerized manager reaches instances by container
       // name over the shared docker network — published loopback ports are

@@ -12,7 +12,6 @@ import {
 } from "./runtime/DockerRuntime.ts";
 import { DenoCommandRunner, DenoTempFiles } from "./lib/CommandRunner.ts";
 import { denoPortProbe } from "./lib/net.ts";
-import { adminEndpointComposer } from "./runtime/adminEndpoint.ts";
 import type { Env } from "./lib/Env.ts";
 import {
   ActivityServiceImpl,
@@ -70,25 +69,33 @@ export function buildApp(
   });
   const runner = new DenoCommandRunner();
   const tempFiles = new DenoTempFiles();
+  const containerRuntime = new DockerRuntime(runner);
+  const instanceRuntime = new DockerInstanceRuntime(
+    containerRuntime,
+    tempFiles,
+    {
+      network: env.dockerNetwork,
+      addressing: config.instanceAddressing,
+    },
+  );
   const mcFactory = new McShellClientFactory(
     runner,
     tempFiles,
     keyGen,
-    adminEndpointComposer(config.instanceAddressing),
+    // Only the runtime knows how to address an instance's admin plane.
+    (t) => instanceRuntime.adminEndpoint(t.alias, t.minioPort),
   );
   const tailscale = new TailscaleHttpApi({
     token: env.tailscaleOauthClientSecret,
     tagOwner: env.tagOwner,
   });
-  const containerRuntime = new DockerRuntime(runner);
   const provisioningService = new ProvisioningService(
     config,
     repo,
     mcFactory,
-    new DockerInstanceRuntime(containerRuntime),
+    instanceRuntime,
     tailscale,
     keyGen,
-    tempFiles,
     new McSmokeTester(runner, tempFiles),
     logger,
   );
@@ -106,7 +113,7 @@ export function buildApp(
     activityService: new ActivityServiceImpl(queries),
     inventoryService: new RuntimeInventoryService(
       queries,
-      containerRuntime,
+      instanceRuntime,
       config.tailnetDomain,
       logger,
     ),
@@ -118,7 +125,7 @@ export function buildApp(
     mcFactory,
     bootReconciler: new BootReconciler(
       repo,
-      containerRuntime,
+      instanceRuntime,
       mcFactory,
       {
         auditWebhookUrl: config.auditWebhookUrl,

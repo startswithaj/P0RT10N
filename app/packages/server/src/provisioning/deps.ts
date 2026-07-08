@@ -17,8 +17,6 @@ import type { InstanceAddressing } from "../runtime/adminEndpoint.ts";
 export interface ProvisioningConfig {
   /** Combined MinIO + tailscaled instance image (pinned). See `instance/`. */
   instanceImage: string;
-  /** Docker network the instances join (they don't share it with the manager). */
-  network: string;
   /**
    * How the manager reaches instances' MinIO admin plane: `host` (loopback-
    * published port, host-run dev) or `network` (by container name over the

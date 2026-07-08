@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { OFFBOARD_STEPS, PROVISION_STEPS } from "@p0rt1on/shared/domain";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
+import type { InstanceSpec } from "../runtime/runtime.ts";
 import {
   ADD_INPUT,
   buildProvisioningService,
@@ -39,16 +40,28 @@ describe("ProvisioningService.addFriend", () => {
     expect(bundle.s3Endpoint).toBe("https://p0rt1on-alice.tailnet.ts.net");
   });
 
-  it("delivers TAILSCALE_AUTHKEY via the env-file alongside the root creds", async () => {
+  it("hands the serve key + derived root cred to the runtime in memory", async () => {
+    // Secret transport (docker env-file / k8s Secret) is the runtime's
+    // business — the service only puts the material on the in-memory spec.
     const calls: Calls = [];
-    const written: string[] = [];
-    await buildProvisioningService(calls, DEDICATED_RES, { written })
-      .addFriend(ADD_INPUT);
+    const specs: InstanceSpec[] = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      runtime: {
+        ensureInstance: (spec) => {
+          specs.push(spec);
+          return Promise.resolve({
+            name: spec.name,
+            id: "id",
+            state: "running",
+          });
+        },
+      },
+    }).addFriend(ADD_INPUT);
 
-    const envFile = written.find((w) => w.includes("MINIO_ROOT_USER="));
-    expect(envFile).toContain("MINIO_ROOT_PASSWORD=");
-    // The serve key rides the env-file, never the docker argv.
-    expect(envFile).toContain("TAILSCALE_AUTHKEY=tskey-tag:p0rt1on-serve");
+    expect(specs[0].rootCred).toEqual(TEST_CRED);
+    expect(specs[0].tsAuthKey).toBe("tskey-tag:p0rt1on-serve");
+    // Instance name = tailnet hostname (dedicated: `p0rt1on-<friend>`).
+    expect(specs[0].name).toBe("p0rt1on-alice");
   });
 
   it("auto ACL mode edits the tailnet policy; no manual instructions", async () => {
@@ -84,7 +97,7 @@ describe("ProvisioningService.addFriend", () => {
     // No new container — but the adopted one is started (if stopped) and
     // health-verified before any bucket work touches it.
     expect(calls).not.toContain("runtime:ensureInstance");
-    expect(calls).toContain("runtime:ensureRunning");
+    expect(calls).toContain("runtime:ensureRunning:p0rt1on-alice");
     expect(calls.indexOf("runtime:waitUntilHealthy")).toBeLessThan(
       calls.indexOf("mc:makeBucketWithLock"),
     );

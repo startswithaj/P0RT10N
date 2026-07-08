@@ -11,8 +11,6 @@ import type { ProvisioningService as ProvisioningServiceContract } from "../serv
 import type { Logger } from "../services/types.ts";
 import type { McClient, McClientFactory, S3Credential } from "../minio/mc.ts";
 import type { InstanceRuntime, InstanceSpec } from "../runtime/runtime.ts";
-import type { TempFiles } from "../lib/CommandRunner.ts";
-import { containerNames } from "../runtime/names.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
 import {
   manualAclInstructions,
@@ -70,7 +68,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     private readonly runtime: InstanceRuntime,
     private readonly tailscale: TailscaleApi,
     private readonly keyGen: KeyGen,
-    private readonly tempFiles: TempFiles,
     private readonly smokeTester: SmokeTester,
     private readonly logger: Logger,
   ) {}
@@ -394,35 +391,23 @@ export class ProvisioningService implements ProvisioningServiceContract {
       await this.runtime.waitUntilHealthy(reservation.tsHostname);
       return;
     }
-    // The container needs its OWN serve auth key (server-side tag), separate
-    // from the friend's enrollment key.
+    // The instance needs its OWN serve auth key (server-side tag), separate
+    // from the friend's enrollment key. It and the derived root cred ride the
+    // spec IN MEMORY — the runtime picks the secret transport (docker: temp
+    // env-file; k8s: Secret). Admin access needs no further setup: every mc
+    // call derives the same root cred and carries it in its own MC_HOST env
+    // var.
     const serveKey = await this.tailscale.mintAuthKey({
       tag: this.config.serveNodeTag,
     });
-    // MinIO root creds + the serve auth key: written to an env-file for
-    // `docker run` (baked into the container), removed after. The auth key
-    // rides the env-file too — never the docker argv (host-visible via ps).
-    // Admin access needs no further setup: every mc call derives the same
-    // root cred and carries it in its own MC_HOST env var.
-    const rootCred = this.keyGen.rootCredentialFor(reservation.tsHostname);
-    const envFile = await this.tempFiles.write(
-      `MINIO_ROOT_USER=${rootCred.accessKeyId}\n` +
-        `MINIO_ROOT_PASSWORD=${rootCred.secretKey}\n` +
-        `TAILSCALE_AUTHKEY=${serveKey.key}\n`,
-    );
-    try {
-      const spec = this.specFor(reservation, envFile);
-      log.debug("starting instance container", {
-        container: spec.name,
-        minioPort: spec.minioPort,
-        network: spec.network,
-      });
-      await this.runtime.ensureInstance(spec);
-    } finally {
-      await this.tempFiles.remove(envFile);
-    }
-    // `docker run` returns before MinIO is accepting connections; wait for the
-    // container's HEALTHCHECK to pass before any admin (mc) call.
+    const spec = this.specFor(reservation, serveKey.key);
+    log.debug("starting instance", {
+      instance: spec.name,
+      minioPort: spec.minioPort,
+    });
+    await this.runtime.ensureInstance(spec);
+    // Starting an instance returns before MinIO is accepting connections;
+    // wait for its healthcheck to pass before any admin (mc) call.
     log.debug("waiting for instance to become healthy", {
       tsHostname: reservation.tsHostname,
     });
@@ -460,10 +445,11 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "smoke" };
     // Smoke-test over the ADMIN endpoint (same MinIO), not the Tailscale URL —
     // the manager isn't on the tailnet and can't reach `<host>.<tailnet>:443`.
-    const adminEndpoint = this.mc.adminEndpoint({
-      alias: reservation.alias,
-      minioPort: reservation.hostPort,
-    });
+    // Only the runtime knows how to address an instance.
+    const adminEndpoint = this.runtime.adminEndpoint(
+      reservation.tsHostname,
+      reservation.hostPort,
+    );
     log.debug("running smoke test", {
       bucket: naming.bucket,
       endpoint: adminEndpoint,
@@ -590,7 +576,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       instanceName: ctx.instanceName,
     });
     await this.runtime.removeInstance(ctx.instanceName, {
-      removeVolumes: true,
+      removeData: true,
     });
     await this.attempt(
       log,
@@ -717,7 +703,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const removed = await this.attempt(
       log,
       "removeInstance",
-      () => this.runtime.removeInstance(tsHostname, { removeVolumes: true }),
+      () => this.runtime.removeInstance(tsHostname, { removeData: true }),
     );
     const revoked = await this.attempt(
       log,
@@ -867,19 +853,15 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   private specFor(
     reservation: InstanceReservation,
-    rootCredSecretRef: string,
+    tsAuthKey: string,
   ): InstanceSpec {
-    const names = containerNames(reservation.tsHostname);
     return {
-      name: names.container,
+      name: reservation.tsHostname,
       image: this.config.instanceImage,
-      tsHostname: reservation.tsHostname,
       tag: this.config.serveNodeTag,
       minioPort: reservation.hostPort,
-      dataVolume: names.dataVolume,
-      stateVolume: names.stateVolume,
-      rootCredSecretRef,
-      network: this.config.network,
+      rootCred: this.keyGen.rootCredentialFor(reservation.tsHostname),
+      tsAuthKey,
     };
   }
 

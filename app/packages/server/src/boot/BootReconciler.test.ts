@@ -1,11 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { ContainerHandle } from "../runtime/runtime.ts";
+import type { ContainerState } from "../runtime/runtime.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import {
   type Calls,
   DEDICATED_RES,
-  mockContainerRuntime,
+  mockInstanceRuntime,
   mockMcClient,
   mockMcFactory,
   mockProvisioningRepo,
@@ -20,23 +20,14 @@ describe("BootReconciler", () => {
     minioPort: 9100,
     status: "active",
   };
-  const CONTAINER = "p0rt1on-instance-alice";
-  const running: ContainerHandle = {
-    name: CONTAINER,
-    id: "1",
-    state: "running",
-  };
-  const stopped: ContainerHandle = {
-    name: CONTAINER,
-    id: "1",
-    state: "stopped",
-  };
+  const running = { name: "alice", state: "running" as ContainerState };
+  const stopped = { name: "alice", state: "stopped" as ContainerState };
 
   function build(
     calls: Calls,
     opts: {
       rows?: typeof ROW[];
-      containers?: ContainerHandle[];
+      instances?: { name: string; state: ContainerState }[];
       healthFor?: (name: string) => "healthy" | "unhealthy";
       listError?: Error;
       repo?: Partial<ProvisioningRepo>;
@@ -47,7 +38,7 @@ describe("BootReconciler", () => {
         liveInstances: () => Promise.resolve(opts.rows ?? [ROW]),
         ...opts.repo,
       }),
-      mockContainerRuntime(calls, opts),
+      mockInstanceRuntime(calls, opts),
       mockMcFactory(mockMcClient(calls)),
       {
         auditWebhookUrl: "http://m/audit",
@@ -60,7 +51,7 @@ describe("BootReconciler", () => {
 
   it("running + healthy: re-issues the audit webhook, touches nothing else", async () => {
     const calls: Calls = [];
-    const summary = await build(calls, { containers: [running] }).run();
+    const summary = await build(calls, { instances: [running] }).run();
 
     expect(summary).toEqual({
       started: 0,
@@ -72,22 +63,22 @@ describe("BootReconciler", () => {
     expect(calls).toContain("mc:setAuditWebhook");
     // Adopt runs even when healthy — it converges config drift (restart
     // policy); the actual no-start behaviour is DockerRuntime's, tested there.
-    expect(calls).toContain(`docker:start:${CONTAINER}`);
+    expect(calls).toContain(`runtime:ensureRunning:alice`);
   });
 
   it("stopped: starts it, verifies health, then re-issues config", async () => {
     const calls: Calls = [];
-    const summary = await build(calls, { containers: [stopped] }).run();
+    const summary = await build(calls, { instances: [stopped] }).run();
 
     expect(summary.started).toBe(1);
-    expect(calls.indexOf(`docker:start:${CONTAINER}`)).toBeLessThan(
+    expect(calls.indexOf(`runtime:ensureRunning:alice`)).toBeLessThan(
       calls.indexOf("mc:setAuditWebhook"),
     );
   });
 
   it("absent container: fails the instance + friends, never realigns", async () => {
     const calls: Calls = [];
-    const summary = await build(calls, { containers: [] }).run();
+    const summary = await build(calls, { instances: [] }).run();
 
     expect(summary.failed).toBe(1);
     expect(calls).toContain("repo:failInstanceMissing:10");
@@ -97,32 +88,28 @@ describe("BootReconciler", () => {
   it("unhealthy after the bounded wait: logged as degraded, NOTHING deleted or marked", async () => {
     const calls: Calls = [];
     const summary = await build(calls, {
-      containers: [running],
+      instances: [running],
       healthFor: () => "unhealthy",
     }).run();
 
     expect(summary.degraded).toBe(1);
     // Boot never destroys, and a live-but-sick instance must not be fed to
-    // the sweep (which deletes volumes).
-    expect(calls).not.toContain(`docker:remove:${CONTAINER}`);
+    // the sweep (which deletes instances and their data).
+    expect(calls).not.toContain("runtime:removeInstance");
     expect(calls.some((c) => c.startsWith("repo:failInstanceMissing")))
       .toBe(false);
     expect(calls).not.toContain("mc:setAuditWebhook");
   });
 
-  it("orphan labelled container: counted + left untouched", async () => {
+  it("orphan instance with no DB row: counted + left untouched", async () => {
     const calls: Calls = [];
-    const orphan: ContainerHandle = {
-      name: "p0rt1on-instance-ghost",
-      id: "9",
-      state: "running",
-    };
-    const summary = await build(calls, { containers: [running, orphan] })
+    const orphan = { name: "ghost", state: "running" as ContainerState };
+    const summary = await build(calls, { instances: [running, orphan] })
       .run();
 
     expect(summary.orphaned).toBe(1);
-    expect(calls).not.toContain("docker:start:p0rt1on-instance-ghost");
-    expect(calls).not.toContain("docker:remove:p0rt1on-instance-ghost");
+    expect(calls).not.toContain("runtime:ensureRunning:ghost");
+    expect(calls).not.toContain("runtime:removeInstance");
   });
 
   it("docker unreachable: reconcile skipped, boot survives", async () => {
@@ -144,9 +131,9 @@ describe("BootReconciler", () => {
     const bobRow = { ...ROW, instanceId: 11, tsHostname: "bob" };
     const summary = await build(calls, {
       rows: [ROW, bobRow],
-      // alice's container exists and is healthy; bob's is absent AND the DB
+      // alice's instance exists and is healthy; bob's is absent AND the DB
       // flip for it blows up — bob must not take alice down with him.
-      containers: [running],
+      instances: [running],
       repo: {
         failInstanceMissing: () => Promise.reject(new Error("db locked")),
       },

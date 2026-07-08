@@ -4,25 +4,19 @@ import {
   RuntimeInventoryService,
   type StatusInstanceRow,
 } from "./InventoryService.ts";
-import type {
-  ContainerHandle,
-  ContainerRuntime,
-  InstanceHealth,
-} from "../runtime/runtime.ts";
+import type { InstanceHealth, InstanceRuntime } from "../runtime/runtime.ts";
+import { mockInstanceRuntime } from "../test-helpers/mocks.ts";
 import { noopLogger } from "../test-helpers/mocks.ts";
 
 describe("RuntimeInventoryService", () => {
-  const handle: ContainerHandle = { name: "x", id: "x", state: "running" };
   const runtimeWith = (
     healthFor: (name: string) => InstanceHealth,
-  ): ContainerRuntime => ({
-    ensureInstance: () => Promise.resolve(handle),
-    ensureStarted: () => Promise.resolve(),
-    status: () => Promise.resolve("running"),
-    health: (name) => Promise.resolve(healthFor(name)),
-    diagnose: (name) =>
+  ): InstanceRuntime => ({
+    ...mockInstanceRuntime([], { healthFor }),
+    diagnoseInstance: (name) =>
       Promise.resolve({
-        name,
+        // Diagnostics carry the real (container) resource name.
+        name: `p0rt1on-instance-${name}`,
         state: "running",
         health: healthFor(name),
         healthReason: null,
@@ -30,10 +24,6 @@ describe("RuntimeInventoryService", () => {
         exitError: null,
         recentLogs: "logs",
       }),
-    stop: () => Promise.resolve(),
-    remove: () => Promise.resolve(),
-    removeVolumes: () => Promise.resolve(),
-    list: () => Promise.resolve([]),
   });
 
   const instance = (status: string): StatusInstanceRow => ({
@@ -78,7 +68,7 @@ describe("RuntimeInventoryService", () => {
     expect(snap.tailscale[0].state).toBe("down");
   });
 
-  it("diagnose delegates to the runtime by container name", async () => {
+  it("diagnose delegates to the runtime by instance name", async () => {
     const svc = new RuntimeInventoryService(
       { instancesForStatus: () => Promise.resolve([]) },
       runtimeWith(() => "unhealthy"),

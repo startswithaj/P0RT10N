@@ -1,4 +1,5 @@
 import type { McClient, McClientFactory, S3Credential } from "../minio/mc.ts";
+import type { ContainerRunSpec } from "../runtime/runtime.ts";
 import type {
   CommandResult,
   CommandRunner,
@@ -10,6 +11,7 @@ import type { FetchLike } from "../tailscale/TailscaleHttpApi.ts";
 import type {
   ContainerHandle,
   ContainerRuntime,
+  ContainerState,
   InstanceHealth,
   InstanceRuntime,
   InstanceSpec,
@@ -58,7 +60,6 @@ export function recordingLogger(): { logger: Logger; warns: string[] } {
 
 export const TEST_CONFIG: ProvisioningConfig = {
   instanceImage: "p0rt1on-instance:pinned",
-  network: "p0rt1on-net",
   instanceAddressing: "host",
   region: "us-east-1",
   portRange: { min: 9000, max: 9100 },
@@ -126,6 +127,16 @@ export function respondAbsentInspect(args: string[]): CommandResult {
 }
 
 export const INSTANCE_SPEC: InstanceSpec = {
+  name: "alice",
+  image: "p0rt1on-instance:x",
+  tag: "tag:p0rt1on-serve",
+  minioPort: 9100,
+  rootCred: TEST_CRED,
+  tsAuthKey: "tskey-serve-secret",
+};
+
+/** Docker-level run spec — what DockerInstanceRuntime derives from the above. */
+export const CONTAINER_RUN_SPEC: ContainerRunSpec = {
   name: "p0rt1on-instance-alice",
   image: "p0rt1on-instance:x",
   tsHostname: "alice",
@@ -241,7 +252,6 @@ export function mockMcClient(calls: Calls): McClient {
 export function mockMcFactory(mc: McClient): McClientFactory {
   return {
     forInstance: () => mc,
-    adminEndpoint: (target) => `http://127.0.0.1:${target.minioPort}`,
   };
 }
 
@@ -324,14 +334,29 @@ export function mockContainerRuntime(
   };
 }
 
-export function mockInstanceRuntime(calls: Calls): InstanceRuntime {
+export function mockInstanceRuntime(
+  calls: Calls,
+  opts: {
+    /** listInstances result (instance names + states). */
+    instances?: { name: string; state: ContainerState }[];
+    healthFor?: (name: string) => InstanceHealth;
+    listError?: Error;
+  } = {},
+): InstanceRuntime {
   return {
     ensureInstance: (spec) => {
       calls.push("runtime:ensureInstance");
       return Promise.resolve({ name: spec.name, id: "id", state: "running" });
     },
-    ensureRunning: () => {
-      calls.push("runtime:ensureRunning");
+    adminEndpoint: (_name, minioPort) => `http://127.0.0.1:${minioPort}`,
+    instanceHealth: (name) =>
+      Promise.resolve(opts.healthFor?.(name) ?? "healthy"),
+    listInstances: () =>
+      opts.listError
+        ? Promise.reject(opts.listError)
+        : Promise.resolve(opts.instances ?? []),
+    ensureRunning: (name) => {
+      calls.push(`runtime:ensureRunning:${name}`);
       return Promise.resolve();
     },
     waitUntilHealthy: () => {
@@ -473,8 +498,6 @@ export interface ProvisioningParts {
   /** Override individual tailscale operations (e.g. inject revoke failures). */
   tailscale?: Partial<TailscaleApi>;
   config?: Partial<ProvisioningConfig>;
-  /** Captures env-file contents the service writes (secret-handling tests). */
-  written?: string[];
 }
 
 /** A ProvisioningService wired to all mocks, recording into `calls`. */
@@ -493,7 +516,6 @@ export function buildProvisioningService(
       generateS3Credential: () => TEST_CRED,
       rootCredentialFor: () => TEST_CRED,
     },
-    fakeTempFiles(parts.written ?? []),
     {
       run: parts.smoke ?? (() => {
         calls.push("smoke:run");

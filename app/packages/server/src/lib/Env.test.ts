@@ -21,7 +21,7 @@ describe("Env", () => {
 
     const c = e.provisioningConfig();
     expect(c.instanceImage).toBe("p0rt1on-instance:latest");
-    expect(c.network).toBe("p0rt1on-net");
+    expect(e.dockerNetwork).toBe("p0rt1on-net");
     expect(c.serveNodeTag).toBe("tag:p0rt1on-serve");
     expect(c.portRange).toEqual({ min: 9100, max: 9999 });
     expect(c.aclMode).toBe("auto");

@@ -1,10 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DockerInstanceRuntime, DockerRuntime } from "./DockerRuntime.ts";
-import type { ContainerHandle, ContainerRuntime } from "./runtime.ts";
+import type {
+  ContainerHandle,
+  ContainerRunSpec,
+  ContainerRuntime,
+} from "./runtime.ts";
 import {
   cmdOk as ok,
+  CONTAINER_RUN_SPEC as RUN_SPEC,
   fakeRunner,
+  fakeTempFiles,
   INSTANCE_SPEC as INSTANCE,
   type RecordedCommand,
   respondAbsentInspect as absentInspect,
@@ -14,7 +20,7 @@ describe("DockerRuntime.ensureInstance", () => {
   it("runs the combined container: network, both volumes, env, no host port", async () => {
     const cmds: RecordedCommand[] = [];
     const handle = await new DockerRuntime(fakeRunner(cmds, absentInspect))
-      .ensureInstance(INSTANCE);
+      .ensureInstance(RUN_SPEC);
 
     expect(handle).toEqual({
       name: "p0rt1on-instance-alice",
@@ -58,7 +64,7 @@ describe("DockerRuntime.ensureInstance", () => {
   it("never puts the auth key on the docker argv, and a failed run can't leak it", async () => {
     const cmds: RecordedCommand[] = [];
     await new DockerRuntime(fakeRunner(cmds, absentInspect))
-      .ensureInstance(INSTANCE);
+      .ensureInstance(RUN_SPEC);
     // The key travels only in the env-file named by rootCredSecretRef.
     const run = cmds.find((c) => c.args[0] === "run");
     expect(run?.args.some((a) => a.includes("AUTHKEY"))).toBe(false);
@@ -68,7 +74,7 @@ describe("DockerRuntime.ensureInstance", () => {
         ? { code: 1, stdout: "", stderr: "no such object" }
         : { code: 125, stdout: "", stderr: "docker: cannot start" };
     const err = await new DockerRuntime(fakeRunner([], failing))
-      .ensureInstance(INSTANCE)
+      .ensureInstance(RUN_SPEC)
       .then(() => null, (e: Error) => e.message);
     expect(err).toContain("docker run");
     expect(err).not.toContain("tskey");
@@ -79,13 +85,13 @@ describe("DockerRuntime.ensureInstance", () => {
     const handle = await new DockerRuntime(
       fakeRunner(cmds, () => ok("abc running")),
     )
-      .ensureInstance(INSTANCE);
+      .ensureInstance(RUN_SPEC);
     expect(handle.id).toBe("abc");
     expect(cmds.some((c) => c.args[0] === "run")).toBe(false);
     // Adopted containers may predate the restart policy — it's applied in place.
     expect(
       cmds.some((c) =>
-        c.args.join(" ") === "update --restart unless-stopped " + INSTANCE.name
+        c.args.join(" ") === "update --restart unless-stopped " + RUN_SPEC.name
       ),
     ).toBe(true);
   });
@@ -94,7 +100,7 @@ describe("DockerRuntime.ensureInstance", () => {
     const cmds: RecordedCommand[] = [];
     const respond = (args: string[]) =>
       args[0] === "inspect" ? ok("abc exited") : ok();
-    await new DockerRuntime(fakeRunner(cmds, respond)).ensureInstance(INSTANCE);
+    await new DockerRuntime(fakeRunner(cmds, respond)).ensureInstance(RUN_SPEC);
     const verbs = cmds.map((c) => c.args[0]);
     expect(verbs.indexOf("update")).toBeLessThan(verbs.indexOf("start"));
   });
@@ -276,27 +282,97 @@ describe("DockerInstanceRuntime", () => {
     };
   }
 
-  it("ensureInstance delegates to the runtime", async () => {
-    const calls: string[] = [];
-    await new DockerInstanceRuntime(recordingRuntime(calls)).ensureInstance(
-      INSTANCE,
+  function build(
+    calls: string[],
+    written: string[] = [],
+    runtime: ContainerRuntime = recordingRuntime(calls),
+  ): DockerInstanceRuntime {
+    return new DockerInstanceRuntime(runtime, fakeTempFiles(written), {
+      network: "p0rt1on-net",
+      addressing: "host",
+    });
+  }
+
+  it("adminEndpoint follows the addressing mode", () => {
+    expect(build([]).adminEndpoint("alice", 9100))
+      .toBe("http://127.0.0.1:9100");
+    const networked = new DockerInstanceRuntime(
+      recordingRuntime([]),
+      fakeTempFiles([]),
+      { network: "p0rt1on-net", addressing: "network" },
     );
-    expect(calls).toEqual(["ensureInstance:p0rt1on-instance-alice"]);
+    expect(networked.adminEndpoint("alice", 9100))
+      .toBe("http://p0rt1on-instance-alice:9100");
+  });
+
+  it("ensureInstance derives every docker-ism from the domain spec", async () => {
+    const calls: string[] = [];
+    const specs: ContainerRunSpec[] = [];
+    const base = recordingRuntime(calls);
+    await build(calls, [], {
+      ...base,
+      ensureInstance: (s) => {
+        specs.push(s);
+        return base.ensureInstance(s);
+      },
+    }).ensureInstance(INSTANCE);
+
+    // Container/volume names, the network, and the env-file path are the
+    // runtime's business — none of them appear in the domain spec.
+    expect(specs[0]).toEqual({
+      name: "p0rt1on-instance-alice",
+      image: "p0rt1on-instance:x",
+      tsHostname: "alice",
+      tag: "tag:p0rt1on-serve",
+      minioPort: 9100,
+      dataVolume: "p0rt1on-data-alice",
+      stateVolume: "p0rt1on-tsstate-alice",
+      rootCredSecretRef: "/fake/policy.json",
+      network: "p0rt1on-net",
+    });
+  });
+
+  it("writes root creds + auth key to a temp env-file, removed even on failure", async () => {
+    const calls: string[] = [];
+    const written: string[] = [];
+    await build(calls, written).ensureInstance(INSTANCE);
+    expect(written[0]).toContain("MINIO_ROOT_USER=AKIATEST");
+    expect(written[0]).toContain("MINIO_ROOT_PASSWORD=secret123");
+    expect(written[0]).toContain("TAILSCALE_AUTHKEY=tskey-serve-secret");
+
+    // The finally must remove the file when the run throws too.
+    const removed: string[] = [];
+    const failing = new DockerInstanceRuntime(
+      {
+        ...recordingRuntime(calls),
+        ensureInstance: () => Promise.reject(new Error("engine down")),
+      },
+      {
+        write: () => Promise.resolve("/fake/env"),
+        remove: (p) => {
+          removed.push(p);
+          return Promise.resolve();
+        },
+      },
+      { network: "p0rt1on-net", addressing: "host" },
+    );
+    await expect(failing.ensureInstance(INSTANCE)).rejects.toThrow(
+      "engine down",
+    );
+    expect(removed).toEqual(["/fake/env"]);
   });
 
   it("ensureRunning addresses the container by instance name", async () => {
     const calls: string[] = [];
-    await new DockerInstanceRuntime(recordingRuntime(calls)).ensureRunning(
-      "alice",
-    );
+    await build(calls).ensureRunning("alice");
     expect(calls).toEqual(["ensureStarted:p0rt1on-instance-alice"]);
   });
 
   it("stop/removeInstance address the container by instance name", async () => {
     const calls: string[] = [];
-    const rt = new DockerInstanceRuntime(recordingRuntime(calls));
+    const rt = build(calls);
     await rt.stopInstance("alice");
-    await rt.removeInstance("alice", { removeVolumes: true });
+    await rt.removeInstance("alice", { removeData: true });
     expect(calls).toEqual([
       "stop:p0rt1on-instance-alice",
       "remove:p0rt1on-instance-alice:true",

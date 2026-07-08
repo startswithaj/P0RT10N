@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { DockerRuntime } from "./DockerRuntime.ts";
 import { DenoCommandRunner, DenoTempFiles } from "../lib/CommandRunner.ts";
 import { hasBinary } from "../lib/hasBinary.ts";
-import type { InstanceSpec } from "./runtime.ts";
+import type { ContainerRunSpec } from "./runtime.ts";
 
 // Drives the REAL host Docker daemon with the combined p0rt1on-instance image, so
 // it needs a real Tailscale auth key too. Runs on the host (not in-container like
@@ -26,7 +26,7 @@ describe("DockerRuntime (integration: real docker + instance image)", () => {
         "MINIO_ROOT_USER=p0rtadmin\nMINIO_ROOT_PASSWORD=p0rtadmin123\n" +
           `TAILSCALE_AUTHKEY=${Deno.env.get("TAILSCALE_AUTHKEY") ?? ""}\n`,
       );
-      const spec: InstanceSpec = {
+      const spec: ContainerRunSpec = {
         name: `p0rt1on-it-${id}`,
         image: Deno.env.get("INSTANCE_IMAGE") ?? "p0rt1on-instance:latest",
         tsHostname: `p0rtit${id}`,
