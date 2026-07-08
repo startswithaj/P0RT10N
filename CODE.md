@@ -52,8 +52,12 @@ mc CLI           │  McShellClient               │
 
 - One container per portion: tailscaled joins via `TAILSCALE_AUTHKEY`, then
   `tailscale serve` publishes MinIO :9000 as HTTPS 443 on the tailnet.
-- Volumes: 4 data volumes (erasure set — required for Object Lock) + 1
-  tailscale-state volume.
+- Volumes: 1 data volume + 1 tailscale-state volume. MinIO single-drive (SNSD)
+  fully supports Object Lock — the old ">=4 drives" rule died with the legacy FS
+  backend in 2022 (probe-verified 2026-07-07). Pre-SNSD instances used 4 erasure
+  volumes (`-1..4`); teardown still reaps those legacy names. SNSD has zero
+  parity: bitrot is detected, not self-healed — the friend's client re-uploading
+  is the redundancy.
 - Isolation (`instances.kind` in `src/db/Schema.ts`):
   - `dedicated` — one friend per instance.
   - `shared` — one pooled instance; buckets split by MinIO IAM + Tailscale ACLs.

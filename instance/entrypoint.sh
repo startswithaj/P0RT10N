@@ -23,10 +23,13 @@ export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
 TAILSCALE_TAG="${TAILSCALE_TAG:-}" # e.g. tag:p0rt1on-serve
 MINIO_PORT="${MINIO_PORT:-9000}"
 DATA_DIR="${DATA_DIR:-/data}"
-# Object Lock (immutability) requires MinIO erasure coding, which needs >=4
-# drives that are each a distinct mount point. The manager mounts 4 separate
-# volumes at $DATA_DIR/d1..d4; single-drive mode ("SNSD") does NOT support locking.
-MINIO_DRIVES="${MINIO_DRIVES:-$DATA_DIR/d1 $DATA_DIR/d2 $DATA_DIR/d3 $DATA_DIR/d4}"
+# MinIO's single-drive mode (SNSD) fully supports versioning + Object Lock
+# (verified against this image 2026-07-07: locked bucket, inherited retention,
+# WORM delete denial). The old ">=4 drives for lock" rule died with the legacy
+# FS backend in 2022 — so one drive, no erasure parity overhead. Note: SNSD
+# has zero parity, so bitrot is detected (checksums) but not self-healed; the
+# real redundancy is the friend's client re-uploading.
+MINIO_DRIVES="${MINIO_DRIVES:-$DATA_DIR}"
 
 TAILSCALED_PID=""
 MINIO_PID=""

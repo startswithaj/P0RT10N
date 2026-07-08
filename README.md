@@ -48,6 +48,9 @@ choice (Kopia recommended; any S3 client works).
   recent objects immutable even to whoever holds the friend's credentials —
   friend creds are explicitly denied lock bypass — so a compromised client can't
   encrypt, tamper with, or wipe the backups. A **hard quota** caps each portion.
+  Host-disk cost is ~1:1 with the quota (MinIO single-drive mode, no erasure
+  parity) plus whatever locked-but-superseded object versions exist until their
+  retention expires — budget a little headroom above the quota.
 - **Zero-knowledge by construction.** Friend S3 secrets and Tailscale auth keys
   exist only in request scope and are shown once in the UI — never written to
   the DB, cache, or logs. The metadata DB (SQLite) holds no secrets; each
@@ -95,8 +98,8 @@ docker compose up
   and two volumes: the metadata DB and `mc` aliases. The provided
   `docker-compose.yml` wires all of this, including the audit-webhook path from
   instances back to the manager.
-- Without `TAILSCALE_OAUTH_CLIENT_SECRET` the manager boots with a Tailscale
-  **stub**: it runs, but provisioning fails loudly at the Tailscale steps.
+- `P0RT1ON_MASTER_KEY` and `TAILSCALE_OAUTH_CLIENT_SECRET` are required — the
+  manager refuses to start without them (no stubs, no degraded mode).
 
 ## Setup — Tailscale OAuth client
 

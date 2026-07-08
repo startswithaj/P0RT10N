@@ -4,9 +4,7 @@ import { DrizzleProvisioningRepo } from "./db/ProvisioningRepo.ts";
 import { ProvisioningService } from "./provisioning/ProvisioningService.ts";
 import { CryptoKeyGen } from "./provisioning/CryptoKeyGen.ts";
 import { McSmokeTester } from "./provisioning/McSmokeTester.ts";
-import { stubTailscale } from "./provisioning/stubs.ts";
 import { TailscaleHttpApi } from "./tailscale/TailscaleHttpApi.ts";
-import type { TailscaleApi } from "./tailscale/tailscale.ts";
 import { McShellClientFactory } from "./minio/McShellClient.ts";
 import {
   DockerInstanceRuntime,
@@ -50,7 +48,7 @@ export function buildApp(
   env: Env,
   logger: Logger,
 ): App {
-  const keyGen = new CryptoKeyGen(env.requireMasterKey());
+  const keyGen = new CryptoKeyGen(env.masterKey);
   // The audit token is derived from the master key, not env-sourced.
   const config = {
     ...env.provisioningConfig(),
@@ -64,7 +62,10 @@ export function buildApp(
   const runner = new DenoCommandRunner();
   const tempFiles = new DenoTempFiles();
   const mcFactory = new McShellClientFactory(runner, tempFiles);
-  const tailscale = buildTailscale(env, logger);
+  const tailscale = new TailscaleHttpApi({
+    token: env.tailscaleOauthClientSecret,
+    tagOwner: env.tagOwner,
+  });
   const containerRuntime = new DockerRuntime(runner);
   const provisioningService = new ProvisioningService(
     config,
@@ -113,23 +114,4 @@ export function buildApp(
       logger,
     ),
   };
-}
-
-/**
- * Real Tailscale API when `TAILSCALE_OAUTH_CLIENT_SECRET` is set, else the stub
- * (so dev without a tailnet still boots — provisioning just fails loudly at the
- * tailscale steps).
- */
-function buildTailscale(env: Env, logger: Logger): TailscaleApi {
-  const token = env.tailscaleOauthClientSecret;
-  if (!token) {
-    logger.warn(
-      "TAILSCALE_OAUTH_CLIENT_SECRET unset — using Tailscale stub (add/offboard fail at TS steps)",
-    );
-    return stubTailscale;
-  }
-  return new TailscaleHttpApi({
-    token,
-    tagOwner: env.tagOwner,
-  });
 }
