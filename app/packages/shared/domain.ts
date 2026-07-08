@@ -55,11 +55,13 @@ export const lockModeSchema = z.enum(LOCK_MODE_VALUES);
 
 /** Friend display name: also the basis for bucket + tag, so keep it tame.
  * min(3) is MinIO's bucket-name minimum — the name IS the bucket name, and a
- * shorter one provisions a friend whose bucket can never be created. */
+ * shorter one provisions a friend whose bucket can never be created.
+ * max(50) leaves headroom in the 63-char DNS label for the `p0rt1on-`
+ * container/volume name prefixes. */
 const friendNameSchema: z.ZodString = z
   .string()
   .min(3, "at least 3 characters (it becomes the S3 bucket name)")
-  .max(63)
+  .max(50, "at most 50 characters (it becomes part of DNS/container names)")
   .regex(
     /^[a-z0-9][a-z0-9-]*$/,
     "lowercase letters/digits/hyphens, starting with a letter or digit",

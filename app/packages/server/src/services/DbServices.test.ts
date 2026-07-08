@@ -165,4 +165,89 @@ describe("FriendServiceImpl", () => {
     expect(calls).toContain("mc:enableUser");
     expect(d.status).toBe("active");
   });
+
+  it("suspend with zero enrolled nodes succeeds (friend never connected)", async () => {
+    const res = await seed("alice");
+    const { service } = build([]); // nodesByTag → []
+    const d = await service.suspend(res.friendId);
+    expect(d.status).toBe("suspended");
+  });
+
+  it("state guards: suspend only from active, resume only from suspended", async () => {
+    const res = await seed("alice");
+    const { service } = build();
+
+    await expect(service.resume(res.friendId)).rejects.toThrow(
+      "cannot resume a active friend",
+    );
+    await repo.setStatus(res.friendId, "suspended");
+    await expect(service.suspend(res.friendId)).rejects.toThrow(
+      "cannot suspend a suspended friend",
+    );
+    await repo.setStatus(res.friendId, "failed");
+    await expect(service.suspend(res.friendId)).rejects.toThrow(
+      "cannot suspend a failed friend",
+    );
+    await repo.setStatus(res.friendId, "provisioning");
+    await expect(service.suspend(res.friendId)).rejects.toThrow(
+      "cannot suspend a provisioning friend",
+    );
+  });
+
+  it("suspend compensates when node revoke fails: user re-enabled, stays active", async () => {
+    const res = await seed("alice");
+    const nodes: TailnetNode[] = [
+      { nodeId: "n1", hostname: "alice", tags: [], online: true },
+    ];
+    const calls: string[] = [];
+    const brokenTs = {
+      ...mockTailscaleApi(calls, nodes),
+      deleteNode: () => Promise.reject(new Error("tailscale down")),
+    };
+    const service = new FriendServiceImpl(
+      queries,
+      repo,
+      mockMcFactory(mockMcClient(calls)),
+      brokenTs,
+      "example.ts.net",
+      noopLogger(),
+    );
+
+    await expect(service.suspend(res.friendId)).rejects.toThrow(
+      "tailscale down",
+    );
+    // Order: disabled, then re-enabled on the failure — access stays open,
+    // matching the status that stays active.
+    expect(calls).toContain("mc:disableUser");
+    expect(calls.indexOf("mc:disableUser")).toBeLessThan(
+      calls.indexOf("mc:enableUser"),
+    );
+    const d = await service.get(res.friendId);
+    expect(d.status).toBe("active");
+
+    // Retry with the API recovered converges to suspended.
+    const { service: healthy } = build(nodes);
+    const after = await healthy.suspend(res.friendId);
+    expect(after.status).toBe("suspended");
+  });
+
+  it("suspend leaves status active when the S3 disable itself fails", async () => {
+    const res = await seed("alice");
+    const calls: string[] = [];
+    const brokenMc = {
+      ...mockMcClient(calls),
+      disableUser: () => Promise.reject(new Error("mc down")),
+    };
+    const service = new FriendServiceImpl(
+      queries,
+      repo,
+      mockMcFactory(brokenMc),
+      mockTailscaleApi(calls),
+      "example.ts.net",
+      noopLogger(),
+    );
+
+    await expect(service.suspend(res.friendId)).rejects.toThrow("mc down");
+    expect((await service.get(res.friendId)).status).toBe("active");
+  });
 });

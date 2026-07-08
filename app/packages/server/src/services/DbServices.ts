@@ -8,7 +8,11 @@ import type { FriendDetailRow, FriendQueries } from "../db/FriendQueries.ts";
 import type { McClientFactory } from "../minio/mc.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
-import { NotFoundError, NotImplementedError } from "../lib/ServiceError.ts";
+import {
+  ConflictError,
+  NotFoundError,
+  NotImplementedError,
+} from "../lib/ServiceError.ts";
 import type {
   ActivityService,
   FriendService,
@@ -62,6 +66,7 @@ export class FriendServiceImpl implements FriendService {
   async suspend(friendId: number): Promise<FriendDetail> {
     const log = this.logger.child({ op: "suspend", friendId });
     log.info("suspending friend");
+    await this.requireStatus(friendId, "active", "suspend");
     const ctx = await this.repo.context(friendId);
     // Disable the S3 user (reversible) + revoke the friend's tailnet nodes.
     if (ctx.s3AccessKeyId) {
@@ -69,7 +74,28 @@ export class FriendServiceImpl implements FriendService {
         ctx.s3AccessKeyId,
       );
     }
-    await this.revokeNodes(ctx.nodeTag, log);
+    try {
+      await this.revokeNodes(ctx.nodeTag, log);
+    } catch (err) {
+      // The displayed status must match actual access: the revoke failed, so
+      // compensate by re-enabling the S3 user and stay `active`, surfacing
+      // the error. A retry re-runs both steps (each idempotent) and converges.
+      log.error("node revoke failed; re-enabling S3 user to stay consistent", {
+        error: String(err),
+      });
+      if (ctx.s3AccessKeyId) {
+        await this.mc.forInstance({ alias: ctx.alias })
+          .enableUser(ctx.s3AccessKeyId)
+          .catch((e) =>
+            // Access is now half-revoked while status says active — loud;
+            // retrying suspend still converges.
+            log.error("compensating enableUser failed too", {
+              error: String(e),
+            })
+          );
+      }
+      throw err;
+    }
     await this.repo.setStatus(friendId, "suspended");
     await this.repo.audit(friendId, "suspend");
     log.info("friend suspended");
@@ -79,8 +105,10 @@ export class FriendServiceImpl implements FriendService {
   async resume(friendId: number): Promise<FriendDetail> {
     const log = this.logger.child({ op: "resume", friendId });
     log.info("resuming friend");
+    await this.requireStatus(friendId, "suspended", "resume");
     const ctx = await this.repo.context(friendId);
     // Re-enable the S3 user; the friend re-enrolls a node with a fresh key.
+    // Status flips only after the enable succeeded (mirror of suspend).
     if (ctx.s3AccessKeyId) {
       await this.mc.forInstance({ alias: ctx.alias }).enableUser(
         ctx.s3AccessKeyId,
@@ -90,6 +118,21 @@ export class FriendServiceImpl implements FriendService {
     await this.repo.audit(friendId, "resume");
     log.info("friend resumed");
     return this.get(friendId);
+  }
+
+  /** State guard: the operation only makes sense from one source status. */
+  private async requireStatus(
+    friendId: number,
+    required: FriendDetail["status"],
+    op: string,
+  ): Promise<void> {
+    const row = await this.queries.detail(friendId);
+    if (!row) throw new NotFoundError(`friend ${friendId} not found`);
+    if (row.status !== required) {
+      throw new ConflictError(
+        `cannot ${op} a ${row.status} friend — only ${required} friends can be ${op}d`,
+      );
+    }
   }
 
   private async revokeNodes(tag: string, log: Logger): Promise<void> {

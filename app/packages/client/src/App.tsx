@@ -397,16 +397,18 @@ function PortionMenu(
               <Radio size={15} /> Re-issue Tailscale key
             </Menu.Item>
             <Menu.Separator />
-            <Show
-              when={props.friend.status !== "suspended"}
-              fallback={
-                <Menu.Item value="resume" class={menuItem}>
-                  <PlayCircle size={15} /> Resume
-                </Menu.Item>
-              }
-            >
+            {
+              /* State guards mirror the server: suspend only from active,
+                resume only from suspended; neither for provisioning/failed. */
+            }
+            <Show when={props.friend.status === "active"}>
               <Menu.Item value="suspend" class={menuItem}>
                 <PauseCircle size={15} /> Suspend
+              </Menu.Item>
+            </Show>
+            <Show when={props.friend.status === "suspended"}>
+              <Menu.Item value="resume" class={menuItem}>
+                <PlayCircle size={15} /> Resume
               </Menu.Item>
             </Show>
             <Menu.Item value="offboard" class={`${menuItem} ${dangerItem}`}>
