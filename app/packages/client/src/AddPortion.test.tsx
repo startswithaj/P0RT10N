@@ -73,6 +73,20 @@ describe("AddPortion", () => {
       fireEvent.input(nameField(), { target: { value: "alice" } });
       expect(createBtn()).toBeEnabled();
     });
+
+    it("does not flash the field error mid-word; blur settles it", () => {
+      // "a" is invalid only because the word isn't finished — the red field
+      // state waits for a typing pause (debounce) or blur. The CTA hint and
+      // submit gating stay immediate.
+      setup();
+
+      fireEvent.input(nameField(), { target: { value: "a" } });
+      expect(nameField()).not.toHaveAttribute("aria-invalid", "true");
+      expect(createBtn()).toBeDisabled();
+
+      fireEvent.blur(nameField());
+      expect(nameField()).toHaveAttribute("aria-invalid", "true");
+    });
   });
 
   describe("quota/retention rejection", () => {

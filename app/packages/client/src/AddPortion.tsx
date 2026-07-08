@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, onCleanup, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { ArrowLeft, Boxes, KeyRound, Mail, Server } from "lucide-solid";
 import { addFriendInput } from "@p0rt1on/shared/domain";
@@ -13,6 +13,8 @@ import * as RadioGroup from "./components/ui/radio-group.tsx";
 // hands it up; App runs the real friends.add mutation.
 
 const GB = 1_000_000_000;
+/** Pause before an invalid name shows its error (don't flash mid-word). */
+const NAME_ERROR_DEBOUNCE_MS = 500;
 
 /** The form's output — an AddFriendInput plus the (frontend-only) enroll choice. */
 export type NewPortion = {
@@ -177,6 +179,25 @@ function blockReasonFor(name: string, issues: FormIssue[]): string | null {
   return `${
     labels[String(first.path[0])] ?? String(first.path[0])
   }: ${first.message}`;
+}
+
+/**
+ * Debounced "settled" flag: false while the user is actively typing, true
+ * after a pause of `delayMs` (or immediately via settleNow, e.g. on blur).
+ */
+function createSettled(delayMs: number) {
+  const [settled, setSettled] = createSignal(true);
+  const box = { timer: 0 };
+  const touch = () => {
+    setSettled(false);
+    clearTimeout(box.timer);
+    box.timer = setTimeout(() => setSettled(true), delayMs);
+  };
+  const settleNow = () => {
+    clearTimeout(box.timer);
+    setSettled(true);
+  };
+  return { settled, touch, settleNow, dispose: () => clearTimeout(box.timer) };
 }
 
 function QuotaField(
@@ -372,6 +393,18 @@ export function AddPortion(
   const valid = () => issues().length === 0;
   const blockReason = () => blockReasonFor(name(), issues());
 
+  // The name error is debounced: "al…" is invalid until the third letter, so
+  // flagging on every keystroke flashes an error at someone mid-word. Submit
+  // gating stays immediate — only the error's visibility waits for a typing
+  // pause (or blur, which settles instantly).
+  const nameSettle = createSettled(NAME_ERROR_DEBOUNCE_MS);
+  onCleanup(nameSettle.dispose);
+  const onNameInput = (value: string) => {
+    setName(value);
+    nameSettle.touch();
+  };
+  const nameError = () => (nameSettle.settled() ? errFor("name") : null);
+
   return (
     <main class={page}>
       <div class={shell}>
@@ -397,18 +430,19 @@ export function AddPortion(
             props.onSubmit({ ...core(), enroll: enroll() });
           }}
         >
-          <Field.Root invalid={name().trim() !== "" && errFor("name") !== null}>
+          <Field.Root invalid={name().trim() !== "" && nameError() !== null}>
             <Field.Label>Friend name</Field.Label>
             <Input
               placeholder="e.g. alice"
               autocomplete="off"
               value={name()}
-              onInput={(e) => setName(e.currentTarget.value)}
+              onInput={(e) => onNameInput(e.currentTarget.value)}
+              onBlur={nameSettle.settleNow}
             />
             <Field.HelperText>
               Lowercase; used for their bucket and alias.
             </Field.HelperText>
-            <Field.ErrorText>{errFor("name")}</Field.ErrorText>
+            <Field.ErrorText>{nameError()}</Field.ErrorText>
           </Field.Root>
 
           <QuotaField
