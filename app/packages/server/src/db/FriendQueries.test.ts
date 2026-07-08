@@ -110,6 +110,27 @@ describe("FriendQueries", () => {
     expect(await queries.detail(999)).toBeNull();
   });
 
+  it("usageSampleTargets lists only ACTIVE friends with their instance alias", async () => {
+    const active = await addFriend("alice");
+    await repo.activate(active.friendId, active.instanceId);
+    await addFriend("bob"); // still `provisioning` — not a sample target
+
+    const targets = await queries.usageSampleTargets();
+    expect(targets).toEqual([
+      { friendId: active.friendId, bucket: "alice", alias: "alice" },
+    ]);
+  });
+
+  it("insertUsage appends a sample the dashboard then reflects", async () => {
+    const res = await addFriend("alice");
+    await queries.insertUsage(res.friendId, { bytesUsed: 777, objectCount: 4 });
+
+    const list = await queries.list();
+    expect(list[0].usage.bytesUsed).toBe(777);
+    expect(list[0].usage.objectCount).toBe(4);
+    expect(list[0].usage.checkedAt).toBe(NOW); // stamped with the injected clock
+  });
+
   it("pruneUsage deletes only samples older than the retention cutoff", async () => {
     const res = await addFriend("alice");
     // NOW is 2026-06-29; the 90-day cutoff falls on 2026-03-31.

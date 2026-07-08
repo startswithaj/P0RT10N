@@ -32,6 +32,8 @@ import type { TrpcContext } from "./trpc/trpc.ts";
 export interface App {
   context: TrpcContext;
   bootReconciler: BootReconciler;
+  /** Shared mc factory (the usage sampler in main.ts needs per-instance clients). */
+  mcFactory: McShellClientFactory;
 }
 
 /** Request-scoped wiring only — the common case for routers and tests. */
@@ -101,6 +103,7 @@ export function buildApp(
   };
   return {
     context,
+    mcFactory,
     bootReconciler: new BootReconciler(
       repo,
       containerRuntime,

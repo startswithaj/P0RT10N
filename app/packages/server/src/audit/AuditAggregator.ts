@@ -5,6 +5,7 @@ import type { Db } from "../db/Database.ts";
 import { activity, friends } from "../db/Schema.ts";
 import type { Logger } from "../services/types.ts";
 import { bump, sumLast24h } from "./requestBuckets.ts";
+import { defer } from "../lib/defer.ts";
 
 // ============================================================================
 // Receives MinIO audit-webhook events and folds them into the per-friend
@@ -39,6 +40,12 @@ export class AuditAggregator {
     private readonly db: Db,
     private readonly logger: Logger,
     private readonly now: () => string = () => new Date().toISOString(),
+    /**
+     * Fired after each successfully-resolved event with the friend it
+     * belonged to (the usage sampler's debounce trigger). Kept as a plain
+     * callback until the audit event bus generalizes fan-out.
+     */
+    private readonly onActivity: (friendId: number) => void = () => {},
   ) {}
 
   /** Parse a raw webhook payload then ingest it; no-op on unparseable input. */
@@ -51,8 +58,13 @@ export class AuditAggregator {
     return this.ingest(event);
   }
 
-  // deno-lint-ignore require-await
-  async ingest(event: AuditEvent): Promise<void> {
+  ingest(event: AuditEvent): Promise<void> {
+    // Sync SQLite body deferred so a throw rejects (handleAudit Promise.alls
+    // over events) rather than escaping synchronously.
+    return defer(() => this.ingestSync(event));
+  }
+
+  private ingestSync(event: AuditEvent): void {
     const friend = this.db.select({ id: friends.id }).from(friends)
       .where(eq(friends.bucket, event.bucket)).get();
     if (!friend) {
@@ -76,6 +88,7 @@ export class AuditAggregator {
       now,
     );
 
+    this.onActivity(friend.id);
     if (existing) {
       this.db.update(activity).set({
         requestsTotal: existing.requestsTotal + 1,

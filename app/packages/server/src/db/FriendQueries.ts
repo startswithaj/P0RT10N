@@ -8,6 +8,7 @@ import type {
 import type { Db } from "./Database.ts";
 import { activity, friends, instances, usage } from "./Schema.ts";
 import { sumLast24h } from "../audit/requestBuckets.ts";
+import { defer } from "../lib/defer.ts";
 
 /**
  * The DB-derived part of a FriendDetail. The service fills the two fields this
@@ -24,6 +25,13 @@ export type FriendDetailRow =
 // it's assembled a layer up (FriendService), not here.
 // ============================================================================
 
+/** One friend the usage sampler should measure. */
+export interface UsageSampleTarget {
+  friendId: number;
+  bucket: string;
+  alias: string;
+}
+
 /** Latest usage sample for a friend (or zeros if none recorded yet). */
 interface UsageSample {
   bytesUsed: number;
@@ -38,9 +46,16 @@ export class FriendQueries {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
+  // Synchronous SQLite reads exposed as Promises (service contract); each
+  // body runs via defer() so a throw rejects rather than escaping
+  // synchronously — same semantics `async` gave, without the unused-await.
+
   /** Dashboard rows: friend + rolling activity + latest usage. */
-  // deno-lint-ignore require-await
-  async list(): Promise<FriendListItem[]> {
+  list(): Promise<FriendListItem[]> {
+    return defer(() => this.listSync());
+  }
+
+  private listSync(): FriendListItem[] {
     const rows = this.db.select({
       id: friends.id,
       name: friends.name,
@@ -73,8 +88,11 @@ export class FriendQueries {
   }
 
   /** Point-in-time usage samples for one friend, newest first. */
-  // deno-lint-ignore require-await
-  async usageHistory(friendId: number, limit: number): Promise<UsageView[]> {
+  usageHistory(friendId: number, limit: number): Promise<UsageView[]> {
+    return defer(() => this.usageHistorySync(friendId, limit));
+  }
+
+  private usageHistorySync(friendId: number, limit: number): UsageView[] {
     const quota = this.db.select({ quotaBytes: friends.quotaBytes })
       .from(friends).where(eq(friends.id, friendId)).get();
     if (!quota) return [];
@@ -143,8 +161,11 @@ export class FriendQueries {
   }
 
   /** Current aggregated activity for one friend (zeros if none recorded yet). */
-  // deno-lint-ignore require-await
-  async activityFor(friendId: number): Promise<ActivityView> {
+  activityFor(friendId: number): Promise<ActivityView> {
+    return defer(() => this.activityForSync(friendId));
+  }
+
+  private activityForSync(friendId: number): ActivityView {
     const row = this.db.select().from(activity)
       .where(eq(activity.friendId, friendId)).get();
     if (!row) {
@@ -174,8 +195,7 @@ export class FriendQueries {
   }
 
   /** All instances, for the Status page inventory (kind/host/port + status). */
-  // deno-lint-ignore require-await
-  async instancesForStatus(): Promise<
+  instancesForStatus(): Promise<
     Array<{
       kind: string;
       tsHostname: string;
@@ -184,13 +204,15 @@ export class FriendQueries {
       tsTag: string;
     }>
   > {
-    return this.db.select({
-      kind: instances.kind,
-      tsHostname: instances.tsHostname,
-      minioPort: instances.minioPort,
-      status: instances.status,
-      tsTag: instances.tsTag,
-    }).from(instances).all();
+    return defer(() =>
+      this.db.select({
+        kind: instances.kind,
+        tsHostname: instances.tsHostname,
+        minioPort: instances.minioPort,
+        status: instances.status,
+        tsTag: instances.tsTag,
+      }).from(instances).all()
+    );
   }
 
   /** Map of friendId → newest usage sample, computed in SQL (O(friends), not
@@ -221,15 +243,47 @@ export class FriendQueries {
     );
   }
 
+  /** Active friends with what the usage sampler needs to `mc du` them. */
+  usageSampleTargets(): Promise<UsageSampleTarget[]> {
+    return defer(() =>
+      this.db.select({
+        friendId: friends.id,
+        bucket: friends.bucket,
+        // The per-instance mc alias is its tailnet hostname (same convention
+        // as BootReconciler.realign).
+        alias: instances.tsHostname,
+      }).from(friends)
+        .innerJoin(instances, eq(instances.id, friends.instanceId))
+        .where(eq(friends.status, "active"))
+        .all()
+    );
+  }
+
+  /** Append one point-in-time usage sample (the write side of usageHistory). */
+  insertUsage(
+    friendId: number,
+    sample: { bytesUsed: number; objectCount: number },
+  ): Promise<void> {
+    return defer(() => {
+      this.db.insert(usage).values({
+        friendId,
+        bytesUsed: sample.bytesUsed,
+        objectCount: sample.objectCount,
+        checkedAt: this.now(),
+      }).run();
+    });
+  }
+
   /** Delete usage samples older than the retention cutoff (bounded work: one
    * DELETE). Piggybacks on the periodic sweep. Returns rows deleted. */
-  // deno-lint-ignore require-await
-  async pruneUsage(): Promise<number> {
-    const cutoff = new Date(
-      new Date(this.now()).getTime() - USAGE_RETENTION_DAYS * 24 * 3_600_000,
-    ).toISOString();
-    return this.db.delete(usage).where(lt(usage.checkedAt, cutoff)).run()
-      .changes;
+  pruneUsage(): Promise<number> {
+    return defer(() => {
+      const cutoff = new Date(
+        new Date(this.now()).getTime() - USAGE_RETENTION_DAYS * 24 * 3_600_000,
+      ).toISOString();
+      return this.db.delete(usage).where(lt(usage.checkedAt, cutoff)).run()
+        .changes;
+    });
   }
 }
 

@@ -1,0 +1,128 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
+import type { UsageSampleTarget } from "../db/FriendQueries.ts";
+import {
+  mockMcClient,
+  mockMcFactory,
+  noopLogger,
+} from "../test-helpers/mocks.ts";
+import { UsageSampler, type UsageStore } from "./UsageSampler.ts";
+
+describe("UsageSampler", () => {
+  const TARGETS: UsageSampleTarget[] = [
+    { friendId: 1, bucket: "alice", alias: "p0rt1on-alice" },
+    { friendId: 2, bucket: "bob", alias: "p0rt1on-bob" },
+  ];
+
+  /** In-memory UsageStore recording inserted samples. */
+  function fakeStore(targets: UsageSampleTarget[]) {
+    const inserted: number[] = [];
+    const store: UsageStore = {
+      usageSampleTargets: () => Promise.resolve(targets),
+      insertUsage: (friendId) => {
+        inserted.push(friendId);
+        return Promise.resolve();
+      },
+    };
+    return { store, inserted };
+  }
+
+  const buildSampler = (
+    store: UsageStore,
+    duCalls: string[] = [],
+    du = () => Promise.resolve({ bytesUsed: 42, objectCount: 3 }),
+  ) =>
+    new UsageSampler(
+      store,
+      {
+        ...mockMcFactory(mockMcClient([])),
+        forInstance: (target) => ({
+          ...mockMcClient([]),
+          du: (bucket: string) => {
+            duCalls.push(`${target.alias}/${bucket}`);
+            return du();
+          },
+        }),
+      },
+      noopLogger(),
+      undefined,
+      { attempts: 1, delayMs: 1 }, // no retry — keeps failure tests instant
+    );
+
+  it("sampleAll measures every active friend and records a sample", async () => {
+    const { store, inserted } = fakeStore(TARGETS);
+    const duCalls: string[] = [];
+
+    expect(await buildSampler(store, duCalls).sampleAll()).toBe(2);
+    expect(duCalls).toEqual(["p0rt1on-alice/alice", "p0rt1on-bob/bob"]);
+    expect(inserted).toEqual([1, 2]);
+  });
+
+  it("sampleAll tolerates one friend's du failing (best-effort)", async () => {
+    const { store, inserted } = fakeStore(TARGETS);
+    const sampler = new UsageSampler(
+      store,
+      {
+        ...mockMcFactory(mockMcClient([])),
+        forInstance: (target) => ({
+          ...mockMcClient([]),
+          du: () =>
+            target.alias === "p0rt1on-alice"
+              ? Promise.reject(new Error("instance down"))
+              : Promise.resolve({ bytesUsed: 1, objectCount: 1 }),
+        }),
+      },
+      noopLogger(),
+      undefined,
+      { attempts: 1, delayMs: 1 },
+    );
+
+    expect(await sampler.sampleAll()).toBe(1);
+    expect(inserted).toEqual([2]);
+  });
+
+  it("noteActivity debounces: one sample fires after the LAST event of a burst", async () => {
+    using time = new FakeTime();
+    const { store, inserted } = fakeStore(TARGETS);
+    const duCalls: string[] = [];
+    const sampler = buildSampler(store, duCalls);
+
+    // A burst of events 10s apart — each re-arms the 30s timer.
+    sampler.noteActivity(2);
+    await time.tickAsync(10_000);
+    sampler.noteActivity(2);
+    await time.tickAsync(10_000);
+    sampler.noteActivity(2);
+    expect(duCalls).toEqual([]); // still inside the burst
+
+    await time.tickAsync(30_000); // 30s of quiet → exactly one sample
+    // tickAsync fires the timer but doesn't flush the promise chain the
+    // callback starts — drain it before asserting.
+    await time.runMicrotasks();
+    expect(duCalls).toEqual(["p0rt1on-bob/bob"]);
+    expect(inserted).toEqual([2]);
+  });
+
+  it("noteActivity for a friend no longer active is a silent no-op", async () => {
+    using time = new FakeTime();
+    const { store, inserted } = fakeStore([TARGETS[0]]); // bob (2) not active
+    const sampler = buildSampler(store);
+
+    sampler.noteActivity(2);
+    await time.tickAsync(30_000);
+    await time.runMicrotasks();
+    expect(inserted).toEqual([]);
+  });
+
+  it("dispose cancels pending debounce timers", async () => {
+    using time = new FakeTime();
+    const { store, inserted } = fakeStore(TARGETS);
+    const sampler = buildSampler(store);
+
+    sampler.noteActivity(1);
+    sampler.dispose();
+    await time.tickAsync(60_000);
+    expect(inserted).toEqual([]);
+  });
+});

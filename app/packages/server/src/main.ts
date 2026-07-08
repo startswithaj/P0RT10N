@@ -7,7 +7,8 @@ import { AuditAggregator } from "./audit/AuditAggregator.ts";
 import { FriendQueries } from "./db/FriendQueries.ts";
 import { buildApp } from "./app.ts";
 import { runBoot } from "./boot/boot.ts";
-import { startServer } from "./server.ts";
+import { startAuditServer, startServer } from "./server.ts";
+import { UsageSampler } from "./audit/UsageSampler.ts";
 
 // Server entrypoint: read env → open DB → wire services → run the boot
 // sequence (migrations → stale-provisioning flip → container reconcile →
@@ -24,9 +25,18 @@ const database = openDatabase(env.dbPath);
 
 const app = buildApp(database, env, logger);
 const context = app.context;
-const aggregator = new AuditAggregator(database.db, logger);
 
 const queries = new FriendQueries(database.db);
+// Usage samples (`mc du` per friend): at boot, hourly, and 30s after the
+// last audit event of a burst — so a finished backup shows on the dashboard
+// in ~30s without measuring mid-upload.
+const sampler = new UsageSampler(queries, app.mcFactory, logger);
+const aggregator = new AuditAggregator(
+  database.db,
+  logger,
+  undefined,
+  (friendId) => sampler.noteActivity(friendId),
+);
 const sweep = () =>
   context.provisioningService.sweepFailed()
     // Same cadence: cap the append-only usage-sample history.
@@ -50,11 +60,27 @@ await runBoot({
   serve: () => {
     // Reap tombstones every 10 min after the boot-time pass.
     setInterval(sweep, 10 * 60 * 1000);
+    // Usage samples: once now (dashboard never empty after a restart) and
+    // hourly as the idle baseline; the audit debounce covers active friends.
+    const sampleAll = () =>
+      sampler.sampleAll().catch((err) =>
+        logger.error("usage sampling failed", { error: String(err) })
+      );
+    sampleAll();
+    setInterval(sampleAll, 60 * 60 * 1000);
+    // Two listeners so the exposed surface is minimal: the admin API is
+    // loopback-only by construction, and only the token-guarded audit
+    // webhook faces the container network.
     startServer({
       port: env.port,
-      hostname: env.bindHost,
       context,
       staticDir: env.staticDir,
+      onListen: ({ port }) =>
+        logger.info(`p0rt1on admin listening on 127.0.0.1:${port}`),
+    });
+    startAuditServer({
+      port: env.auditPort,
+      hostname: env.auditBindHost,
       audit: {
         // Derived from the master key — same value buildApp wires into
         // setAuditWebhook, so instances and listener always agree.
@@ -62,7 +88,9 @@ await runBoot({
         onEvent: (raw) => aggregator.ingestRaw(raw),
       },
       onListen: ({ port }) =>
-        logger.info(`p0rt1on listening on ${env.bindHost}:${port}`),
+        logger.info(
+          `p0rt1on audit webhook listening on ${env.auditBindHost}:${port}`,
+        ),
     });
   },
 });
