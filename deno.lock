@@ -1,6 +1,9 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@cloudydeno/kubernetes-apis@~0.7.2": "0.7.2",
+    "jsr:@cloudydeno/kubernetes-client@0.8": "0.8.1",
+    "jsr:@cloudydeno/kubernetes-client@~0.8.1": "0.8.1",
     "jsr:@db/sqlite@0.12": "0.12.0",
     "jsr:@denosaurs/plug@1": "1.1.0",
     "jsr:@std/assert@0.217": "0.217.0",
@@ -29,6 +32,7 @@
     "jsr:@std/streams@1": "1.1.1",
     "jsr:@std/streams@^1.1.1": "1.1.1",
     "jsr:@std/testing@^1.0.17": "1.0.17",
+    "jsr:@std/yaml@1": "1.1.1",
     "npm:@ark-ui/solid@5": "5.37.1_solid-js@1.9.13",
     "npm:@deno/vite-plugin@1": "1.0.6_vite@6.4.3",
     "npm:@pandacss/dev@*": "1.11.3_jsdom@29.1.1",
@@ -54,12 +58,28 @@
     "npm:solid-js@^1.9.0": "1.9.13",
     "npm:typescript@*": "6.0.3",
     "npm:typescript@5.9.3": "5.9.3",
+    "npm:undici@7": "7.28.0",
     "npm:vite-plugin-solid@2": "2.11.12_@testing-library+jest-dom@6.9.1_solid-js@1.9.13_vite@6.4.3",
     "npm:vite@6": "6.4.3",
     "npm:vitest@3": "3.2.6_jsdom@29.1.1",
     "npm:zod@^3.24.0": "3.25.76"
   },
   "jsr": {
+    "@cloudydeno/kubernetes-apis@0.7.2": {
+      "integrity": "12dd29857228a695f75cbf91c8e630ad6ae73de174823f135a42d9b0a7cad608",
+      "dependencies": [
+        "jsr:@cloudydeno/kubernetes-client@0.8"
+      ]
+    },
+    "@cloudydeno/kubernetes-client@0.8.1": {
+      "integrity": "d7baa0166ee2c375c23d89e285831ca6569ea14a3cfb4434460c96e71b08d23e",
+      "dependencies": [
+        "jsr:@std/path@1",
+        "jsr:@std/streams@1",
+        "jsr:@std/yaml",
+        "npm:undici"
+      ]
+    },
     "@db/sqlite@0.12.0": {
       "integrity": "dd1ef7f621ad50fc1e073a1c3609c4470bd51edc0994139c5bf9851de7a6d85f",
       "dependencies": [
@@ -183,6 +203,9 @@
         "jsr:@std/data-structures",
         "jsr:@std/internal@^1.0.12"
       ]
+    },
+    "@std/yaml@1.1.1": {
+      "integrity": "a57665ecf3d17b926380593a56625d8a10cc7281802f1e993b5ebc94a48e71f8"
     }
   },
   "npm": {
@@ -6460,6 +6483,8 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@cloudydeno/kubernetes-apis@~0.7.2",
+      "jsr:@cloudydeno/kubernetes-client@~0.8.1",
       "jsr:@db/sqlite@0.12",
       "jsr:@std/assert@1",
       "jsr:@std/expect@^1.0.18",

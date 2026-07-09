@@ -23,7 +23,7 @@ logger.info("p0rt1on starting", { level: env.logLevel, pid: Deno.pid });
 logger.debug("opening database", { dbPath: env.dbPath });
 const database = openDatabase(env.dbPath);
 
-const app = buildApp(database, env, logger);
+const app = await buildApp(database, env, logger);
 const context = app.context;
 
 const queries = new FriendQueries(database.db);
@@ -37,6 +37,7 @@ const aggregator = new AuditAggregator(
   undefined,
   (friendId) => sampler.noteActivity(friendId),
 );
+
 const sweep = () =>
   context.provisioningService.sweepFailed()
     // Same cadence: cap the append-only usage-sample history.

@@ -40,7 +40,9 @@ describe("app wiring (tRPC caller over a real DB)", () => {
     });
     seedUsage(database.db, friendId, 256, 4, "2026-06-29T09:00:00Z");
 
-    caller = createCaller(buildContext(database, testEnv(), noopLogger()));
+    caller = createCaller(
+      await buildContext(database, testEnv(), noopLogger()),
+    );
   });
 
   afterEach(() => {

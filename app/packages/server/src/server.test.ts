@@ -8,7 +8,7 @@ import { noopLogger, testEnv } from "./test-helpers/mocks.ts";
 describe("startServer (HTTP)", () => {
   it("serves /health and the tRPC router on loopback", async () => {
     const database = createTestDatabase();
-    const context = buildContext(database, testEnv(), noopLogger());
+    const context = await buildContext(database, testEnv(), noopLogger());
     const abort = new AbortController();
     const listening = Promise.withResolvers<number>();
     const server = startServer({
@@ -39,7 +39,7 @@ describe("startServer (HTTP)", () => {
     // The webhook lives on its own listener so the admin API never needs a
     // non-loopback bind; the admin listener must not even route the path.
     const database = createTestDatabase();
-    const context = buildContext(database, testEnv(), noopLogger());
+    const context = await buildContext(database, testEnv(), noopLogger());
     const abort = new AbortController();
     const listening = Promise.withResolvers<number>();
     const server = startServer({
@@ -196,7 +196,7 @@ describe("startServer (HTTP)", () => {
 
   it("staticDir: serves built assets and falls back to index.html", async () => {
     const database = createTestDatabase();
-    const context = buildContext(database, testEnv(), noopLogger());
+    const context = await buildContext(database, testEnv(), noopLogger());
     // Temp asset dir inside the repo (never /tmp); cleaned up in finally.
     const staticDir = await Deno.makeTempDir({ dir: ".", prefix: "static-" });
     await Deno.writeTextFile(`${staticDir}/index.html`, "<!doctype html>app");

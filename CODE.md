@@ -56,35 +56,37 @@ test bans docker literals outside `runtime/`). Selected by
 
 - **docker** (`DockerRuntime.ts`) — one container per instance; volume
   names/network/env-file secret transport all derived inside the runtime.
-- **kubernetes** (`KubernetesRuntime.ts`) — plain `fetch` + SA bearer token (no
-  kubectl); per instance: StatefulSet(1) + Service + Secret + 2 PVCs.
+- **kubernetes** (`KubernetesRuntime.ts`) — typed `@cloudydeno` client
+  (`CoreV1Api`/`AppsV1Api` over a `RestClient`), no kubectl; per instance:
+  StatefulSet(1) + Service + Secret + 2 PVCs.
   - Least privilege: userspace tailscaled (`TS_USERSPACE=true`, no
     capabilities/devices) so the namespace enforces PSA `restricted`; instance
     pods get `automountServiceAccountToken: false`; manager RBAC is one
     namespace-scoped Role (see `deploy/k8s/p0rt1on.yaml`).
-  - Suspend = scale StatefulSet to 0 (kubelet owns restarts).
-  - The spent `TAILSCALE_AUTHKEY` is erased from the Secret once healthy (node
-    identity lives on the state PVC).
-  - TLS to the API: set `DENO_CERT` to the mounted cluster CA (manifest does
-    this). Config:
-    `K8S_NAMESPACE/K8S_TOKEN[_FILE]/K8S_API/
+  - Reads/scale avoid subresources the Role doesn't grant: pod health uses
+    `getPod` (not `getPodStatus` → `pods/status`), suspend/resume json-patch
+    `/spec/replicas` on the main StatefulSet (not the `/scale` subresource).
+  - `buildRestClient()` auto-detects the mounted in-cluster SA (token + CA +
+    server) via `forInCluster`, or takes explicit `K8S_API`/`K8S_TOKEN`/
+    `K8S_CA_FILE` for dev — no more `DENO_CERT`. Config:
+    `K8S_NAMESPACE/K8S_API/K8S_TOKEN/K8S_CA_FILE/
     K8S_DATA_SIZE/K8S_STATE_SIZE/K8S_STORAGE_CLASS`.
   - Verified on k3d by `deploy/k8s/run-integration.sh` (no secrets needed — an
     in-cluster HEADSCALE is the control plane; REAL images only): runtime tier
-    (apply idempotency, key erasure, scale, PVC gating, RBAC containment, PSA
-    rejection, real tailnet enrollment) + portion tier (full tRPC
-    addStart→rotate→offboard, zero mocks: real enrollment, serve in HTTP mode,
-    node deleted on offboard; uid 1000 under PSA `restricted`). The portion tier
-    ALSO runs the friend's real backup: a `backup-client` pod joins the same
-    tailnet under its friend tag and snapshots with Kopia through the instance's
-    serve (WireGuard) using only bundle contents — proving the ACL grant,
-    MagicDNS, serve, and an actual write to the bucket. That pod runs as ROOT in
-    the non-restricted `p0rt1on-it-clients` namespace (like a friend's docker
-    host); a test-only Role there lets the manager SA launch it — the production
-    Role has no pod-create. Subcommands: `build` (rerun after image-source
-    changes) / `tier1` / `tier2` — test iterations reuse the fixed images. Still
-    pending the nightly real-Tailscale tier: serve over HTTPS (headscale issues
-    no certs).
+    (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection, real
+    tailnet enrollment) + portion tier (full tRPC addStart→rotate→offboard, zero
+    mocks: real enrollment, serve in HTTP mode, node deleted on offboard; uid
+    1000 under PSA `restricted`). The portion tier ALSO runs the friend's real
+    backup: a `backup-client` pod joins the same tailnet under its friend tag
+    and snapshots with Kopia through the instance's serve (WireGuard) using only
+    bundle contents — proving the ACL grant, MagicDNS, serve, and an actual
+    write to the bucket. That pod runs as ROOT in the non-restricted
+    `p0rt1on-it-clients` namespace (like a friend's docker host); a test-only
+    Role there lets the manager SA launch it — the production Role has no
+    pod-create. Subcommands: `build` (rerun after image-source changes) /
+    `tier1` / `tier2` — test iterations reuse the fixed images. Still pending
+    the nightly real-Tailscale tier: serve over HTTPS (headscale issues no
+    certs).
   - `serveMode` (`https`|`http`, from `TAILSCALE_SERVE_MODE`) drives THREE
     things in lockstep: the instance's serve port (443/80), the friend endpoint
     scheme, and the ACL grant port — all from one env value so they can't drift.

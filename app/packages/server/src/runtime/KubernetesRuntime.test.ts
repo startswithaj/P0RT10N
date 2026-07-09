@@ -1,43 +1,124 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { KubernetesRuntime } from "./KubernetesRuntime.ts";
-import {
-  fakeFetch,
-  INSTANCE_SPEC,
-  type RecordedRequest,
-} from "../test-helpers/mocks.ts";
+import { buildRestClient, KubernetesRuntime } from "./KubernetesRuntime.ts";
+import { INSTANCE_SPEC } from "../test-helpers/mocks.ts";
+import type { RestClient } from "@cloudydeno/kubernetes-client";
+
+// The typed @cloudydeno api layer sits between the runtime and the wire, so we
+// mock its seam — `RestClient.performRequest` — and assert on the STRUCTURED
+// request (path, method, patch content-type, body) the api layer produces,
+// rather than hand-built URL strings.
+interface Recorded {
+  method: string;
+  path: string;
+  query: string;
+  contentType?: string;
+  body?: unknown;
+}
+
+/** A response the fake returns, or an error to throw (with an HTTP status). */
+type Reply = { json?: unknown; status?: number };
 
 describe("KubernetesRuntime", () => {
+  const fakeClient = (
+    recorded: Recorded[],
+    handler: (r: Recorded) => Reply = () => ({}),
+  ): RestClient => {
+    // deno-lint-ignore no-explicit-any
+    const perform = (opts: any): Promise<unknown> => {
+      const rec: Recorded = {
+        method: opts.method,
+        path: opts.path,
+        query: String(opts.querystring ?? ""),
+        contentType: opts.contentType,
+        body: opts.bodyJson,
+      };
+      recorded.push(rec);
+      const reply = handler(rec);
+      if (reply.status && reply.status >= 400) {
+        // Mirror cloudydeno: the error carries `httpCode` and echoes the
+        // RESPONSE message (never the request) — lets us prove redaction.
+        const err = new Error(
+          `Kubernetes returned HTTP ${reply.status}: ${
+            (reply.json as { message?: string })?.message ?? ""
+          }`,
+        );
+        (err as { httpCode?: number }).httpCode = reply.status;
+        return Promise.reject(err);
+      }
+      if (opts.expectJson) return Promise.resolve(reply.json ?? {});
+      return Promise.resolve(
+        new TextEncoder().encode(
+          typeof reply.json === "string" ? reply.json : "",
+        ),
+      );
+    };
+    return {
+      performRequest: perform,
+      close() {},
+      [Symbol.dispose]() {},
+    } as unknown as RestClient;
+  };
+
   const build = (
-    reqs: RecordedRequest[],
-    handler: Parameters<typeof fakeFetch>[1] = () => ({ json: {} }),
+    recorded: Recorded[],
+    handler?: (r: Recorded) => Reply,
+    tailscale?: { loginServer?: string; serveMode: "https" | "http" },
   ) =>
     new KubernetesRuntime(
       {
         namespace: "p0rt1on",
-        token: "sa-token",
-        apiBase: "https://k8s.test",
         dataSize: "50Gi",
         stateSize: "1Gi",
+        tailscale,
       },
-      fakeFetch(reqs, handler),
+      fakeClient(recorded, handler),
     );
 
-  const readyPod = {
+  // The cloudydeno converters are strict — a ContainerStatus needs
+  // name/image/imageID/ready/restartCount, and a StatefulSet needs a
+  // selector + template even when we only read name/replicas. These builders
+  // produce valid-but-minimal fixtures.
+  const cstatus = (over: Record<string, unknown>) => ({
+    name: "instance",
+    image: "img",
+    imageID: "img@sha",
+    ready: false,
+    restartCount: 0,
+    ...over,
+  });
+  const pod = (phase: string, cs?: Record<string, unknown>) => ({
     status: {
-      phase: "Running",
-      containerStatuses: [{ ready: true, restartCount: 0, state: {} }],
+      phase,
+      ...(cs ? { containerStatuses: [cstatus(cs)] } : {}),
     },
-  };
+  });
+  const readyPod = pod("Running", { ready: true, state: {} });
+  const sts = (name: string, replicas: number) => ({
+    metadata: { name },
+    spec: {
+      replicas,
+      serviceName: name,
+      selector: { matchLabels: {} },
+      template: {
+        metadata: {},
+        spec: { containers: [{ name: "instance", image: "img" }] },
+      },
+    },
+  });
+
+  const last = (path: string) => path.split("/").at(-1);
+  const bodyOf = (reqs: Recorded[], kind: string) =>
+    reqs.find((r) => r.path.includes(`/${kind}/`))?.body as // deno-lint-ignore no-explicit-any
+    any;
 
   it("ensureInstance applies PVCs, Secret, Service, StatefulSet — all labelled", async () => {
-    const reqs: RecordedRequest[] = [];
+    const reqs: Recorded[] = [];
     const handle = await build(reqs).ensureInstance(INSTANCE_SPEC);
 
     expect(handle).toEqual({ name: "alice", id: "alice", state: "running" });
     // Server-side apply everywhere: create-or-adopt, idempotent on retry.
-    const applied = reqs.map((r) => r.url.split("?")[0].split("/").at(-1));
-    expect(applied).toEqual([
+    expect(reqs.map((r) => last(r.path))).toEqual([
       "alice-data",
       "alice-state",
       "alice-creds",
@@ -46,22 +127,20 @@ describe("KubernetesRuntime", () => {
     ]);
     reqs.forEach((r) => {
       expect(r.method).toBe("PATCH");
-      expect(r.url).toContain("fieldManager=p0rt1on");
-      expect(r.headers["content-type"]).toBe("application/apply-patch+yaml");
-      expect(r.headers["authorization"]).toBe("Bearer sa-token");
-      const manifest = JSON.parse(r.body ?? "{}");
+      expect(r.query).toContain("fieldManager=p0rt1on");
+      expect(r.query).toContain("force=1"); // cloudydeno serializes true as 1
+      expect(r.contentType).toBe("application/apply-patch+yaml");
+      // deno-lint-ignore no-explicit-any
+      const manifest = r.body as any;
       expect(manifest.metadata.labels["app.kubernetes.io/managed-by"])
         .toBe("p0rt1on");
     });
   });
 
   it("the pod spec is restricted-profile clean and API-credential free", async () => {
-    const reqs: RecordedRequest[] = [];
+    const reqs: Recorded[] = [];
     await build(reqs).ensureInstance(INSTANCE_SPEC);
-    const sts = JSON.parse(
-      reqs.find((r) => r.url.includes("/statefulsets/"))?.body ?? "{}",
-    );
-    const pod = sts.spec.template.spec;
+    const pod = bodyOf(reqs, "statefulsets").spec.template.spec;
     // Least privilege: no API token, no capabilities, userspace tailscaled.
     expect(pod.automountServiceAccountToken).toBe(false);
     expect(pod.securityContext).toEqual({
@@ -96,33 +175,23 @@ describe("KubernetesRuntime", () => {
 
   it("tailscale extras land in the pod env only when configured", async () => {
     // Default build (no tailscale config): neither var appears.
-    const plainReqs: RecordedRequest[] = [];
+    const plainReqs: Recorded[] = [];
     await build(plainReqs).ensureInstance(INSTANCE_SPEC);
-    const plainSts = plainReqs.find((r) => r.url.includes("/statefulsets/"));
-    expect(plainSts?.body).not.toContain("TAILSCALE_LOGIN_SERVER");
-    expect(plainSts?.body).not.toContain("TAILSCALE_SERVE_MODE");
+    const plainEnv = bodyOf(plainReqs, "statefulsets")
+      .spec.template.spec.containers[0].env
+      .map((e: { name: string }) => e.name);
+    expect(plainEnv).not.toContain("TAILSCALE_LOGIN_SERVER");
+    expect(plainEnv).not.toContain("TAILSCALE_SERVE_MODE");
 
     // Headscale test tier: login server + the no-cert http serve fallback.
-    const reqs: RecordedRequest[] = [];
-    const headscale = new KubernetesRuntime(
-      {
-        namespace: "p0rt1on",
-        token: "sa-token",
-        apiBase: "https://k8s.test",
-        dataSize: "50Gi",
-        stateSize: "1Gi",
-        tailscale: { loginServer: "http://hs:8080", serveMode: "http" },
-      },
-      fakeFetch(reqs, () => ({ json: {} })),
-    );
-    await headscale.ensureInstance(INSTANCE_SPEC);
-    const sts = JSON.parse(
-      reqs.find((r) => r.url.includes("/statefulsets/"))?.body ?? "{}",
-    );
+    const reqs: Recorded[] = [];
+    await build(reqs, undefined, {
+      loginServer: "http://hs:8080",
+      serveMode: "http",
+    }).ensureInstance(INSTANCE_SPEC);
     const env = Object.fromEntries(
-      sts.spec.template.spec.containers[0].env.map(
-        (e: { name: string; value: string }) => [e.name, e.value],
-      ),
+      bodyOf(reqs, "statefulsets").spec.template.spec.containers[0].env
+        .map((e: { name: string; value: string }) => [e.name, e.value]),
     );
     expect(env.TAILSCALE_LOGIN_SERVER).toBe("http://hs:8080");
     expect(env.TAILSCALE_SERVE_MODE).toBe("http");
@@ -131,14 +200,14 @@ describe("KubernetesRuntime", () => {
   it("a failed Secret apply never echoes the secret material", async () => {
     const failing = build(
       [],
-      (req) =>
-        req.url.includes("/secrets/")
+      (r) =>
+        r.path.includes("/secrets/")
           ? { status: 500, json: { message: "boom secret123 tskey" } }
-          : { json: {} },
+          : {},
     );
     const err = await failing.ensureInstance(INSTANCE_SPEC)
       .then(() => null, (e: Error) => e.message);
-    expect(err).toContain("failed (500)");
+    expect(err).toContain("redacted");
     expect(err).not.toContain("secret123");
     expect(err).not.toContain("tskey");
   });
@@ -148,21 +217,12 @@ describe("KubernetesRuntime", () => {
       .toBe("http://alice.p0rt1on.svc:9100");
   });
 
-  it("waitUntilHealthy erases the spent enrollment key from the Secret", async () => {
-    const reqs: RecordedRequest[] = [];
-    await build(
-      reqs,
-      (req) => req.url.includes("/pods/") ? { json: readyPod } : { json: {} },
-    )
-      .waitUntilHealthy("alice");
-
-    const patch = reqs.find((r) => r.url.includes("/secrets/alice-creds"));
-    expect(patch?.method).toBe("PATCH");
-    expect(patch?.headers["content-type"]).toBe("application/merge-patch+json");
-    // JSON merge-patch null = remove the field.
-    expect(JSON.parse(patch?.body ?? "{}")).toEqual({
-      data: { TAILSCALE_AUTHKEY: null },
+  it("buildRestClient builds a client from explicit connection info", async () => {
+    const client = await buildRestClient({
+      apiBase: "https://k8s.test",
+      token: "sa-token",
     });
+    expect(typeof client.performRequest).toBe("function");
   });
 
   it("instanceHealth maps pod readiness / crashloop / absence", async () => {
@@ -170,39 +230,27 @@ describe("KubernetesRuntime", () => {
     expect(await healthy.instanceHealth("alice")).toBe("healthy");
 
     const crashing = build([], () => ({
-      json: {
-        status: {
-          phase: "Running",
-          containerStatuses: [{
-            ready: false,
-            state: { waiting: { reason: "CrashLoopBackOff" } },
-          }],
-        },
-      },
+      json: pod("Running", {
+        ready: false,
+        state: { waiting: { reason: "CrashLoopBackOff" } },
+      }),
     }));
     expect(await crashing.instanceHealth("alice")).toBe("unhealthy");
 
-    const pending = build([], () => ({
-      json: { status: { phase: "Pending" } },
-    }));
+    const pending = build([], () => ({ json: pod("Pending") }));
     expect(await pending.instanceHealth("alice")).toBe("starting");
 
-    const absent = build([], () => ({ status: 404, json: {} }));
+    const absent = build([], () => ({ status: 404 }));
     expect(await absent.instanceHealth("alice")).toBe("unknown");
   });
 
   it("listInstances maps label-selected StatefulSets; replicas 0 = stopped", async () => {
-    const reqs: RecordedRequest[] = [];
+    const reqs: Recorded[] = [];
     const list = await build(reqs, () => ({
-      json: {
-        items: [
-          { metadata: { name: "alice" }, spec: { replicas: 1 } },
-          { metadata: { name: "pool" }, spec: { replicas: 0 } },
-        ],
-      },
+      json: { metadata: {}, items: [sts("alice", 1), sts("pool", 0)] },
     })).listInstances();
 
-    expect(reqs[0].url).toContain(
+    expect(reqs[0].query).toContain(
       "labelSelector=app.kubernetes.io%2Fmanaged-by%3Dp0rt1on",
     );
     expect(list).toEqual([
@@ -212,31 +260,48 @@ describe("KubernetesRuntime", () => {
   });
 
   it("stop/ensureRunning scale replicas; absent adopt throws", async () => {
-    const reqs: RecordedRequest[] = [];
+    const reqs: Recorded[] = [];
     const rt = build(reqs, () => ({ json: {} }));
     await rt.stopInstance("alice");
     await rt.ensureRunning("alice");
-    const patches = reqs.filter((r) => r.method === "PATCH");
-    expect(JSON.parse(patches[0].body ?? "{}")).toEqual({
-      spec: { replicas: 0 },
-    });
-    expect(JSON.parse(patches[1].body ?? "{}")).toEqual({
-      spec: { replicas: 1 },
-    });
+    // Scale = json-patch replace on the MAIN resource (no /scale subresource).
+    const scales = reqs.filter((r) =>
+      r.contentType === "application/json-patch+json"
+    );
+    expect(scales[0].body).toEqual([
+      { op: "replace", path: "/spec/replicas", value: 0 },
+    ]);
+    expect(scales[1].body).toEqual([
+      { op: "replace", path: "/spec/replicas", value: 1 },
+    ]);
 
-    const gone = build([], () => ({ status: 404, json: {} }));
+    const gone = build([], () => ({ status: 404 }));
     // stop tolerates absence (idempotent teardown); adopt never invents.
     await gone.stopInstance("alice");
     await expect(gone.ensureRunning("alice")).rejects.toThrow("cannot adopt");
+
+    // A non-404 scale failure is a real error — stop must NOT swallow it.
+    const broken = build([], () => ({ status: 500 }));
+    await expect(broken.stopInstance("alice")).rejects.toThrow();
+  });
+
+  it("diagnoseInstance reports absent when the pod is gone", async () => {
+    const d = await build([], () => ({ status: 404 })).diagnoseInstance(
+      "alice",
+    );
+    expect(d.state).toBe("absent");
+    expect(d.health).toBe("unknown");
+    expect(d.recentLogs).toBe("");
   });
 
   it("removeInstance deletes workload always, PVCs only with removeData", async () => {
-    const reqs: RecordedRequest[] = [];
+    const reqs: Recorded[] = [];
     const rt = build(reqs, () => ({ json: {} }));
     await rt.removeInstance("alice", { removeData: false });
     const deleted = (from: number) =>
-      reqs.slice(from).filter((r) => r.method === "DELETE")
-        .map((r) => r.url.split("/").at(-1));
+      reqs.slice(from).filter((r) => r.method === "DELETE").map((r) =>
+        last(r.path)
+      );
     expect(deleted(0)).toEqual(["alice", "alice", "alice-creds"]);
 
     const n = reqs.length;
@@ -250,27 +315,19 @@ describe("KubernetesRuntime", () => {
     ]);
 
     // Idempotent: everything already absent is success.
-    const gone = build([], () => ({ status: 404, json: {} }));
+    const gone = build([], () => ({ status: 404 }));
     await gone.removeInstance("alice", { removeData: true });
   });
 
   it("diagnoseInstance assembles pod state + reason + log tail", async () => {
-    const rt = build([], (req) => {
-      if (req.url.endsWith("/log?tailLines=50")) {
-        return { json: undefined, status: 200 };
-      }
-      return {
-        json: {
-          status: {
-            phase: "Pending",
-            containerStatuses: [{
-              ready: false,
-              state: { waiting: { reason: "ImagePullBackOff" } },
-            }],
-          },
-        },
-      };
+    const pendingPod = pod("Pending", {
+      ready: false,
+      state: { waiting: { reason: "ImagePullBackOff" } },
     });
+    const rt = build(
+      [],
+      (r) => r.path.endsWith("/log") ? { json: "" } : { json: pendingPod },
+    );
     const d = await rt.diagnoseInstance("alice");
     expect(d.name).toBe("alice-0");
     expect(d.state).toBe("stopped");

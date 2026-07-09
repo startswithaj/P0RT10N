@@ -21,7 +21,9 @@
     "zod": "npm:zod@^3.24",
     "@trpc/server": "npm:@trpc/server@^11",
     "@db/sqlite": "jsr:@db/sqlite@^0.12",
-    "better-sqlite3": "npm:better-sqlite3@^11"
+    "better-sqlite3": "npm:better-sqlite3@^11",
+    "@cloudydeno/kubernetes-client": "jsr:@cloudydeno/kubernetes-client@^0.8.1",
+    "@cloudydeno/kubernetes-apis": "jsr:@cloudydeno/kubernetes-apis@^0.7.2"
   },
   "tasks": {
     "lint": "deno lint",

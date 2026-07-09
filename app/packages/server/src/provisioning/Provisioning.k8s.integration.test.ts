@@ -4,7 +4,10 @@ import { createCallerFactory } from "../trpc/trpc.ts";
 import { appRouter } from "../trpc/root.ts";
 import type { TrpcContext } from "../trpc/trpc.ts";
 import { ProvisioningService } from "./ProvisioningService.ts";
-import { KubernetesRuntime } from "../runtime/KubernetesRuntime.ts";
+import {
+  buildRestClient,
+  KubernetesRuntime,
+} from "../runtime/KubernetesRuntime.ts";
 import { CryptoKeyGen } from "./CryptoKeyGen.ts";
 import { McShellClientFactory } from "../minio/McShellClient.ts";
 import { McSmokeTester } from "./McSmokeTester.ts";
@@ -162,15 +165,18 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       const k8s = k8sApi(token);
       const headscaleUrl = Deno.env.get("HEADSCALE_URL") ??
         "http://headscale.p0rt1on.svc:8080";
-      const runtime = new KubernetesRuntime({
-        namespace,
-        token,
-        dataSize: "50Mi",
-        stateSize: "10Mi",
-        // The instance joins the local headscale tailnet; headscale issues
-        // no HTTPS certs, so serve falls back to plain HTTP.
-        tailscale: { loginServer: headscaleUrl, serveMode: "http" },
-      });
+      const runtime = new KubernetesRuntime(
+        {
+          namespace,
+          dataSize: "50Mi",
+          stateSize: "10Mi",
+          // The instance joins the local headscale tailnet; headscale issues
+          // no HTTPS certs, so serve falls back to plain HTTP.
+          tailscale: { loginServer: headscaleUrl, serveMode: "http" },
+        },
+        // In-cluster: auto-detect the mounted SA (token + CA + server).
+        await buildRestClient({}),
+      );
       const keyGen = new CryptoKeyGen("k8s-it-master-key");
       const runner = new DenoCommandRunner();
       // /app is read-only for the runner pod's non-root uid — write temp

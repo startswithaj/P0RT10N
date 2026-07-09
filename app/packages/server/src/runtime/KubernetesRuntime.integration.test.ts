@@ -1,13 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { KubernetesRuntime } from "./KubernetesRuntime.ts";
+import { buildRestClient, KubernetesRuntime } from "./KubernetesRuntime.ts";
+import { CoreV1Api } from "@cloudydeno/kubernetes-apis/core/v1";
 import type { FetchLike } from "../tailscale/TailscaleHttpApi.ts";
 import type { InstanceSpec } from "./runtime.ts";
 
 // Drives a REAL k8s API server (k3d/kind), authenticated as the
 // p0rt1on-manager ServiceAccount — so this proves both the API mechanics a
-// fake can't (server-side apply adopt, merge-patch field removal, PSA
-// admission) AND that the least-privilege Role actually suffices / contains.
+// fake can't (server-side apply adopt, scale, PSA admission) AND that the
+// least-privilege Role actually suffices / contains.
 // Driver: deploy/k8s/run-integration.sh (creates the cluster, applies the
 // manifests, mints the SA token + a headscale preauth key, imports the REAL
 // instance image — readiness means tailscaled actually enrolled). Skipped
@@ -31,12 +32,23 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
       fetch(input, { ...init, client } as RequestInit & { client: unknown });
   };
 
-  const build = () =>
+  const restClient = () =>
+    buildRestClient({
+      apiBase: server,
+      token,
+      caCert: Deno.readTextFileSync(caFile ?? ""),
+    });
+
+  // A test-owned typed client to inspect real cluster state directly (the
+  // runtime abstracts Secrets/PVCs away). Same lib the runtime uses — no
+  // hand-built URLs.
+  const readApi = async () =>
+    new CoreV1Api(await restClient()).namespace("p0rt1on");
+
+  const build = async () =>
     new KubernetesRuntime(
       {
         namespace: "p0rt1on",
-        token: token ?? "",
-        apiBase: server,
         dataSize: "10Mi",
         stateSize: "10Mi",
         // Real image enrolls against the local headscale; no certs there,
@@ -47,7 +59,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
           serveMode: "http",
         },
       },
-      fetchWithCa(),
+      await restClient(),
     );
 
   const spec: InstanceSpec = {
@@ -64,9 +76,9 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
   };
 
   maybe(
-    "full lifecycle: apply → ready → key erased → scale → gated teardown",
+    "full lifecycle: apply → ready → scale → gated teardown",
     async () => {
-      const rt = build();
+      const rt = await build();
       try {
         // Idempotent create-or-adopt: applying twice must not error.
         await rt.ensureInstance(spec);
@@ -78,13 +90,6 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         // userspace) enrolled on the tailnet and MinIO is live.
         await rt.waitUntilHealthy(spec.name);
         expect(await rt.instanceHealth(spec.name)).toBe("healthy");
-
-        // waitUntilHealthy must have erased the spent enrollment key.
-        const secret = await rt["get"](
-          `/api/v1/namespaces/p0rt1on/secrets/it-alice-creds`,
-        ) as { data?: Record<string, string> };
-        expect(secret.data?.TAILSCALE_AUTHKEY).toBeUndefined();
-        expect(secret.data?.MINIO_ROOT_USER).toBeDefined();
 
         expect(await rt.listInstances()).toContainEqual({
           name: "it-alice",
@@ -102,14 +107,14 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
 
         // Teardown WITHOUT removeData keeps the PVCs (tombstone gating).
         await rt.removeInstance(spec.name, { removeData: false });
-        const pvc = await rt["get"](
-          `/api/v1/namespaces/p0rt1on/persistentvolumeclaims/it-alice-data`,
-        );
+        const pvc = await (await readApi())
+          .getPersistentVolumeClaim("it-alice-data")
+          .catch(() => null);
         expect(pvc).not.toBeNull();
       } finally {
         // Full teardown; idempotent — "already absent" is success.
-        await build().removeInstance(spec.name, { removeData: true });
-        await build().removeInstance(spec.name, { removeData: true });
+        await (await build()).removeInstance(spec.name, { removeData: true });
+        await (await build()).removeInstance(spec.name, { removeData: true });
       }
     },
   );

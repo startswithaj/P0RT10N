@@ -12,7 +12,10 @@ import {
   DockerInstanceRuntime,
   DockerRuntime,
 } from "./runtime/DockerRuntime.ts";
-import { KubernetesRuntime } from "./runtime/KubernetesRuntime.ts";
+import {
+  buildRestClient,
+  KubernetesRuntime,
+} from "./runtime/KubernetesRuntime.ts";
 import type { InstanceRuntime } from "./runtime/runtime.ts";
 import { DenoCommandRunner, DenoTempFiles } from "./lib/CommandRunner.ts";
 import { denoPortProbe } from "./lib/net.ts";
@@ -42,25 +45,29 @@ export interface App {
 }
 
 /** RUNTIME=docker (default) or kubernetes — the only place this branches. */
-function buildInstanceRuntime(
+async function buildInstanceRuntime(
   env: Env,
   runner: DenoCommandRunner,
   tempFiles: DenoTempFiles,
-): InstanceRuntime {
+): Promise<InstanceRuntime> {
   if (env.runtimeKind === "kubernetes") {
     const settings = env.kubeSettings();
-    // ServiceAccount token from env (dev) or the in-cluster mounted file.
-    const token = settings.tokenInline ??
-      Deno.readTextFileSync(settings.tokenFile).trim();
+    // No explicit overrides → the client auto-detects the mounted in-cluster
+    // ServiceAccount (token + CA + server); dev passes K8S_API/K8S_TOKEN.
+    const client = await buildRestClient({
+      apiBase: settings.apiBase,
+      token: settings.tokenInline,
+      caCert: settings.caFile
+        ? Deno.readTextFileSync(settings.caFile)
+        : undefined,
+    });
     return new KubernetesRuntime({
       namespace: settings.namespace,
-      token,
-      apiBase: settings.apiBase,
       dataSize: settings.dataSize,
       stateSize: settings.stateSize,
       storageClass: settings.storageClass,
       tailscale: env.instanceTailscale(),
-    });
+    }, client);
   }
   return new DockerInstanceRuntime(new DockerRuntime(runner), tempFiles, {
     network: env.dockerNetwork,
@@ -85,19 +92,19 @@ function buildTailscaleApi(env: Env): TailscaleApi {
 }
 
 /** Request-scoped wiring only — the common case for routers and tests. */
-export function buildContext(
+export async function buildContext(
   database: Database,
   env: Env,
   logger: Logger,
-): TrpcContext {
-  return buildApp(database, env, logger).context;
+): Promise<TrpcContext> {
+  return (await buildApp(database, env, logger)).context;
 }
 
-export function buildApp(
+export async function buildApp(
   database: Database,
   env: Env,
   logger: Logger,
-): App {
+): Promise<App> {
   const keyGen = new CryptoKeyGen(env.masterKey);
   // The audit token is derived from the master key, not env-sourced.
   const config = {
@@ -119,7 +126,7 @@ export function buildApp(
   });
   const runner = new DenoCommandRunner();
   const tempFiles = new DenoTempFiles();
-  const instanceRuntime = buildInstanceRuntime(env, runner, tempFiles);
+  const instanceRuntime = await buildInstanceRuntime(env, runner, tempFiles);
   const mcFactory = new McShellClientFactory(
     runner,
     tempFiles,
