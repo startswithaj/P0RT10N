@@ -64,6 +64,25 @@ export interface InstanceSpec {
   tsAuthKey: string;
 }
 
+/** Instance tailnet-enrollment extras (headscale test tier): an alternative
+ * control plane and the serve fallback for planes without cert issuance. */
+export interface InstanceTailscaleOptions {
+  loginServer?: string;
+  serveMode: "https" | "http";
+}
+
+/** The env pairs the instance entrypoint reads — empty when on defaults, so
+ * SaaS deployments produce byte-identical container env to before. */
+export function tailscaleEnv(
+  opts: InstanceTailscaleOptions | undefined,
+): Record<string, string> {
+  if (opts === undefined) return {};
+  return {
+    ...(opts.loginServer ? { TAILSCALE_LOGIN_SERVER: opts.loginServer } : {}),
+    ...(opts.serveMode === "http" ? { TAILSCALE_SERVE_MODE: "http" } : {}),
+  };
+}
+
 /**
  * Docker-level run spec (the old docker-shaped InstanceSpec) — built by
  * DockerInstanceRuntime from the domain `InstanceSpec`, never by callers.

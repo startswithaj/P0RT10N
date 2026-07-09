@@ -18,22 +18,23 @@ import {
 } from "../services/DbServices.ts";
 import { RuntimeInventoryService } from "../services/InventoryService.ts";
 import { JobService } from "../jobs/JobService.ts";
-import {
-  mockTailscaleApi,
-  noopLogger,
-  TEST_CONFIG,
-} from "../test-helpers/mocks.ts";
+import { HeadscaleHttpApi } from "../tailscale/HeadscaleHttpApi.ts";
+import { noopLogger, TEST_CONFIG } from "../test-helpers/mocks.ts";
 import { createTestDatabase } from "../test-helpers/testDb.ts";
 
 // The PORTION-level k8s integration: a friend is added THROUGH THE tRPC API
 // (friends.addStart → jobs.progress → jobs.claimBundle) and the instance pod
 // materialises in the cluster as a side effect — real router, real services,
 // real SQLite, real `mc` (bundled in the manager image), the real instance
-// image (MinIO-only via TAILSCALE_DISABLED=1) and the real KubernetesRuntime.
-// Only TailscaleApi is mocked — CI clusters have no tailnet; the nightly e2e
-// tier covers that half. MUST run IN-cluster (needs `mc` + cluster DNS + the
-// mounted ServiceAccount): deploy/k8s/run-integration.sh launches it as a
-// pod. Skipped unless P0RT1ON_K8S_PORTION_IT is set.
+// image (tailscaled ENABLED) and the real KubernetesRuntime. ZERO mocks: an
+// in-cluster HEADSCALE control plane (deploy/k8s/headscale-it.yaml) makes the
+// tailnet real too — the preauth key is actually minted, the pod's userspace
+// tailscaled actually enrolls, and offboard actually deletes the node. What
+// this still can't prove: `tailscale serve` over HTTPS (headscale issues no
+// certs — serve runs HTTP here) — that stays with the nightly real-tailnet
+// tier. MUST run IN-cluster (needs `mc` + cluster DNS + the mounted
+// ServiceAccount): deploy/k8s/run-integration.sh launches it as a pod.
+// Skipped unless P0RT1ON_K8S_PORTION_IT is set.
 describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   const enabled = Boolean(Deno.env.get("P0RT1ON_K8S_PORTION_IT"));
   const maybe = enabled ? it : it.ignore;
@@ -45,11 +46,16 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       const token = Deno.readTextFileSync(
         "/var/run/secrets/kubernetes.io/serviceaccount/token",
       ).trim();
+      const headscaleUrl = Deno.env.get("HEADSCALE_URL") ??
+        "http://headscale.p0rt1on.svc:8080";
       const runtime = new KubernetesRuntime({
         namespace,
         token,
         dataSize: "50Mi",
         stateSize: "10Mi",
+        // The instance joins the local headscale tailnet; headscale issues
+        // no HTTPS certs, so serve falls back to plain HTTP.
+        tailscale: { loginServer: headscaleUrl, serveMode: "http" },
       });
       const keyGen = new CryptoKeyGen("k8s-it-master-key");
       const runner = new DenoCommandRunner();
@@ -68,14 +74,17 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         portRange: { min: 9000, max: 9010 },
         serveNodeTag: "tag:p0rt1on-serve",
       });
-      // The only fake: CI clusters have no tailnet. Its minted keys are inert
-      // (tailscaled is disabled in the instance image for this tier).
-      const tailscale = mockTailscaleApi([]);
+      // Real control plane: the in-cluster headscale. Keys minted here are
+      // live — the instance pod redeems its serve key against this server.
+      const tailscale = new HeadscaleHttpApi({
+        baseUrl: headscaleUrl,
+        apiKey: Deno.env.get("HEADSCALE_API_KEY") ?? "",
+        user: "p0rt1on",
+      });
       const logger = noopLogger();
       const config = {
         ...TEST_CONFIG,
-        instanceImage: Deno.env.get("INSTANCE_IMAGE") ??
-          "p0rt1on-instance:it-notail",
+        instanceImage: Deno.env.get("INSTANCE_IMAGE") ?? "p0rt1on-instance:it",
       };
       // Mirrors app.ts wiring with the two swaps (k8s runtime, mock tailscale).
       const context: TrpcContext = {
@@ -136,6 +145,11 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         });
         expect(await runtime.instanceHealth("p0rt1on-k8sit")).toBe("healthy");
 
+        // ...and its tailscaled ACTUALLY enrolled on the headscale tailnet
+        // (healthy already implies `tailscale status` = Running in-pod).
+        expect(await tailscale.isNodeOnline(TEST_CONFIG.serveNodeTag))
+          .toBe(true);
+
         // The once-shown bundle is claimable exactly once.
         const bundle = await caller.jobs.claimBundle({ jobId });
         expect(bundle.s3SecretKey.length).toBeGreaterThan(0);
@@ -156,6 +170,9 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         expect(offEvents.at(-1)?.type).toBe("done");
         expect(await runtime.listInstances()).toEqual([]);
         expect(await caller.friends.list()).toEqual([]);
+        // Offboard removed the node from the tailnet, not just the pod.
+        expect(await tailscale.nodesByTag(TEST_CONFIG.serveNodeTag))
+          .toEqual([]);
       } finally {
         // Best-effort teardown if any step failed mid-way.
         await runtime.removeInstance("p0rt1on-k8sit", { removeData: true })

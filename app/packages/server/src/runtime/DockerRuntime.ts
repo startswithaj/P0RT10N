@@ -7,7 +7,9 @@ import type {
   InstanceHealth,
   InstanceRuntime,
   InstanceSpec,
+  InstanceTailscaleOptions,
 } from "./runtime.ts";
+import { tailscaleEnv } from "./runtime.ts";
 import { containerNames } from "./names.ts";
 import {
   adminEndpointComposer,
@@ -311,6 +313,7 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     private readonly config: {
       network: string;
       addressing: InstanceAddressing;
+      tailscale?: InstanceTailscaleOptions;
     },
   ) {}
 
@@ -326,10 +329,15 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     // MinIO root creds + the serve auth key ride a short-lived env-file for
     // `docker run` (baked into the container, file removed after) — an
     // enrollment credential must never ride the argv (host-visible via ps).
+    // Non-secret tailscale extras (login server / serve mode) ride the same
+    // file — it's already the per-run env transport.
+    const extraEnv = Object.entries(tailscaleEnv(this.config.tailscale))
+      .map(([k, v]) => `${k}=${v}\n`).join("");
     const envFile = await this.tempFiles.write(
       `MINIO_ROOT_USER=${spec.rootCred.accessKeyId}\n` +
         `MINIO_ROOT_PASSWORD=${spec.rootCred.secretKey}\n` +
-        `TAILSCALE_AUTHKEY=${spec.tsAuthKey}\n`,
+        `TAILSCALE_AUTHKEY=${spec.tsAuthKey}\n` +
+        extraEnv,
     );
     try {
       return await this.runtime.ensureInstance({

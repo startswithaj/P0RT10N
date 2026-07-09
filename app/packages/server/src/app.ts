@@ -5,6 +5,8 @@ import { ProvisioningService } from "./provisioning/ProvisioningService.ts";
 import { CryptoKeyGen } from "./provisioning/CryptoKeyGen.ts";
 import { McSmokeTester } from "./provisioning/McSmokeTester.ts";
 import { TailscaleHttpApi } from "./tailscale/TailscaleHttpApi.ts";
+import { HeadscaleHttpApi } from "./tailscale/HeadscaleHttpApi.ts";
+import type { TailscaleApi } from "./tailscale/tailscale.ts";
 import { McShellClientFactory } from "./minio/McShellClient.ts";
 import {
   DockerInstanceRuntime,
@@ -57,11 +59,28 @@ function buildInstanceRuntime(
       dataSize: settings.dataSize,
       stateSize: settings.stateSize,
       storageClass: settings.storageClass,
+      tailscale: env.instanceTailscale(),
     });
   }
   return new DockerInstanceRuntime(new DockerRuntime(runner), tempFiles, {
     network: env.dockerNetwork,
     addressing: env.provisioningConfig().instanceAddressing,
+    tailscale: env.instanceTailscale(),
+  });
+}
+
+/** TAILSCALE_BACKEND=tailscale (default) or headscale — the only place this
+ * branches. Headscale is the self-hosted test-tier control plane. */
+function buildTailscaleApi(env: Env): TailscaleApi {
+  if (env.tailscaleBackend === "headscale") {
+    return new HeadscaleHttpApi({
+      ...env.headscaleSettings(),
+      tagOwner: env.tagOwner,
+    });
+  }
+  return new TailscaleHttpApi({
+    token: env.tailscaleOauthClientSecret,
+    tagOwner: env.tagOwner,
   });
 }
 
@@ -108,10 +127,7 @@ export function buildApp(
     // Only the runtime knows how to address an instance's admin plane.
     (t) => instanceRuntime.adminEndpoint(t.alias, t.minioPort),
   );
-  const tailscale = new TailscaleHttpApi({
-    token: env.tailscaleOauthClientSecret,
-    tagOwner: env.tagOwner,
-  });
+  const tailscale = buildTailscaleApi(env);
   const provisioningService = new ProvisioningService(
     config,
     repo,

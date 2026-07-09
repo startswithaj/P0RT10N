@@ -69,13 +69,15 @@ test bans docker literals outside `runtime/`). Selected by
     this). Config:
     `K8S_NAMESPACE/K8S_TOKEN[_FILE]/K8S_API/
     K8S_DATA_SIZE/K8S_STATE_SIZE/K8S_STORAGE_CLASS`.
-  - Verified on k3d by `deploy/k8s/run-integration.sh` (no secrets needed):
-    runtime tier (apply idempotency, key erasure, scale, PVC gating, RBAC
-    containment, PSA rejection) + portion tier (full tRPC
-    addStart→rotate→offboard with the real instance image, MinIO-only via
-    `TAILSCALE_DISABLED=1`, running as uid 1000 under PSA `restricted`).
-    Still pending the nightly tier: userspace `tailscale serve` over a real
-    tailnet.
+  - Verified on k3d by `deploy/k8s/run-integration.sh` (no secrets needed — an
+    in-cluster HEADSCALE is the control plane; REAL images only): runtime tier
+    (apply idempotency, key erasure, scale, PVC gating, RBAC containment, PSA
+    rejection, real tailnet enrollment) + portion tier (full tRPC
+    addStart→rotate→offboard, zero mocks: real enrollment, serve in HTTP mode,
+    node deleted on offboard; uid 1000 under PSA `restricted`). Subcommands:
+    `build` (rerun after image-source changes) / `tier1` / `tier2` — test
+    iterations reuse the fixed images. Still pending the nightly real-Tailscale
+    tier: serve over HTTPS (headscale issues no certs).
 
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 
@@ -83,6 +85,19 @@ test bans docker literals outside `runtime/`). Selected by
   the manager.
 - Ops used: mint pre-tagged single-use auth keys, edit ACLs/tagOwners,
   list/delete nodes.
+
+### Headscale — `src/tailscale/HeadscaleHttpApi.ts`
+
+- Second `TailscaleApi` impl over headscale's v1 REST API; selected by
+  `TAILSCALE_BACKEND=headscale` (`HEADSCALE_URL/API_KEY/USER` required instead
+  of the OAuth secret). The integration-test control plane.
+- API quirks handled: numeric user ids (name resolved per call), expire preauth
+  keys by key string, classic `acls` policy as a JSON string (needs headscale
+  `policy.mode: database`), first-ever policy GET is a 500 "not found" (=
+  empty), tags deduped across forced/valid lists.
+- No HTTPS cert issuance → instances run `tailscale serve` in HTTP mode: set
+  `TAILSCALE_LOGIN_SERVER` + `TAILSCALE_SERVE_MODE=http` (plumbed to instance
+  env via `Env.instanceTailscale()` → both runtimes).
 
 ### Instances — `instance/Dockerfile`, `entrypoint.sh`
 

@@ -92,6 +92,9 @@ export class McShellClient implements McClient {
     private readonly runner: CommandRunner,
     private readonly tempFiles: TempFiles,
     private readonly mcBin = "mc",
+    /** Delay between `mc ready` retries; injectable so tests can cover the
+     * exhaustion path without real 500ms sleeps. */
+    private readonly readyDelayMs = 500,
   ) {}
 
   /** `<alias>/<bucket>`. */
@@ -337,6 +340,29 @@ export class McShellClient implements McClient {
       "--json",
       this.target.alias,
     ]);
+    // The restart drops connections for a moment. "Webhook configured" must
+    // mean "serving again" — the very next mc call (rotate, offboard, the
+    // admin clicking around right after an add) lands in that window
+    // otherwise. Bounded wait, ~15s worst case.
+    await this.awaitReady(30);
+  }
+
+  /** Poll `mc ready` (readyDelayMs apart) until MinIO answers; bounded. */
+  private async awaitReady(attemptsLeft: number): Promise<void> {
+    const res = await this.runner.run(
+      this.mcBin,
+      ["ready", this.target.alias],
+      this.hostEnv(),
+    );
+    if (res.code === 0) return;
+    if (attemptsLeft <= 0) {
+      throw new ServiceError(
+        "INTERNAL_SERVER_ERROR",
+        `minio ${this.target.alias} did not come back after restart`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, this.readyDelayMs));
+    return this.awaitReady(attemptsLeft - 1);
   }
 
   /** Live tail — streaming; implemented in the integration phase. */

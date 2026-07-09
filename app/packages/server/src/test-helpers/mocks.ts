@@ -210,6 +210,7 @@ export function buildMcShellClient(
   recorded: RecordedCommand[],
   respond?: (args: string[]) => CommandResult,
   written: string[] = [],
+  readyDelayMs = 1, // fast `mc ready` retries — no real 500ms sleeps in tests
 ): McShellClient {
   return new McShellClient(
     { alias: "alice", minioPort: 9100 },
@@ -218,6 +219,7 @@ export function buildMcShellClient(
     fakeRunner(recorded, respond),
     fakeTempFiles(written),
     "mc",
+    readyDelayMs,
   );
 }
 

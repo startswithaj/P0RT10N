@@ -27,6 +27,10 @@ fi
 export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
 
 TAILSCALE_TAG="${TAILSCALE_TAG:-}" # e.g. tag:p0rt1on-serve
+# Alternative control plane, e.g. http://headscale:8080 (empty = Tailscale SaaS).
+TAILSCALE_LOGIN_SERVER="${TAILSCALE_LOGIN_SERVER:-}"
+# http = control planes without cert issuance (headscale); default https.
+TAILSCALE_SERVE_MODE="${TAILSCALE_SERVE_MODE:-https}"
 MINIO_PORT="${MINIO_PORT:-9000}"
 DATA_DIR="${DATA_DIR:-/data}"
 # MinIO's single-drive mode (SNSD) fully supports versioning + Object Lock
@@ -36,6 +40,21 @@ DATA_DIR="${DATA_DIR:-/data}"
 # has zero parity, so bitrot is detected (checksums) but not self-healed; the
 # real redundancy is the friend's client re-uploading.
 MINIO_DRIVES="${MINIO_DRIVES:-$DATA_DIR}"
+# tailscaled state + socket live in a SUBDIR of the state volume, created by
+# whatever uid runs this script: tailscaled chmods its state dir to 0700, and
+# under k8s PSA `restricted` (uid 1000, fsGroup) the volume MOUNT POINT is
+# root-owned — chmod on it fails. A freshly created subdir is ours to chmod.
+# The default socket dir /var/run/tailscale is root-only for the same reason.
+# Same paths in healthcheck.sh.
+TS_STATE_DIR="/var/lib/tailscale/state"
+TS_SOCKET="$TS_STATE_DIR/tailscaled.sock"
+mkdir -p "$TS_STATE_DIR"
+# Pre-subdir instances (docker, root) kept state at the volume root — move it
+# so they keep their node identity instead of re-enrolling.
+if [ -f /var/lib/tailscale/tailscaled.state ] &&
+  [ ! -f "$TS_STATE_DIR/tailscaled.state" ]; then
+  mv /var/lib/tailscale/tailscaled.state "$TS_STATE_DIR/tailscaled.state"
+fi
 
 TAILSCALED_PID=""
 MINIO_PID=""
@@ -43,7 +62,7 @@ shutdown() {
   log "shutting down"
   [ -n "$MINIO_PID" ] && kill -TERM "$MINIO_PID" 2>/dev/null || true
   [ -n "$TAILSCALED_PID" ] && {
-    tailscale down >/dev/null 2>&1 || true
+    tailscale --socket="$TS_SOCKET" down >/dev/null 2>&1 || true
     kill "$TAILSCALED_PID" 2>/dev/null || true
   }
 }
@@ -56,7 +75,8 @@ else
 log "starting tailscaled (userspace networking)"
 tailscaled \
   --tun=userspace-networking \
-  --state=/var/lib/tailscale/tailscaled.state \
+  --state="$TS_STATE_DIR/tailscaled.state" \
+  --socket="$TS_SOCKET" \
   >/tmp/tailscaled.log 2>&1 &
 TAILSCALED_PID=$!
 
@@ -64,13 +84,16 @@ TAILSCALED_PID=$!
 # re-redeeming the single-use key.
 extra=""
 [ -n "$TAILSCALE_TAG" ] && extra="--advertise-tags=$TAILSCALE_TAG"
+[ -n "$TAILSCALE_LOGIN_SERVER" ] && extra="$extra --login-server=$TAILSCALE_LOGIN_SERVER"
 log "joining tailnet as '$TAILSCALE_HOSTNAME'"
 # shellcheck disable=SC2086
-tailscale up --authkey="$TAILSCALE_AUTHKEY" --hostname="$TAILSCALE_HOSTNAME" $extra
+tailscale --socket="$TS_SOCKET" up \
+  --authkey="$TAILSCALE_AUTHKEY" --hostname="$TAILSCALE_HOSTNAME" $extra
 
 # Wait for the backend to report Running (up to ~30s).
 i=0
-until tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'; do
+until tailscale --socket="$TS_SOCKET" status --json 2>/dev/null |
+  grep -q '"BackendState": *"Running"'; do
   i=$((i + 1))
   [ "$i" -ge 30 ] && die "tailscale did not come up (see /tmp/tailscaled.log)"
   sleep 1
@@ -78,8 +101,16 @@ done
 log "tailnet is up"
 
 # --- serve MinIO over the tailnet (https:443 -> localhost:MINIO_PORT) ---------
-log "publishing MinIO via tailscale serve"
-tailscale serve --bg --https=443 "http://localhost:${MINIO_PORT}"
+log "publishing MinIO via tailscale serve (${TAILSCALE_SERVE_MODE})"
+if [ "$TAILSCALE_SERVE_MODE" = "http" ]; then
+  # No cert issuance on this control plane (headscale) — serve plain HTTP :80.
+  # The tailnet itself (WireGuard) is the encryption on this path.
+  tailscale --socket="$TS_SOCKET" serve --bg --http=80 \
+    "http://localhost:${MINIO_PORT}"
+else
+  tailscale --socket="$TS_SOCKET" serve --bg --https=443 \
+    "http://localhost:${MINIO_PORT}"
+fi
 fi
 
 # --- MinIO -------------------------------------------------------------------

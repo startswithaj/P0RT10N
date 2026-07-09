@@ -1,0 +1,106 @@
+# Headscale control plane for the k8s integration tier ONLY — gives the
+# portion test a real tailnet (real tailscaled enrollment, WireGuard, node
+# lifecycle) with no Tailscale account. Not a production deployment: state is
+# an emptyDir, there is no TLS, and the API key is minted per run.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: headscale-config
+  namespace: p0rt1on
+data:
+  config.yaml: |
+    server_url: http://headscale.p0rt1on.svc:8080
+    listen_addr: 0.0.0.0:8080
+    private_key_path: /var/lib/headscale/private.key
+    noise:
+      private_key_path: /var/lib/headscale/noise_private.key
+    # The CLI socket must live somewhere uid 1000 can write (default
+    # /var/run/headscale is root-only); the in-pod `headscale` CLI uses it.
+    unix_socket: /var/lib/headscale/headscale.sock
+    prefixes:
+      v4: 100.64.0.0/10
+      v6: fd7a:115c:a1e0::/48
+    database:
+      type: sqlite
+      sqlite:
+        path: /var/lib/headscale/db.sqlite
+    # The manager edits ACLs via the API — that needs database mode.
+    policy:
+      mode: database
+    derp:
+      server:
+        enabled: true
+        private_key_path: /var/lib/headscale/derp_server_private.key
+        region_id: 999
+        region_code: it
+        region_name: integration
+        stun_listen_addr: 0.0.0.0:3478
+    dns:
+      magic_dns: true
+      base_domain: hs.test
+      # 0.26 defaults override_local_dns=true, which then REQUIRES global
+      # nameservers — keep pod-local resolution instead (cluster DNS).
+      override_local_dns: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: headscale
+  namespace: p0rt1on
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: headscale
+  template:
+    metadata:
+      labels:
+        app: headscale
+    spec:
+      # The namespace enforces PSA `restricted` — same full set as the
+      # instance pods.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: headscale
+          image: headscale/headscale:0.26.1
+          command: ["headscale", "serve"]
+          ports:
+            - containerPort: 8080
+            - containerPort: 3478
+              protocol: UDP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/headscale
+            - name: state
+              mountPath: /var/lib/headscale
+      volumes:
+        - name: config
+          configMap:
+            name: headscale-config
+        - name: state
+          emptyDir: {} # test tier — state is disposable
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: headscale
+  namespace: p0rt1on
+spec:
+  selector:
+    app: headscale
+  ports:
+    - name: http
+      port: 8080
+    - name: stun
+      port: 3478
+      protocol: UDP

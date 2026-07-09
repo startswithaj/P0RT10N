@@ -94,6 +94,40 @@ describe("KubernetesRuntime", () => {
     ]);
   });
 
+  it("tailscale extras land in the pod env only when configured", async () => {
+    // Default build (no tailscale config): neither var appears.
+    const plainReqs: RecordedRequest[] = [];
+    await build(plainReqs).ensureInstance(INSTANCE_SPEC);
+    const plainSts = plainReqs.find((r) => r.url.includes("/statefulsets/"));
+    expect(plainSts?.body).not.toContain("TAILSCALE_LOGIN_SERVER");
+    expect(plainSts?.body).not.toContain("TAILSCALE_SERVE_MODE");
+
+    // Headscale test tier: login server + the no-cert http serve fallback.
+    const reqs: RecordedRequest[] = [];
+    const headscale = new KubernetesRuntime(
+      {
+        namespace: "p0rt1on",
+        token: "sa-token",
+        apiBase: "https://k8s.test",
+        dataSize: "50Gi",
+        stateSize: "1Gi",
+        tailscale: { loginServer: "http://hs:8080", serveMode: "http" },
+      },
+      fakeFetch(reqs, () => ({ json: {} })),
+    );
+    await headscale.ensureInstance(INSTANCE_SPEC);
+    const sts = JSON.parse(
+      reqs.find((r) => r.url.includes("/statefulsets/"))?.body ?? "{}",
+    );
+    const env = Object.fromEntries(
+      sts.spec.template.spec.containers[0].env.map(
+        (e: { name: string; value: string }) => [e.name, e.value],
+      ),
+    );
+    expect(env.TAILSCALE_LOGIN_SERVER).toBe("http://hs:8080");
+    expect(env.TAILSCALE_SERVE_MODE).toBe("http");
+  });
+
   it("a failed Secret apply never echoes the secret material", async () => {
     const failing = build(
       [],

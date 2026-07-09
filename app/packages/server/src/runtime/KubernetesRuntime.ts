@@ -5,7 +5,9 @@ import type {
   InstanceHealth,
   InstanceRuntime,
   InstanceSpec,
+  InstanceTailscaleOptions,
 } from "./runtime.ts";
+import { tailscaleEnv } from "./runtime.ts";
 import type { FetchLike } from "../tailscale/TailscaleHttpApi.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
@@ -30,6 +32,8 @@ export interface KubeConfig {
   dataSize: string;
   stateSize: string;
   storageClass?: string;
+  /** Instance enrollment extras (headscale test tier); absent = SaaS defaults. */
+  tailscale?: InstanceTailscaleOptions;
 }
 
 const LABEL_KEY = "app.kubernetes.io/managed-by";
@@ -315,6 +319,8 @@ export class KubernetesRuntime implements InstanceRuntime {
                 { name: "TAILSCALE_HOSTNAME", value: spec.name },
                 { name: "TAILSCALE_TAG", value: spec.tag },
                 { name: "MINIO_PORT", value: String(spec.minioPort) },
+                ...Object.entries(tailscaleEnv(this.config.tailscale))
+                  .map(([name, value]) => ({ name, value })),
               ],
               ports: [{ containerPort: spec.minioPort }],
               // Same script as the docker HEALTHCHECK (tailscale up AND

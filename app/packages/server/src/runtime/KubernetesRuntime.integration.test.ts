@@ -9,14 +9,15 @@ import type { InstanceSpec } from "./runtime.ts";
 // fake can't (server-side apply adopt, merge-patch field removal, PSA
 // admission) AND that the least-privilege Role actually suffices / contains.
 // Driver: deploy/k8s/run-integration.sh (creates the cluster, applies the
-// manifests, mints the SA token, imports a stub instance image). Skipped
+// manifests, mints the SA token + a headscale preauth key, imports the REAL
+// instance image — readiness means tailscaled actually enrolled). Skipped
 // unless P0RT1ON_INTEGRATION + K8S_IT_* are set. No secrets needed — the
-// stub image satisfies the readiness probe without a tailnet.
+// tailnet is the local headscale.
 describe("KubernetesRuntime (integration: real k8s API)", () => {
   const server = Deno.env.get("K8S_IT_SERVER");
   const token = Deno.env.get("K8S_IT_TOKEN");
   const caFile = Deno.env.get("K8S_IT_CA");
-  const image = Deno.env.get("K8S_IT_IMAGE") ?? "p0rt1on-it-stub:it";
+  const image = Deno.env.get("K8S_IT_IMAGE") ?? "p0rt1on-instance:it";
   const enabled = Boolean(Deno.env.get("P0RT1ON_INTEGRATION")) &&
     Boolean(server && token && caFile);
   const maybe = enabled ? it : it.ignore;
@@ -38,6 +39,13 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         apiBase: server,
         dataSize: "10Mi",
         stateSize: "10Mi",
+        // Real image enrolls against the local headscale; no certs there,
+        // so serve runs in HTTP mode.
+        tailscale: {
+          loginServer: Deno.env.get("K8S_IT_LOGIN_SERVER") ??
+            "http://headscale.p0rt1on.svc:8080",
+          serveMode: "http",
+        },
       },
       fetchWithCa(),
     );
@@ -45,10 +53,14 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
   const spec: InstanceSpec = {
     name: "it-alice",
     image,
-    tag: "tag:p0rt1on-serve",
+    // Tier-1-only tag: this node must never satisfy the portion tier's
+    // tag:p0rt1on-serve assertions.
+    tag: "tag:p0rt1on-it-tier1",
     minioPort: 9100,
     rootCred: { accessKeyId: "AKIAIT", secretKey: "it-secret-123" },
-    tsAuthKey: "tskey-it-fake",
+    // A REAL single-use headscale key, minted by the driver — readiness
+    // requires actually redeeming it.
+    tsAuthKey: Deno.env.get("K8S_IT_AUTHKEY") ?? "tskey-it-fake",
   };
 
   maybe(
@@ -62,7 +74,8 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
 
         // PSA `restricted` is enforced on the namespace — the pod being
         // ADMITTED at all proves our generated pod spec satisfies it, and
-        // readiness proves the stub probe runs.
+        // readiness proves the REAL image came up: tailscaled (non-root,
+        // userspace) enrolled on the tailnet and MinIO is live.
         await rt.waitUntilHealthy(spec.name);
         expect(await rt.instanceHealth(spec.name)).toBe("healthy");
 

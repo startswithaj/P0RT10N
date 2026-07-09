@@ -8,9 +8,13 @@ set -eu
 
 MINIO_PORT="${MINIO_PORT:-9000}"
 
+# Socket in the state subdir — writable for non-root (see entrypoint.sh).
+TS_SOCKET="/var/lib/tailscale/state/tailscaled.sock"
+
 # Integration-test mode (see entrypoint.sh): MinIO-only, no tailnet check.
 if [ "${TAILSCALE_DISABLED:-}" != "1" ]; then
-  tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"' ||
+  tailscale --socket="$TS_SOCKET" status --json 2>/dev/null |
+    grep -q '"BackendState": *"Running"' ||
     { echo "tailscale not Running" >&2; exit 1; }
 fi
 

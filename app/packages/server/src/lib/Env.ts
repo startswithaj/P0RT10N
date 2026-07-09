@@ -18,17 +18,21 @@ const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 /**
  * Vars the app cannot run without, validated at construction. Master key:
  * every instance root credential (and the audit token) derives from it.
- * Tailscale OAuth secret: every add/suspend/offboard calls the API — no
- * stub, no fallback; a manager without it could only fail later and worse.
+ * The control-plane credential is backend-dependent (checked in the
+ * constructor): every add/suspend/offboard calls the API — no stub, no
+ * fallback; a manager without it could only fail later and worse.
  */
 const REQUIRED_VARS = [
   "P0RT1ON_MASTER_KEY",
-  "TAILSCALE_OAUTH_CLIENT_SECRET",
 ] as const;
 
 export class Env {
   constructor(private readonly src: EnvSource = denoSource) {
-    const missing = REQUIRED_VARS.filter((k) => this.#opt(k) === undefined);
+    const perBackend: readonly string[] = this.tailscaleBackend === "headscale"
+      ? ["HEADSCALE_URL", "HEADSCALE_API_KEY"]
+      : ["TAILSCALE_OAUTH_CLIENT_SECRET"];
+    const missing = [...REQUIRED_VARS, ...perBackend]
+      .filter((k) => this.#opt(k) === undefined);
     if (missing.length > 0) {
       throw new Error(`${missing.join(", ")} is not set`);
     }
@@ -158,6 +162,31 @@ export class Env {
   }
   get tagOwner(): string | undefined {
     return this.#opt("TAILSCALE_TAG_OWNER");
+  }
+  /** Which control plane the manager talks to. `headscale` is the self-hosted
+   * test-tier backend — see HeadscaleHttpApi for what it can't do (HTTPS certs). */
+  get tailscaleBackend(): "tailscale" | "headscale" {
+    return this.#str("TAILSCALE_BACKEND", "tailscale") === "headscale"
+      ? "headscale"
+      : "tailscale";
+  }
+  headscaleSettings(): { baseUrl: string; apiKey: string; user: string } {
+    return {
+      baseUrl: this.#required("HEADSCALE_URL"),
+      apiKey: this.#required("HEADSCALE_API_KEY"),
+      user: this.#str("HEADSCALE_USER", "p0rt1on"),
+    };
+  }
+  /** Instance enrollment extras: headscale needs an explicit login server, and
+   * without cert issuance `tailscale serve` must fall back to plain HTTP
+   * (WireGuard still encrypts the path). Empty loginServer = SaaS default. */
+  instanceTailscale(): { loginServer?: string; serveMode: "https" | "http" } {
+    return {
+      loginServer: this.#opt("TAILSCALE_LOGIN_SERVER"),
+      serveMode: this.#str("TAILSCALE_SERVE_MODE", "https") === "http"
+        ? "http"
+        : "https",
+    };
   }
 
   /**

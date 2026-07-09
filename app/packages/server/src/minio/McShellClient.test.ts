@@ -144,7 +144,7 @@ describe("McShellClient arg-building", () => {
     expect(cmds[0].args).toEqual(["admin", "user", "disable", "alice", "AK"]);
   });
 
-  it("setAuditWebhook configures then restarts", async () => {
+  it("setAuditWebhook configures, restarts, then waits for ready", async () => {
     const cmds: RecordedCommand[] = [];
     await client(cmds).setAuditWebhook("http://m/audit", "tok");
     expect(cmds[0].args.slice(0, 5)).toEqual([
@@ -161,6 +161,35 @@ describe("McShellClient arg-building", () => {
     expect(cmds[1].args).toEqual(
       ["admin", "service", "restart", "--json", "alice"],
     );
+    // The restart drops connections — "configured" must mean "serving
+    // again", so the next mc call can't land in the restart window.
+    expect(cmds[2].args).toEqual(["ready", "alice"]);
+  });
+
+  it("setAuditWebhook retries `ready` until MinIO answers again", async () => {
+    const cmds: RecordedCommand[] = [];
+    // MinIO refuses twice mid-restart, then comes back.
+    const readyFailures = { left: 2 };
+    await client(cmds, (args) => {
+      if (args[0] === "ready" && readyFailures.left > 0) {
+        readyFailures.left -= 1;
+        return { code: 1, stdout: "", stderr: "connection refused" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    }).setAuditWebhook("http://m/audit", "tok");
+    expect(cmds.filter((c) => c.args[0] === "ready").length).toBe(3);
+  });
+
+  it("setAuditWebhook fails loudly when MinIO never comes back", async () => {
+    const failing = client(
+      [],
+      (args) =>
+        args[0] === "ready"
+          ? { code: 1, stdout: "", stderr: "connection refused" }
+          : { code: 0, stdout: "", stderr: "" },
+    );
+    await expect(failing.setAuditWebhook("http://m/audit", "tok"))
+      .rejects.toThrow("did not come back after restart");
   });
 
   it("createUser failure never leaks the secret key in the error", async () => {

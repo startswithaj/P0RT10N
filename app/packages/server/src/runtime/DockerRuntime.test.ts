@@ -362,6 +362,29 @@ describe("DockerInstanceRuntime", () => {
     expect(removed).toEqual(["/fake/env"]);
   });
 
+  it("tailscale extras ride the env-file only when configured", async () => {
+    // Default (SaaS) config: neither var appears — byte-identical env.
+    const plain: string[] = [];
+    await build([], plain).ensureInstance(INSTANCE);
+    expect(plain[0]).not.toContain("TAILSCALE_LOGIN_SERVER");
+    expect(plain[0]).not.toContain("TAILSCALE_SERVE_MODE");
+
+    // Headscale test tier: login server + the no-cert http serve fallback.
+    const written: string[] = [];
+    const headscale = new DockerInstanceRuntime(
+      recordingRuntime([]),
+      fakeTempFiles(written),
+      {
+        network: "p0rt1on-net",
+        addressing: "host",
+        tailscale: { loginServer: "http://hs:8080", serveMode: "http" },
+      },
+    );
+    await headscale.ensureInstance(INSTANCE);
+    expect(written[0]).toContain("TAILSCALE_LOGIN_SERVER=http://hs:8080\n");
+    expect(written[0]).toContain("TAILSCALE_SERVE_MODE=http\n");
+  });
+
   it("ensureRunning addresses the container by instance name", async () => {
     const calls: string[] = [];
     await build(calls).ensureRunning("alice");

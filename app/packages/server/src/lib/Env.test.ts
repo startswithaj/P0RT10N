@@ -94,4 +94,54 @@ describe("Env", () => {
     expect(env({}).masterKey).toBe("k");
     expect(env({}).tailscaleOauthClientSecret).toBe("tok");
   });
+
+  it("headscale backend requires its own vars, not the OAuth secret", () => {
+    const headscale = new Env({
+      get: (k) =>
+        ({
+          P0RT1ON_MASTER_KEY: "k",
+          TAILSCALE_BACKEND: "headscale",
+          HEADSCALE_URL: "http://hs:8080",
+          HEADSCALE_API_KEY: "hs-key",
+        } as Record<string, string>)[k],
+    });
+    expect(headscale.tailscaleBackend).toBe("headscale");
+    expect(headscale.headscaleSettings()).toEqual({
+      baseUrl: "http://hs:8080",
+      apiKey: "hs-key",
+      user: "p0rt1on",
+    });
+
+    expect(() =>
+      new Env({
+        get: (k) =>
+          ({
+            P0RT1ON_MASTER_KEY: "k",
+            TAILSCALE_BACKEND: "headscale",
+          } as Record<string, string>)[k],
+      })
+    ).toThrow("HEADSCALE_URL, HEADSCALE_API_KEY is not set");
+  });
+
+  it("defaults to the tailscale backend, ignoring bogus values", () => {
+    expect(env({}).tailscaleBackend).toBe("tailscale");
+    expect(env({ TAILSCALE_BACKEND: "bogus" }).tailscaleBackend)
+      .toBe("tailscale");
+  });
+
+  it("instanceTailscale defaults to SaaS https; reads the http override", () => {
+    expect(env({}).instanceTailscale()).toEqual({
+      loginServer: undefined,
+      serveMode: "https",
+    });
+    expect(
+      env({
+        TAILSCALE_LOGIN_SERVER: "http://hs:8080",
+        TAILSCALE_SERVE_MODE: "http",
+      }).instanceTailscale(),
+    ).toEqual({ loginServer: "http://hs:8080", serveMode: "http" });
+    // Anything but the explicit opt-out stays https.
+    expect(env({ TAILSCALE_SERVE_MODE: "bogus" }).instanceTailscale().serveMode)
+      .toBe("https");
+  });
 });
