@@ -58,6 +58,13 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
             "http://headscale.p0rt1on.svc:8080",
           serveMode: "http",
         },
+        // Small requests + generous limits (won't OOM the real MinIO image).
+        resources: {
+          cpuRequest: "50m",
+          cpuLimit: "1",
+          memoryRequest: "64Mi",
+          memoryLimit: "1Gi",
+        },
       },
       await restClient(),
     );
@@ -90,6 +97,14 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         // userspace) enrolled on the tailnet and MinIO is live.
         await rt.waitUntilHealthy(spec.name);
         expect(await rt.instanceHealth(spec.name)).toBe("healthy");
+
+        // The configured CPU/memory actually landed on the pod container.
+        const podRes = (await (await readApi()).getPod("it-alice-0"))
+          .spec?.containers?.[0].resources;
+        expect(podRes?.requests?.cpu?.serialize()).toBe("50m");
+        expect(podRes?.requests?.memory?.serialize()).toBe("64Mi");
+        expect(podRes?.limits?.cpu?.serialize()).toBe("1");
+        expect(podRes?.limits?.memory?.serialize()).toBe("1Gi");
 
         expect(await rt.listInstances()).toContainEqual({
           name: "it-alice",
