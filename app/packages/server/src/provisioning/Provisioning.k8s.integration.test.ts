@@ -39,6 +39,31 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   const enabled = Boolean(Deno.env.get("P0RT1ON_K8S_PORTION_IT"));
   const maybe = enabled ? it : it.ignore;
 
+  // The test's OWN k8s API access (mounted SA token + cluster CA via DENO_CERT).
+  // The friend's client pod has nothing to do with the app's InstanceRuntime,
+  // so launching it never touches that. Returns parsed JSON (text() elsewhere).
+  const k8sApi =
+    (token: string) =>
+    async (method: string, path: string, body?: unknown): Promise<unknown> => {
+      const res = await fetch(`https://kubernetes.default.svc${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      if (!res.ok) {
+        throw new Error(
+          `k8s ${method} ${path} failed (${res.status}): ${await res.text()
+            .catch(() => "")}`,
+        );
+      }
+      return res.status === 204
+        ? undefined
+        : await res.json().catch(() => undefined);
+    };
+
   // The friend's REAL backup over the tailnet: a backup-client pod, given ONLY
   // bundle contents, joins the SAME headscale tailnet under its friend tag and
   // runs Kopia through the instance's `tailscale serve` (WireGuard) — the
@@ -46,7 +71,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   // non-restricted namespace, like a friend's docker host. Must run with the
   // CLAIMED keys, i.e. before rotate revokes them.
   const backupOverTailnet = async (
-    runtime: KubernetesRuntime,
+    k8s: ReturnType<typeof k8sApi>,
     mc: McShellClientFactory,
     token: string,
     headscaleUrl: string,
@@ -60,9 +85,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   ): Promise<void> => {
     const clientNs = "p0rt1on-it-clients";
     const payload = crypto.randomUUID();
-    const req = (method: string, path: string, body?: unknown) =>
-      runtime["request"](method, path, body);
-    await req("POST", `/api/v1/namespaces/${clientNs}/pods`, {
+    await k8s("POST", `/api/v1/namespaces/${clientNs}/pods`, {
       apiVersion: "v1",
       kind: "Pod",
       metadata: { name: "p0rt1on-it-client", namespace: clientNs },
@@ -97,7 +120,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     // Kopia is one-shot: poll for the pod's terminal phase (~2min budget
     // covers enrollment + repo create + snapshot).
     const podPhase = async (attemptsLeft: number): Promise<string> => {
-      const pod = await req(
+      const pod = await k8s(
         "GET",
         `/api/v1/namespaces/${clientNs}/pods/p0rt1on-it-client`,
       ) as { status?: { phase?: string } };
@@ -136,6 +159,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       const token = Deno.readTextFileSync(
         "/var/run/secrets/kubernetes.io/serviceaccount/token",
       ).trim();
+      const k8s = k8sApi(token);
       const headscaleUrl = Deno.env.get("HEADSCALE_URL") ??
         "http://headscale.p0rt1on.svc:8080";
       const runtime = new KubernetesRuntime({
@@ -254,7 +278,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         expect(friends[0].status).toBe("active");
 
         // The friend backs up for real over the tailnet (see helper above).
-        await backupOverTailnet(runtime, mc, token, headscaleUrl, bundle);
+        await backupOverTailnet(k8s, mc, token, headscaleUrl, bundle);
 
         // ROTATE via the API: create-before-remove against the live MinIO.
         const rotated = await caller.friends.rotateKey({ friendId });
@@ -276,7 +300,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           .toEqual([]);
       } finally {
         // Best-effort teardown if any step failed mid-way.
-        await runtime["request"](
+        await k8s(
           "DELETE",
           "/api/v1/namespaces/p0rt1on-it-clients/pods/p0rt1on-it-client",
         ).catch(() => undefined);
