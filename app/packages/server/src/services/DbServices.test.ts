@@ -94,7 +94,10 @@ describe("FriendServiceImpl", () => {
   });
   afterEach(() => database.driver.close());
 
-  const build = (nodes: TailnetNode[] = []) => {
+  const build = (
+    nodes: TailnetNode[] = [],
+    serveMode: "https" | "http" = "https",
+  ) => {
     const calls: string[] = [];
     const service = new FriendServiceImpl(
       queries,
@@ -102,6 +105,7 @@ describe("FriendServiceImpl", () => {
       mockMcFactory(mockMcClient(calls)),
       mockTailscaleApi(calls, nodes),
       "example.ts.net",
+      serveMode,
       noopLogger(),
     );
     return { calls, service };
@@ -125,6 +129,13 @@ describe("FriendServiceImpl", () => {
     expect(d.bucket).toBe("alice");
     expect(d.s3Endpoint).toBe("https://alice.example.ts.net");
     expect(d.nodeOnline).toBe(true);
+  });
+
+  it("get: http serve mode yields an http endpoint", async () => {
+    const res = await seed("alice");
+    const { service } = build([], "http");
+    const d = await service.get(res.friendId);
+    expect(d.s3Endpoint).toBe("http://alice.example.ts.net");
   });
 
   it("get: throws NOT_FOUND for an unknown friend", async () => {
@@ -210,6 +221,7 @@ describe("FriendServiceImpl", () => {
       mockMcFactory(mockMcClient(calls)),
       brokenTs,
       "example.ts.net",
+      "https",
       noopLogger(),
     );
 
@@ -244,6 +256,7 @@ describe("FriendServiceImpl", () => {
       mockMcFactory(brokenMc),
       mockTailscaleApi(calls),
       "example.ts.net",
+      "https",
       noopLogger(),
     );
 

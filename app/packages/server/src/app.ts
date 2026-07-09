@@ -145,6 +145,7 @@ export function buildApp(
       mcFactory,
       tailscale,
       config.tailnetDomain,
+      config.serveMode,
       logger,
     ),
     provisioningService,

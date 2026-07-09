@@ -28,6 +28,8 @@ RETENTION_DAYS="${RETENTION_DAYS:-30}"
 # fragments across sources.
 TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-$S3_BUCKET}"
 TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
+# Alternative control plane, e.g. http://headscale:8080 (empty = Tailscale SaaS).
+TAILSCALE_LOGIN_SERVER="${TAILSCALE_LOGIN_SERVER:-}"
 # SKIP_TAILSCALE=1 talks to S3_ENDPOINT directly (local testing without a tailnet).
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-}"
 
@@ -75,6 +77,7 @@ else
     --authkey="$TAILSCALE_AUTHKEY" \
     --hostname="$TAILSCALE_HOSTNAME" \
     --accept-routes \
+    ${TAILSCALE_LOGIN_SERVER:+--login-server="$TAILSCALE_LOGIN_SERVER"} \
     $TAILSCALE_EXTRA_ARGS
 
   # Wait for the backend to report Running (up to ~30s).

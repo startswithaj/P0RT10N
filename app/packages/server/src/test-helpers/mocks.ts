@@ -65,6 +65,7 @@ export const TEST_CONFIG: ProvisioningConfig = {
   portRange: { min: 9000, max: 9100 },
   sharedInstanceName: "pool",
   tailnetDomain: "tailnet.ts.net",
+  serveMode: "https",
   serveNodeTag: "tag:p0rt1on-serve",
   aclMode: "auto",
   auditWebhookUrl: "http://manager/internal/audit",

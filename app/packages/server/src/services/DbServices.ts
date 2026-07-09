@@ -33,6 +33,8 @@ export class FriendServiceImpl implements FriendService {
     private readonly mc: McClientFactory,
     private readonly tailscale: TailscaleApi,
     private readonly tailnetDomain: string,
+    /** Endpoint scheme — must match how instances serve (see ProvisioningConfig). */
+    private readonly serveMode: "https" | "http",
     private readonly logger: Logger,
   ) {}
 
@@ -153,7 +155,7 @@ export class FriendServiceImpl implements FriendService {
     const { tsHostname, ...rest } = row;
     return {
       ...rest,
-      s3Endpoint: `https://${tsHostname}.${this.tailnetDomain}`,
+      s3Endpoint: `${this.serveMode}://${tsHostname}.${this.tailnetDomain}`,
       nodeOnline,
     };
   }

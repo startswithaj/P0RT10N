@@ -211,6 +211,9 @@ export class Env {
       },
       sharedInstanceName: this.#str("SHARED_INSTANCE_NAME", "pool"),
       tailnetDomain: this.#str("TAILNET_DOMAIN", "example.ts.net"),
+      // Same source as the instance's TAILSCALE_SERVE_MODE — the friend
+      // endpoint scheme + ACL grant port must match how instances serve.
+      serveMode: this.instanceTailscale().serveMode,
       serveNodeTag: this.#str("SERVE_NODE_TAG", "tag:p0rt1on-serve"),
       aclMode: this.#str("TAILSCALE_ACL_MODE", "auto") === "manual"
         ? "manual"

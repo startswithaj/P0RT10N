@@ -31,6 +31,14 @@ export interface ProvisioningConfig {
   /** Tailnet base, e.g. `tailXXXX.ts.net`; endpoint = `<tsHostname>.<this>`. */
   tailnetDomain: string;
   /**
+   * How instances publish MinIO on the tailnet: `https` (tailscale serve with
+   * control-plane certs, port 443) or `http` (port 80 — control planes
+   * without cert issuance, i.e. headscale). Drives BOTH the friend endpoint
+   * scheme and the ACL grant port; instances read the same value via
+   * `TAILSCALE_SERVE_MODE`.
+   */
+  serveMode: "https" | "http";
+  /**
    * Tag for the SERVER-side tailscaled we run (the `serve` node) — distinct from
    * the friend's client `tag:p0rt1on-friend-<name>`. Used to mint that container's own
    * auth key when starting a new instance.

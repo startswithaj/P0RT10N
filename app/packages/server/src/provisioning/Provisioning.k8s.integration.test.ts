@@ -39,6 +39,96 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   const enabled = Boolean(Deno.env.get("P0RT1ON_K8S_PORTION_IT"));
   const maybe = enabled ? it : it.ignore;
 
+  // The friend's REAL backup over the tailnet: a backup-client pod, given ONLY
+  // bundle contents, joins the SAME headscale tailnet under its friend tag and
+  // runs Kopia through the instance's `tailscale serve` (WireGuard) — the
+  // friend-facing path the manager never touches. Runs as ROOT in a
+  // non-restricted namespace, like a friend's docker host. Must run with the
+  // CLAIMED keys, i.e. before rotate revokes them.
+  const backupOverTailnet = async (
+    runtime: KubernetesRuntime,
+    mc: McShellClientFactory,
+    token: string,
+    headscaleUrl: string,
+    bundle: {
+      s3Endpoint: string;
+      bucket: string;
+      s3AccessKeyId: string;
+      s3SecretKey: string;
+      tsAuthKey?: string;
+    },
+  ): Promise<void> => {
+    const clientNs = "p0rt1on-it-clients";
+    const payload = crypto.randomUUID();
+    const req = (method: string, path: string, body?: unknown) =>
+      runtime["request"](method, path, body);
+    await req("POST", `/api/v1/namespaces/${clientNs}/pods`, {
+      apiVersion: "v1",
+      kind: "Pod",
+      metadata: { name: "p0rt1on-it-client", namespace: clientNs },
+      spec: {
+        restartPolicy: "Never",
+        containers: [{
+          name: "client",
+          image: Deno.env.get("CLIENT_IMAGE") ?? "p0rt1on-backup-client:it",
+          // Seed a known file, then hand off to the real entrypoint; the
+          // pod's exit status is Kopia's.
+          command: [
+            "sh",
+            "-c",
+            'mkdir -p /backup && printf %s "$PAYLOAD" > ' +
+            "/backup/canary.txt && exec /entrypoint.sh",
+          ],
+          env: [
+            { name: "PAYLOAD", value: payload },
+            { name: "BACKUP_PATH", value: "/backup" },
+            { name: "S3_ENDPOINT", value: bundle.s3Endpoint },
+            { name: "S3_BUCKET", value: bundle.bucket },
+            { name: "S3_ACCESS_KEY_ID", value: bundle.s3AccessKeyId },
+            { name: "S3_SECRET_ACCESS_KEY", value: bundle.s3SecretKey },
+            { name: "KOPIA_PASSWORD", value: "it-kopia-pw" },
+            { name: "TAILSCALE_AUTHKEY", value: bundle.tsAuthKey ?? "" },
+            { name: "TAILSCALE_LOGIN_SERVER", value: headscaleUrl },
+          ],
+        }],
+      },
+    });
+
+    // Kopia is one-shot: poll for the pod's terminal phase (~2min budget
+    // covers enrollment + repo create + snapshot).
+    const podPhase = async (attemptsLeft: number): Promise<string> => {
+      const pod = await req(
+        "GET",
+        `/api/v1/namespaces/${clientNs}/pods/p0rt1on-it-client`,
+      ) as { status?: { phase?: string } };
+      const phase = pod.status?.phase ?? "Unknown";
+      if (phase === "Succeeded" || phase === "Failed") return phase;
+      if (attemptsLeft <= 0) return phase;
+      await new Promise((r) => setTimeout(r, 2000));
+      return podPhase(attemptsLeft - 1);
+    };
+    const phase = await podPhase(60);
+    if (phase !== "Succeeded") {
+      const logRes = await fetch(
+        `https://kubernetes.default.svc/api/v1/namespaces/${clientNs}` +
+          "/pods/p0rt1on-it-client/log?tailLines=100",
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      console.error(
+        "backup-client log:",
+        logRes.ok ? await logRes.text() : "<no log>",
+      );
+    }
+    expect(phase).toBe("Succeeded");
+
+    // The friend's Kopia repo actually landed objects in the bucket —
+    // written over the tailnet, through serve, with the bundle keys.
+    const du = await mc
+      .forInstance({ alias: "p0rt1on-k8sit", minioPort: 9000 })
+      .du(bundle.bucket);
+    expect(du.objectCount).toBeGreaterThan(0);
+  };
+
   maybe(
     "addStart creates the pod; rotate + offboard leave it clean",
     async () => {
@@ -85,8 +175,12 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       const config = {
         ...TEST_CONFIG,
         instanceImage: Deno.env.get("INSTANCE_IMAGE") ?? "p0rt1on-instance:it",
+        // Headscale serves over HTTP (no certs) and its MagicDNS base is
+        // hs.test — endpoints + ACL grants must line up with the real tailnet.
+        serveMode: "http" as const,
+        tailnetDomain: "hs.test",
       };
-      // Mirrors app.ts wiring with the two swaps (k8s runtime, mock tailscale).
+      // Mirrors app.ts wiring with the runtime + headscale swaps.
       const context: TrpcContext = {
         friendService: new FriendServiceImpl(
           queries,
@@ -94,6 +188,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           mc,
           tailscale,
           config.tailnetDomain,
+          config.serveMode,
           logger,
         ),
         provisioningService: new ProvisioningService(
@@ -158,6 +253,9 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         const friendId = friends[0].id;
         expect(friends[0].status).toBe("active");
 
+        // The friend backs up for real over the tailnet (see helper above).
+        await backupOverTailnet(runtime, mc, token, headscaleUrl, bundle);
+
         // ROTATE via the API: create-before-remove against the live MinIO.
         const rotated = await caller.friends.rotateKey({ friendId });
         expect(rotated.s3AccessKeyId).not.toBe(bundle.s3AccessKeyId);
@@ -170,11 +268,18 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         expect(offEvents.at(-1)?.type).toBe("done");
         expect(await runtime.listInstances()).toEqual([]);
         expect(await caller.friends.list()).toEqual([]);
-        // Offboard removed the node from the tailnet, not just the pod.
+        // Offboard removed BOTH tailnet nodes: the instance's serve node and
+        // the friend's client node (revoked by the friend tag).
         expect(await tailscale.nodesByTag(TEST_CONFIG.serveNodeTag))
+          .toEqual([]);
+        expect(await tailscale.nodesByTag("tag:p0rt1on-friend-k8sit"))
           .toEqual([]);
       } finally {
         // Best-effort teardown if any step failed mid-way.
+        await runtime["request"](
+          "DELETE",
+          "/api/v1/namespaces/p0rt1on-it-clients/pods/p0rt1on-it-client",
+        ).catch(() => undefined);
         await runtime.removeInstance("p0rt1on-k8sit", { removeData: true })
           .catch(() => undefined);
         database.driver.close();

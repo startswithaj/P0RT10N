@@ -104,3 +104,37 @@ spec:
     - name: stun
       port: 3478
       protocol: UDP
+---
+# The friend's backup-client runs here — as ROOT, like a friend's docker host,
+# so NO PSA `restricted` label (unlike the p0rt1on namespace). Test-only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: p0rt1on-it-clients
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: p0rt1on-it-client-runner
+  namespace: p0rt1on-it-clients
+# TEST ONLY: the portion test launches the friend's backup-client pod here
+# (the only place the once-shown bundle exists). The PRODUCTION manager Role
+# (deploy/k8s/p0rt1on.yaml) has no pod-create and stays that way.
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["create", "get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: p0rt1on-it-client-runner
+  namespace: p0rt1on-it-clients
+subjects:
+  - kind: ServiceAccount
+    name: p0rt1on-manager
+    namespace: p0rt1on
+roleRef:
+  kind: Role
+  name: p0rt1on-it-client-runner
+  apiGroup: rbac.authorization.k8s.io

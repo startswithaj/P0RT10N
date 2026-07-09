@@ -87,6 +87,20 @@ describe("ProvisioningService.addFriend", () => {
     expect(bundle.manualAclInstructions).toContain("tcp:443");
   });
 
+  it("http serve mode: endpoint scheme + ACL grant port follow the mode", async () => {
+    const calls: Calls = [];
+    const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
+      // Manual mode surfaces the grant endpoint so we can assert the port.
+      config: { serveMode: "http", aclMode: "manual" },
+    }).addFriend(ADD_INPUT);
+
+    // Friend endpoint is http, not https.
+    expect(bundle.s3Endpoint).toBe("http://p0rt1on-alice.tailnet.ts.net");
+    // ...and the grant targets port 80, not 443.
+    expect(bundle.manualAclInstructions).toContain("tcp:80");
+    expect(bundle.manualAclInstructions).not.toContain("tcp:443");
+  });
+
   it("adopting the existing shared pool verifies it instead of assuming", async () => {
     const calls: Calls = [];
     await buildProvisioningService(calls, {

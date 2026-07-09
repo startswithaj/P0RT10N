@@ -74,10 +74,20 @@ test bans docker literals outside `runtime/`). Selected by
     (apply idempotency, key erasure, scale, PVC gating, RBAC containment, PSA
     rejection, real tailnet enrollment) + portion tier (full tRPC
     addStart→rotate→offboard, zero mocks: real enrollment, serve in HTTP mode,
-    node deleted on offboard; uid 1000 under PSA `restricted`). Subcommands:
-    `build` (rerun after image-source changes) / `tier1` / `tier2` — test
-    iterations reuse the fixed images. Still pending the nightly real-Tailscale
-    tier: serve over HTTPS (headscale issues no certs).
+    node deleted on offboard; uid 1000 under PSA `restricted`). The portion tier
+    ALSO runs the friend's real backup: a `backup-client` pod joins the same
+    tailnet under its friend tag and snapshots with Kopia through the instance's
+    serve (WireGuard) using only bundle contents — proving the ACL grant,
+    MagicDNS, serve, and an actual write to the bucket. That pod runs as ROOT in
+    the non-restricted `p0rt1on-it-clients` namespace (like a friend's docker
+    host); a test-only Role there lets the manager SA launch it — the production
+    Role has no pod-create. Subcommands: `build` (rerun after image-source
+    changes) / `tier1` / `tier2` — test iterations reuse the fixed images. Still
+    pending the nightly real-Tailscale tier: serve over HTTPS (headscale issues
+    no certs).
+  - `serveMode` (`https`|`http`, from `TAILSCALE_SERVE_MODE`) drives THREE
+    things in lockstep: the instance's serve port (443/80), the friend endpoint
+    scheme, and the ACL grant port — all from one env value so they can't drift.
 
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 

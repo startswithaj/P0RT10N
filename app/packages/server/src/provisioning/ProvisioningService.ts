@@ -355,7 +355,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
         `instance ${reservation.tsHostname} has no tailnet IP yet`,
       );
     }
-    const endpointHostPort = `${ip}:443`;
+    // Port follows the serve mode: 443 (https certs) or 80 (http — headscale).
+    const endpointHostPort = `${ip}:${
+      this.config.serveMode === "http" ? 80 : 443
+    }`;
     if (this.config.aclMode === "manual") {
       log.info("manual ACL mode — admin must add the grant by hand", {
         tag: naming.nodeTag,
@@ -848,7 +851,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
   }
 
   private endpointFor(tsHostname: string): string {
-    return `https://${tsHostname}.${this.config.tailnetDomain}`;
+    return `${this.config.serveMode}://${tsHostname}.${this.config.tailnetDomain}`;
   }
 
   private specFor(
