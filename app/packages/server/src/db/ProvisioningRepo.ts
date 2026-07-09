@@ -72,6 +72,13 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     });
   }
 
+  recordServeNodeId(instanceId: number, serveNodeId: string): Promise<void> {
+    return defer(() => {
+      this.db.update(instances).set({ serveNodeId })
+        .where(eq(instances.id, instanceId)).run();
+    });
+  }
+
   setQuota(friendId: number, quotaBytes: number): Promise<void> {
     return defer(() => {
       this.db.update(friends).set({ quotaBytes })
@@ -137,6 +144,7 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       lockRetentionDays: friends.lockRetentionDays,
       instanceId: friends.instanceId,
       tsHostname: instances.tsHostname,
+      serveNodeId: instances.serveNodeId,
       minioPort: instances.minioPort,
     }).from(friends)
       .innerJoin(instances, eq(friends.instanceId, instances.id))
@@ -221,11 +229,14 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     );
   }
 
-  failedInstances(): Promise<{ instanceId: number; tsHostname: string }[]> {
+  failedInstances(): Promise<
+    { instanceId: number; tsHostname: string; serveNodeId: string | null }[]
+  > {
     return defer(() =>
       this.db.select({
         instanceId: instances.id,
         tsHostname: instances.tsHostname,
+        serveNodeId: instances.serveNodeId,
       }).from(instances).where(eq(instances.status, "failed")).all()
     );
   }

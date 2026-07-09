@@ -92,6 +92,8 @@ export interface FriendProvisionContext {
   instanceName: string;
   alias: string;
   tsHostname: string;
+  /** Serve node's stable tailnet ID; null pre-column. Offboard deletes by it. */
+  serveNodeId: string | null;
   /** Host-published admin-plane port (composes the per-call MC_HOST endpoint). */
   minioPort: number;
 }
@@ -116,6 +118,9 @@ export interface ProvisioningRepo {
 
   /** Persist the Tailscale auth-key **ID** (never the secret) at mint time. */
   recordTsKeyId(friendId: number, tsKeyId: string): Promise<void>;
+
+  /** Persist the serve node's tailnet ID once it has enrolled. */
+  recordServeNodeId(instanceId: number, serveNodeId: string): Promise<void>;
 
   /**
    * Atomically count live friends and mark the instance `reaping` (one
@@ -157,7 +162,9 @@ export interface ProvisioningRepo {
   failStaleProvisioning(): Promise<string[]>;
 
   /** Instances left in `failed` state — for reaping orphaned containers/volumes. */
-  failedInstances(): Promise<{ instanceId: number; tsHostname: string }[]>;
+  failedInstances(): Promise<
+    { instanceId: number; tsHostname: string; serveNodeId: string | null }[]
+  >;
 
   /** Every non-failed instance (id + address) — the boot reconcile's worklist. */
   liveInstances(): Promise<

@@ -355,6 +355,17 @@ export class ProvisioningService implements ProvisioningServiceContract {
         `instance ${reservation.tsHostname} has no tailnet IP yet`,
       );
     }
+    // Capture the serve node's stable ID now, while it's freshly enrolled and
+    // its hostname is unambiguous — offboard deletes by ID, not hostname.
+    const serveNode =
+      (await this.tailscale.nodesByTag(this.config.serveNodeTag))
+        .find((n) => n.hostname === reservation.tsHostname);
+    if (serveNode) {
+      await this.repo.recordServeNodeId(
+        reservation.instanceId,
+        serveNode.nodeId,
+      );
+    }
     // Port follows the serve mode: 443 (https certs) or 80 (http — headscale).
     const endpointHostPort = `${ip}:${
       this.config.serveMode === "http" ? 80 : 443
@@ -584,7 +595,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     await this.attempt(
       log,
       "revoke serve node",
-      () => this.revokeServeNode(ctx.tsHostname),
+      () => this.revokeServeNode(ctx.serveNodeId, ctx.tsHostname),
     );
     await this.repo.deleteInstance(ctx.instanceId);
   }
@@ -613,13 +624,18 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
   }
 
-  /** Delete an instance's own (serve) tailnet node, matched by hostname. */
-  private async revokeServeNode(tsHostname: string): Promise<void> {
+  /** Delete an instance's own (serve) tailnet node. Match by stored ID (stable
+   * across control-plane renames); fall back to hostname for pre-column
+   * instances. Absent = already gone = success. */
+  private async revokeServeNode(
+    serveNodeId: string | null,
+    tsHostname: string,
+  ): Promise<void> {
     const nodes = await this.tailscale.nodesByTag(this.config.serveNodeTag);
-    await Promise.all(
-      nodes.filter((n) => n.hostname === tsHostname)
-        .map((n) => this.tailscale.deleteNode(n.nodeId)),
-    );
+    const target = serveNodeId
+      ? nodes.find((n) => n.nodeId === serveNodeId)
+      : nodes.find((n) => n.hostname === tsHostname);
+    if (target) await this.tailscale.deleteNode(target.nodeId);
   }
 
   /** Best-effort teardown of a failed friend's (possibly partial) resources. */
@@ -701,6 +717,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
   private async reapOrphanInstance(
     instanceId: number,
     tsHostname: string,
+    serveNodeId: string | null,
     log: Logger,
   ): Promise<void> {
     const removed = await this.attempt(
@@ -711,7 +728,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const revoked = await this.attempt(
       log,
       "revokeServeNode",
-      () => this.revokeServeNode(tsHostname),
+      () => this.revokeServeNode(serveNodeId, tsHostname),
     );
     if (!removed || !revoked) {
       // Same gating as reapFriend: the row is the record — keep it so the
@@ -760,7 +777,14 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const orphans = await this.repo.failedInstances();
     await orphans.reduce(
       (p, o) =>
-        p.then(() => this.reapOrphanInstance(o.instanceId, o.tsHostname, log)),
+        p.then(() =>
+          this.reapOrphanInstance(
+            o.instanceId,
+            o.tsHostname,
+            o.serveNodeId,
+            log,
+          )
+        ),
       Promise.resolve(),
     );
     const total = friendIds.length + orphans.length;

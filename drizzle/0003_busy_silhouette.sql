@@ -1,0 +1,1 @@
+ALTER TABLE `instances` ADD `serve_node_id` text;

@@ -64,6 +64,18 @@ describe("ProvisioningService.addFriend", () => {
     expect(specs[0].name).toBe("p0rt1on-alice");
   });
 
+  it("records the serve node's ID at provision (for id-based offboard)", async () => {
+    const calls: Calls = [];
+    // The freshly-enrolled serve node, found by its (still-unambiguous) hostname.
+    const nodes: TailnetNode[] = [
+      { nodeId: "srv1", hostname: "p0rt1on-alice", tags: [], online: true },
+    ];
+    await buildProvisioningService(calls, DEDICATED_RES, { nodes })
+      .addFriend(ADD_INPUT);
+
+    expect(calls).toContain("repo:recordServeNodeId:srv1");
+  });
+
   it("auto ACL mode edits the tailnet policy; no manual instructions", async () => {
     const calls: Calls = [];
     const bundle = await buildProvisioningService(calls, DEDICATED_RES)
@@ -463,13 +475,63 @@ describe("ProvisioningService.sweepFailed", () => {
       repo: {
         failedFriendIds: () => Promise.resolve([]),
         failedInstances: () =>
-          Promise.resolve([{ instanceId: 10, tsHostname: "ghost" }]),
+          Promise.resolve([{
+            instanceId: 10,
+            tsHostname: "ghost",
+            serveNodeId: null,
+          }]),
       },
     }).sweepFailed();
 
     expect(n).toBe(1);
     expect(calls).toContain("runtime:removeInstance");
     expect(calls).toContain("repo:deleteInstance");
+  });
+
+  it("orphan reap deletes the serve node by STORED ID despite a rename", async () => {
+    // A stale node made the control plane rename this one to <host>-1, so a
+    // hostname match would MISS it — the stored ID still finds it.
+    const calls: Calls = [];
+    const nodes: TailnetNode[] = [
+      { nodeId: "srv1", hostname: "p0rt1on-alice-1", tags: [], online: false },
+    ];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      nodes,
+      repo: {
+        failedFriendIds: () => Promise.resolve([]),
+        failedInstances: () =>
+          Promise.resolve([{
+            instanceId: 10,
+            tsHostname: "p0rt1on-alice",
+            serveNodeId: "srv1",
+          }]),
+      },
+    }).sweepFailed();
+
+    expect(calls).toContain("ts:deleteNode:srv1");
+  });
+
+  it("orphan reap without a stored ID falls back to hostname (misses a rename)", async () => {
+    // The pre-column behaviour: null ID → hostname match, which a rename
+    // defeats. Documents exactly why the ID column exists.
+    const calls: Calls = [];
+    const nodes: TailnetNode[] = [
+      { nodeId: "srv1", hostname: "p0rt1on-alice-1", tags: [], online: false },
+    ];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      nodes,
+      repo: {
+        failedFriendIds: () => Promise.resolve([]),
+        failedInstances: () =>
+          Promise.resolve([{
+            instanceId: 10,
+            tsHostname: "p0rt1on-alice",
+            serveNodeId: null,
+          }]),
+      },
+    }).sweepFailed();
+
+    expect(calls).not.toContain("ts:deleteNode:srv1");
   });
 
   it("best-effort: swallows a teardown error and still deletes the friend", async () => {
@@ -537,7 +599,11 @@ describe("ProvisioningService.sweepFailed", () => {
     await buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
         failedInstances: () =>
-          Promise.resolve([{ instanceId: 10, tsHostname: "ghost" }]),
+          Promise.resolve([{
+            instanceId: 10,
+            tsHostname: "ghost",
+            serveNodeId: null,
+          }]),
       },
       runtime: {
         removeInstance: () => Promise.reject(new Error("docker down")),

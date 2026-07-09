@@ -182,6 +182,18 @@ describe("DrizzleProvisioningRepo", () => {
     expect(ctx.s3AccessKeyId).toBe("AKIANEW");
     expect(ctx.bucket).toBe("alice");
     expect(ctx.nodeTag).toBe("tag:p0rt1on-friend-alice");
+    expect(ctx.serveNodeId).toBeNull(); // not yet recorded
+  });
+
+  it("records the serve node ID; context reflects it", async () => {
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    await repo.recordServeNodeId(res.instanceId, "srv-node-1");
+
+    const ctx = await repo.context(res.friendId);
+    expect(ctx.serveNodeId).toBe("srv-node-1");
   });
 
   it("counts live friends and excludes failed ones", async () => {

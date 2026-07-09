@@ -37,6 +37,9 @@ export const instances = sqliteTable("instances", {
   tsHostname: text("ts_hostname").notNull(),
   // The serve node's tag on our tailnet (instance side).
   tsTag: text("ts_tag").notNull(),
+  // Stable tailnet node ID; offboard deletes by this (not hostname, which the
+  // control plane renames on collision). Null for pre-column instances.
+  serveNodeId: text("serve_node_id"),
   status: text("status", { enum: INSTANCE_STATUS_VALUES })
     .notNull()
     .default("provisioning"),

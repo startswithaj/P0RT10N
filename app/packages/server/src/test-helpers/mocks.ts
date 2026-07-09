@@ -402,6 +402,10 @@ export function mockProvisioningRepo(
       calls.push(`repo:recordTsKeyId:${tsKeyId}`);
       return Promise.resolve();
     },
+    recordServeNodeId: (_instanceId, serveNodeId) => {
+      calls.push(`repo:recordServeNodeId:${serveNodeId}`);
+      return Promise.resolve();
+    },
     setQuota: () => {
       calls.push("repo:setQuota");
       return Promise.resolve();
@@ -487,6 +491,7 @@ export const CTX: FriendProvisionContext = {
   instanceName: "p0rt1on-minio-alice",
   alias: "alias",
   tsHostname: "alice",
+  serveNodeId: null,
   minioPort: 9100,
 };
 
