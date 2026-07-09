@@ -59,6 +59,31 @@ describe("DockerRuntime.ensureInstance", () => {
     ]);
     // MinIO is published to host loopback so the manager reaches it for admin.
     expect(run?.args).toContain("127.0.0.1:9100:9100");
+    // No resource flags when unconfigured (the exact array above proves it).
+    expect(run?.args).not.toContain("--cpus");
+  });
+
+  it("emits resource flags before the image when configured", async () => {
+    const cmds: RecordedCommand[] = [];
+    await new DockerRuntime(fakeRunner(cmds, absentInspect)).ensureInstance({
+      ...RUN_SPEC,
+      resources: {
+        cpuShares: "512",
+        cpus: "0.5",
+        memoryReservation: "256m",
+        memoryLimit: "1g",
+      },
+    });
+    const run = cmds.find((c) => c.args[0] === "run");
+    const joined = (run?.args ?? []).join(" ");
+    expect(joined).toContain("--cpu-shares 512");
+    expect(joined).toContain("--cpus 0.5");
+    expect(joined).toContain("--memory-reservation 256m");
+    expect(joined).toContain("--memory 1g");
+    // Flags must precede the image positional arg.
+    expect(run?.args.indexOf("--memory")).toBeLessThan(
+      run?.args.indexOf("p0rt1on-instance:x") ?? -1,
+    );
   });
 
   it("never puts the auth key on the docker argv, and a failed run can't leak it", async () => {

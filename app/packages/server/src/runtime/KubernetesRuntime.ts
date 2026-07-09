@@ -38,6 +38,13 @@ export interface KubeConfig {
   storageClass?: string;
   /** Instance enrollment extras (headscale test tier); absent = SaaS defaults. */
   tailscale?: InstanceTailscaleOptions;
+  /** Per-portion container CPU/memory (native k8s values); fields optional. */
+  resources?: {
+    cpuRequest?: string;
+    cpuLimit?: string;
+    memoryRequest?: string;
+    memoryLimit?: string;
+  };
 }
 
 /** Transport inputs — where the client points and how it authenticates. */
@@ -266,6 +273,25 @@ export class KubernetesRuntime implements InstanceRuntime {
     return "starting";
   }
 
+  /** Container `resources` from config — only the set fields; undefined when
+   * none are configured (no caps, the default). */
+  private containerResources() {
+    const r = this.config.resources;
+    const requests = {
+      ...(r?.cpuRequest ? { cpu: toQuantity(r.cpuRequest) } : {}),
+      ...(r?.memoryRequest ? { memory: toQuantity(r.memoryRequest) } : {}),
+    };
+    const limits = {
+      ...(r?.cpuLimit ? { cpu: toQuantity(r.cpuLimit) } : {}),
+      ...(r?.memoryLimit ? { memory: toQuantity(r.memoryLimit) } : {}),
+    };
+    const out = {
+      ...(Object.keys(requests).length ? { requests } : {}),
+      ...(Object.keys(limits).length ? { limits } : {}),
+    };
+    return Object.keys(out).length ? out : undefined;
+  }
+
   private applyPvc(
     name: string,
     labels: Record<string, string>,
@@ -314,6 +340,7 @@ export class KubernetesRuntime implements InstanceRuntime {
             containers: [{
               name: "instance",
               image: spec.image,
+              resources: this.containerResources(),
               envFrom: [{ secretRef: { name: names.secret } }],
               env: [
                 // Userspace tailscaled: zero capabilities, no /dev/net/tun —

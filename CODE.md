@@ -56,6 +56,10 @@ test bans docker literals outside `runtime/`). Selected by
 
 - **docker** (`DockerRuntime.ts`) — one container per instance; volume
   names/network/env-file secret transport all derived inside the runtime.
+  - Per-portion CPU/memory via `PORTION_DOCKER_CPU_REQUEST` (→ `--cpu-shares`) /
+    `PORTION_DOCKER_CPU_LIMIT` (→ `--cpus`) / `PORTION_DOCKER_MEMORY_REQUEST` (→
+    `--memory-reservation`) / `PORTION_DOCKER_MEMORY_LIMIT` (→ `--memory`); all
+    optional, unset = no cap.
 - **kubernetes** (`KubernetesRuntime.ts`) — typed `@cloudydeno` client
   (`CoreV1Api`/`AppsV1Api` over a `RestClient`), no kubectl; per instance:
   StatefulSet(1) + Service + Secret + 2 PVCs.
@@ -66,6 +70,9 @@ test bans docker literals outside `runtime/`). Selected by
   - Reads/scale avoid subresources the Role doesn't grant: pod health uses
     `getPod` (not `getPodStatus` → `pods/status`), suspend/resume json-patch
     `/spec/replicas` on the main StatefulSet (not the `/scale` subresource).
+  - Per-portion CPU/memory via `PORTION_K8S_CPU_REQUEST`/`_CPU_LIMIT`/
+    `_MEMORY_REQUEST`/`_MEMORY_LIMIT` (native k8s values → container
+    `resources.requests`/`.limits`); all optional, unset = no block.
   - `buildRestClient()` auto-detects the mounted in-cluster SA (token + CA +
     server) via `forInCluster`, or takes explicit `K8S_API`/`K8S_TOKEN`/
     `K8S_CA_FILE` for dev — no more `DENO_CERT`. Config:

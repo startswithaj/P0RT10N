@@ -3,6 +3,7 @@ import type {
   ContainerRunSpec,
   ContainerRuntime,
   ContainerState,
+  DockerResources,
   InstanceDiagnostics,
   InstanceHealth,
   InstanceRuntime,
@@ -28,6 +29,18 @@ import { maskSecrets, safeArgs } from "../lib/redact.ts";
 // ============================================================================
 
 const LABEL = "p0rt1on=1";
+
+/** `docker run` resource flags for the set fields only (native values). */
+function resourceArgs(r: ContainerRunSpec["resources"]): string[] {
+  return [
+    ...(r?.cpuShares ? ["--cpu-shares", r.cpuShares] : []),
+    ...(r?.cpus ? ["--cpus", r.cpus] : []),
+    ...(r?.memoryReservation
+      ? ["--memory-reservation", r.memoryReservation]
+      : []),
+    ...(r?.memoryLimit ? ["--memory", r.memoryLimit] : []),
+  ];
+}
 
 /** docker `State.Status` → our coarse ContainerState. */
 function mapState(status: string): ContainerState {
@@ -129,6 +142,7 @@ export class DockerRuntime implements ContainerRuntime {
       `TAILSCALE_TAG=${spec.tag}`,
       "-e",
       `MINIO_PORT=${spec.minioPort}`,
+      ...resourceArgs(spec.resources),
       spec.image,
     ]);
   }
@@ -314,6 +328,7 @@ export class DockerInstanceRuntime implements InstanceRuntime {
       network: string;
       addressing: InstanceAddressing;
       tailscale?: InstanceTailscaleOptions;
+      resources?: DockerResources;
     },
   ) {}
 
@@ -350,6 +365,7 @@ export class DockerInstanceRuntime implements InstanceRuntime {
         stateVolume: names.stateVolume,
         rootCredSecretRef: envFile,
         network: this.config.network,
+        resources: this.config.resources,
       });
     } finally {
       await this.tempFiles.remove(envFile);

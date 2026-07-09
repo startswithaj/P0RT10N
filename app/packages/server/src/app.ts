@@ -67,12 +67,14 @@ async function buildInstanceRuntime(
       stateSize: settings.stateSize,
       storageClass: settings.storageClass,
       tailscale: env.instanceTailscale(),
+      resources: settings.resources,
     }, client);
   }
   return new DockerInstanceRuntime(new DockerRuntime(runner), tempFiles, {
     network: env.dockerNetwork,
     addressing: env.provisioningConfig().instanceAddressing,
     tailscale: env.instanceTailscale(),
+    resources: env.dockerPortionResources(),
   });
 }
 

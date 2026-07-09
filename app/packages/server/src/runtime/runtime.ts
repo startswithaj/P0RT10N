@@ -83,6 +83,14 @@ export function tailscaleEnv(
   };
 }
 
+/** Per-portion docker resource caps (native `docker run` values); optional. */
+export interface DockerResources {
+  cpuShares?: string;
+  cpus?: string;
+  memoryReservation?: string;
+  memoryLimit?: string;
+}
+
 /**
  * Docker-level run spec (the old docker-shaped InstanceSpec) — built by
  * DockerInstanceRuntime from the domain `InstanceSpec`, never by callers.
@@ -100,6 +108,7 @@ export interface ContainerRunSpec {
   stateVolume: string;
   rootCredSecretRef: string;
   network: string;
+  resources?: DockerResources;
 }
 
 /**

@@ -124,6 +124,12 @@ export class Env {
     dataSize: string;
     stateSize: string;
     storageClass?: string;
+    resources: {
+      cpuRequest?: string;
+      cpuLimit?: string;
+      memoryRequest?: string;
+      memoryLimit?: string;
+    };
   } {
     return {
       namespace: this.#str("K8S_NAMESPACE", "p0rt1on"),
@@ -133,6 +139,28 @@ export class Env {
       dataSize: this.#str("K8S_DATA_SIZE", "50Gi"),
       stateSize: this.#str("K8S_STATE_SIZE", "1Gi"),
       storageClass: this.#opt("K8S_STORAGE_CLASS"),
+      // Per-portion container CPU/memory (native k8s values, all optional).
+      resources: {
+        cpuRequest: this.#opt("PORTION_K8S_CPU_REQUEST"),
+        cpuLimit: this.#opt("PORTION_K8S_CPU_LIMIT"),
+        memoryRequest: this.#opt("PORTION_K8S_MEMORY_REQUEST"),
+        memoryLimit: this.#opt("PORTION_K8S_MEMORY_LIMIT"),
+      },
+    };
+  }
+
+  /** Per-portion docker resource caps → `docker run` flags (all optional). */
+  dockerPortionResources(): {
+    cpuShares?: string;
+    cpus?: string;
+    memoryReservation?: string;
+    memoryLimit?: string;
+  } {
+    return {
+      cpuShares: this.#opt("PORTION_DOCKER_CPU_REQUEST"),
+      cpus: this.#opt("PORTION_DOCKER_CPU_LIMIT"),
+      memoryReservation: this.#opt("PORTION_DOCKER_MEMORY_REQUEST"),
+      memoryLimit: this.#opt("PORTION_DOCKER_MEMORY_LIMIT"),
     };
   }
   /**

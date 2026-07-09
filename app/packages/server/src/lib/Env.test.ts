@@ -144,4 +144,48 @@ describe("Env", () => {
     expect(env({ TAILSCALE_SERVE_MODE: "bogus" }).instanceTailscale().serveMode)
       .toBe("https");
   });
+
+  it("portion resources are all unset by default (no caps)", () => {
+    expect(env({}).kubeSettings().resources).toEqual({
+      cpuRequest: undefined,
+      cpuLimit: undefined,
+      memoryRequest: undefined,
+      memoryLimit: undefined,
+    });
+    expect(env({}).dockerPortionResources()).toEqual({
+      cpuShares: undefined,
+      cpus: undefined,
+      memoryReservation: undefined,
+      memoryLimit: undefined,
+    });
+  });
+
+  it("reads the per-portion k8s + docker resource vars", () => {
+    expect(
+      env({
+        PORTION_K8S_CPU_REQUEST: "250m",
+        PORTION_K8S_CPU_LIMIT: "1",
+        PORTION_K8S_MEMORY_REQUEST: "256Mi",
+        PORTION_K8S_MEMORY_LIMIT: "1Gi",
+      }).kubeSettings().resources,
+    ).toEqual({
+      cpuRequest: "250m",
+      cpuLimit: "1",
+      memoryRequest: "256Mi",
+      memoryLimit: "1Gi",
+    });
+    expect(
+      env({
+        PORTION_DOCKER_CPU_REQUEST: "512",
+        PORTION_DOCKER_CPU_LIMIT: "0.5",
+        PORTION_DOCKER_MEMORY_REQUEST: "256m",
+        PORTION_DOCKER_MEMORY_LIMIT: "1g",
+      }).dockerPortionResources(),
+    ).toEqual({
+      cpuShares: "512",
+      cpus: "0.5",
+      memoryReservation: "256m",
+      memoryLimit: "1g",
+    });
+  });
 });

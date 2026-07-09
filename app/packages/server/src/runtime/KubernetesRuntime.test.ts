@@ -197,6 +197,38 @@ describe("KubernetesRuntime", () => {
     expect(env.TAILSCALE_SERVE_MODE).toBe("http");
   });
 
+  it("container resources: omitted by default, set from config", async () => {
+    // Default: no resources block at all (no caps).
+    const plain: Recorded[] = [];
+    await build(plain).ensureInstance(INSTANCE_SPEC);
+    expect(bodyOf(plain, "statefulsets").spec.template.spec.containers[0])
+      .not.toHaveProperty("resources");
+
+    // Configured: only the set fields, split into requests/limits.
+    const reqs: Recorded[] = [];
+    await new KubernetesRuntime(
+      {
+        namespace: "p0rt1on",
+        dataSize: "50Gi",
+        stateSize: "1Gi",
+        resources: {
+          cpuRequest: "250m",
+          cpuLimit: "1",
+          memoryRequest: "256Mi",
+          memoryLimit: "1Gi",
+        },
+      },
+      fakeClient(reqs),
+    ).ensureInstance(INSTANCE_SPEC);
+    expect(
+      bodyOf(reqs, "statefulsets").spec.template.spec.containers[0].resources,
+    )
+      .toEqual({
+        requests: { cpu: "250m", memory: "256Mi" },
+        limits: { cpu: "1", memory: "1Gi" },
+      });
+  });
+
   it("a failed Secret apply never echoes the secret material", async () => {
     const failing = build(
       [],
