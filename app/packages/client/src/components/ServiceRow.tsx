@@ -71,13 +71,14 @@ const provText = css({ color: "warning" });
 
 function stateColor(s: SvcState): string {
   if (s === "up") return upText;
-  if (s === "provisioning") return provText;
+  // `pending` (reaping) is transient like provisioning — not a real "down".
+  if (s === "provisioning" || s === "pending") return provText;
   return downText;
 }
 
 function stateDot(s: SvcState): string {
   if (s === "up") return dotUp;
-  if (s === "provisioning") return dotProv;
+  if (s === "provisioning" || s === "pending") return dotProv;
   return dotDown;
 }
 

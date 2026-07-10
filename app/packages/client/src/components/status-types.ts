@@ -1,6 +1,8 @@
 // Shared status-service shape used by StatusPage and its ServiceRow.
 
-export type SvcState = "up" | "provisioning" | "down";
+// `pending` = teardown-in-progress (reaping): the container is going away on
+// purpose, so a failing health probe is expected — shown as transient, not down.
+export type SvcState = "up" | "provisioning" | "pending" | "down";
 export type Svc = {
   name: string;
   detail: string;
@@ -11,5 +13,6 @@ export type Svc = {
 export function stateLabel(s: SvcState): string {
   if (s === "up") return "Up";
   if (s === "provisioning") return "Provisioning";
+  if (s === "pending") return "Offboarding";
   return "Down";
 }

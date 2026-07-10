@@ -285,8 +285,9 @@ export type FriendDetail = {
 export type ServiceStatus = {
   name: string;
   detail: string;
-  /** `provisioning` while the instance is still coming up (not yet healthy). */
-  state: "up" | "provisioning" | "down";
+  /** `provisioning` while coming up (not yet healthy); `pending` while being
+   * torn down (instance `reaping`) — transitional, not a fault. */
+  state: "up" | "provisioning" | "pending" | "down";
   /** Instance hostname for `status.diagnose`; absent for host rows. */
   instance?: string;
 };

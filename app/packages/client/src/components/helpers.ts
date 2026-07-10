@@ -47,11 +47,18 @@ export const invalidate = () =>
  * the Status page renders: backend unreachable or any service `down` ⇒
  * unhealthy. `provisioning` is transitional, not unhealthy.
  */
+/** Footer/aggregate health states. `offboarding` = a teardown in progress. */
+export type SystemHealth = "healthy" | "unhealthy" | "offboarding" | "checking";
+
 export function systemHealth(
   q: { isError: boolean; data?: StatusView },
-): "healthy" | "unhealthy" | "checking" {
+): SystemHealth {
   if (q.isError) return "unhealthy";
   if (!q.data) return "checking";
   const services = [...q.data.minio, ...q.data.tailscale, ...q.data.host];
-  return services.some((s) => s.state === "down") ? "unhealthy" : "healthy";
+  // A genuine `down` outranks teardown: a real fault must still read unhealthy
+  // even if something else is offboarding at the same time.
+  if (services.some((s) => s.state === "down")) return "unhealthy";
+  if (services.some((s) => s.state === "pending")) return "offboarding";
+  return "healthy";
 }

@@ -4,9 +4,10 @@ import { NavBar } from "./NavBar.tsx";
 import { PortionsView } from "./PortionsView.tsx";
 import { PortionsSkeleton } from "./PortionsSkeleton.tsx";
 import { StatusPage } from "./StatusPage.tsx";
+import type { SystemHealth } from "./helpers.ts";
 import { page, shell } from "./styles.ts";
 import type { FriendRow } from "./types.ts";
-import type { Pending } from "./ActionDialog.tsx";
+import type { Pending } from "./action-dialog-shared.ts";
 
 export function Dashboard(
   props: {
@@ -18,7 +19,7 @@ export function Dashboard(
     totalQuota: () => number;
     totalUsed: () => number;
     overallPct: () => number;
-    health: () => "healthy" | "unhealthy" | "checking";
+    health: () => SystemHealth;
     onAction: (p: Pending) => void;
     onLogout?: () => void;
   },

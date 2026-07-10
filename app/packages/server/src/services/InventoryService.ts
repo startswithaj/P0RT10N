@@ -27,6 +27,9 @@ function serviceState(
   dbStatus: string,
 ): ServiceStatus["state"] {
   if (health === "healthy") return "up";
+  // Reaping is teardown-in-progress: the container is going away on purpose, so
+  // a failing health probe here is expected — surface it as pending, not down.
+  if (dbStatus === "reaping") return "pending";
   if (health === "starting" || dbStatus === "provisioning") {
     return "provisioning";
   }

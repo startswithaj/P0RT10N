@@ -3,6 +3,7 @@ import { css } from "styled-system/css";
 import { GitCommitHorizontal, LogOut } from "lucide-solid";
 import { Button } from "./ui/button.tsx";
 import { Wordmark } from "./Wordmark.tsx";
+import type { SystemHealth } from "./helpers.ts";
 
 declare const __COMMIT__: string; // injected by Vite (short git hash, or "dev")
 
@@ -28,6 +29,14 @@ const footerNote = css({
 });
 const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "cyan.9" });
 const dotDown = css({ w: "2", h: "2", rounded: "full", bg: "fg.error" });
+// Offboarding: a pulsing warning dot — teardown in progress, not a fault.
+const dotOffboarding = css({
+  w: "2",
+  h: "2",
+  rounded: "full",
+  bg: "warning",
+  animation: "pulse 1.4s ease-in-out infinite",
+});
 // The footer health chip is a link to the Status page (which shows the issue).
 // Stays on variant=plain (it wants px:1, which `link` forces to 0!) — so all
 // of plain's gray washes are neutralised here, like segBtn.
@@ -47,15 +56,22 @@ const footerStatusBtn = css({
 // The commit chip: git icon + short hash, aligned with the muted note text.
 const version = css({ display: "inline-flex", alignItems: "center", gap: "1" });
 
-function healthLabel(h: "healthy" | "unhealthy" | "checking"): string {
+function healthLabel(h: SystemHealth): string {
   if (h === "unhealthy") return "Unhealthy";
+  if (h === "offboarding") return "Offboarding";
   if (h === "checking") return "Checking…";
   return "Healthy";
 }
 
+function healthDot(h: SystemHealth): string {
+  if (h === "unhealthy") return dotDown;
+  if (h === "offboarding") return dotOffboarding;
+  return dotUp;
+}
+
 export function AppFooter(
   props: {
-    health: () => "healthy" | "unhealthy" | "checking";
+    health: () => SystemHealth;
     onStatus: () => void;
     /** Present only when auth is enabled — renders a log-out button. */
     onLogout?: () => void;
@@ -71,7 +87,7 @@ export function AppFooter(
           class={footerStatusBtn}
           onClick={() => props.onStatus()}
         >
-          <span class={props.health() === "unhealthy" ? dotDown : dotUp} />
+          <span class={healthDot(props.health())} />
           {healthLabel(props.health())}
         </Button>
         {" · "}

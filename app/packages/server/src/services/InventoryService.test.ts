@@ -63,6 +63,12 @@ describe("RuntimeInventoryService", () => {
     expect(snap.minio[0].state).toBe("provisioning");
   });
 
+  it("db status reaping → pending even when the probe fails (teardown)", async () => {
+    const snap = await svcOf("unhealthy", "reaping").snapshot();
+    expect(snap.minio[0].state).toBe("pending");
+    expect(snap.tailscale[0].state).toBe("pending");
+  });
+
   it("unhealthy → down on both rows", async () => {
     const snap = await svcOf("unhealthy").snapshot();
     expect(snap.minio[0].state).toBe("down");
