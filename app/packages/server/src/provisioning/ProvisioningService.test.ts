@@ -4,6 +4,7 @@ import { OFFBOARD_STEPS, PROVISION_STEPS } from "@p0rt1on/shared/domain";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
 import type { InstanceSpec } from "../runtime/runtime.ts";
 import {
+  absentInstance,
   ADD_INPUT,
   buildProvisioningService,
   type Calls,
@@ -344,6 +345,25 @@ describe("ProvisioningService.offboard", () => {
     expect(calls).toContain("repo:deleteFriend");
   });
 
+  it("skips MinIO teardown when the instance is already gone", async () => {
+    // The instance container was removed out-of-band; its bucket, users and
+    // policies went with it. Reaching in with mc would wedge on
+    // connection-refused — the offboard must treat the storage as already torn
+    // down and still complete (tailnet + rows cleaned up).
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: { context: () => Promise.resolve(CTX) },
+      runtime: { diagnoseInstance: absentInstance },
+    }).offboard(1);
+
+    expect(calls).not.toContain("mc:removeUser");
+    expect(calls).not.toContain("mc:removePolicy");
+    expect(calls).not.toContain("mc:removeBucket");
+    expect(calls).toContain("ts:revokeAuthKey:kid-old");
+    expect(calls).toContain("repo:deleteFriend");
+    expect(calls).toContain("runtime:removeInstance");
+  });
+
   it("refuses a COMPLIANCE friend with data BEFORE any destructive step", async () => {
     // COMPLIANCE-locked objects are undeletable by anyone until retention
     // lapses — failing up-front beats failing opaquely mid-teardown with the
@@ -449,6 +469,25 @@ describe("ProvisioningService.sweepFailed", () => {
     expect(calls).toContain("ts:revokeAuthKey:kid-old");
     expect(calls).toContain("repo:deleteFriend");
     expect(calls).toContain("runtime:removeInstance");
+    expect(calls).toContain("repo:deleteInstance");
+  });
+
+  it("reaps a failed friend whose instance is already gone", async () => {
+    // An absent instance means the storage steps are vacuously done — the
+    // sweep clears the tombstone instead of retrying a connection-refused
+    // forever (what used to strand the row).
+    const calls: Calls = [];
+    const n = await buildProvisioningService(calls, DEDICATED_RES, {
+      repo: {
+        failedFriendIds: () => Promise.resolve([1]),
+        context: () => Promise.resolve(CTX),
+      },
+      runtime: { diagnoseInstance: absentInstance },
+    }).sweepFailed();
+
+    expect(n).toBe(1);
+    expect(calls).not.toContain("mc:removeBucket");
+    expect(calls).toContain("repo:deleteFriend");
     expect(calls).toContain("repo:deleteInstance");
   });
 

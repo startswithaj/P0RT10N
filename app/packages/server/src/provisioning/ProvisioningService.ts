@@ -519,6 +519,68 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   // ---- offboard helpers ----
 
+  /**
+   * True when the instance container is ABSENT — its MinIO, and with it every
+   * bucket/user/policy, is already gone. Storage teardown is then vacuously
+   * done; reaching in with `mc` would only wedge on connection-refused (the
+   * failure that used to strand an offboard whose instance had already been
+   * removed). A present-but-unreachable instance is NOT treated this way — we
+   * can't prove its data is gone, so the mc call still runs and surfaces the
+   * real error rather than silently leaking a shared instance's resources.
+   */
+  private async instanceGone(
+    ctx: FriendProvisionContext,
+    log: Logger,
+  ): Promise<boolean> {
+    const state = await this.runtime
+      .diagnoseInstance(ctx.instanceName)
+      .then((d) => d.state)
+      .catch(() => null);
+    if (state === "absent") {
+      log.info(
+        "instance absent — MinIO storage already gone, skipping teardown",
+        { instance: ctx.instanceName },
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Best-effort MinIO teardown for the reap sweep — each step treats "already
+   * absent" as success, so partially-provisioned friends converge. If the
+   * instance is gone, its storage went with it: those steps are vacuously done
+   * (else the mc calls would wedge on connection-refused, keeping the tombstone
+   * forever). Returns a per-step success map the caller folds into `results`.
+   */
+  private async reapStorage(
+    ctx: FriendProvisionContext,
+    mc: McClient,
+    rlog: Logger,
+  ): Promise<Record<string, boolean>> {
+    if (await this.instanceGone(ctx, rlog)) {
+      return { removeUser: true, removePolicy: true, removeBucket: true };
+    }
+    const ak = ctx.s3AccessKeyId;
+    return {
+      removeUser: await this.attempt(rlog, "removeUser", async () => {
+        if (ak) await mc.removeUser(ak);
+        // Stale users from a failed rotation die with the friend too.
+        await this.removeStaleUsers(mc, ctx.bucket, null, rlog);
+      }),
+      removePolicy: await this.attempt(
+        rlog,
+        "removePolicy",
+        () => mc.removePolicy(ctx.bucket),
+      ),
+      removeBucket: await this.attempt(
+        rlog,
+        "removeBucket",
+        () => mc.removeBucket(ctx.bucket),
+      ),
+    };
+  }
+
   private async *tearDownSteps(
     ctx: FriendProvisionContext,
     log: Logger,
@@ -528,14 +590,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
       minioPort: ctx.minioPort,
     });
     yield { type: "step", step: "storage" };
-    if (ctx.s3AccessKeyId) await mc.removeUser(ctx.s3AccessKeyId);
-    // Also sweep users a failed rotation may have left attached to the
-    // policy — no credential may outlive the friend.
-    await this.removeStaleUsers(mc, ctx.bucket, null, log);
-    // The bucket-scoped IAM policy (named after the bucket) would otherwise
-    // live in MinIO forever; absent is success.
-    await mc.removePolicy(ctx.bucket);
-    await mc.removeBucket(ctx.bucket); // force; deletes all versions
+    if (!(await this.instanceGone(ctx, log))) {
+      if (ctx.s3AccessKeyId) await mc.removeUser(ctx.s3AccessKeyId);
+      // Also sweep users a failed rotation may have left attached to the
+      // policy — no credential may outlive the friend.
+      await this.removeStaleUsers(mc, ctx.bucket, null, log);
+      // The bucket-scoped IAM policy (named after the bucket) would otherwise
+      // live in MinIO forever; absent is success.
+      await mc.removePolicy(ctx.bucket);
+      await mc.removeBucket(ctx.bucket); // force; deletes all versions
+    }
     yield { type: "step", step: "nodes" };
     await this.revokeFriendNodes(ctx.nodeTag);
     // The enrollment key too — unused it stays live for ~90 days. Absent ID
@@ -659,25 +723,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
       alias: ctx.alias,
       minioPort: ctx.minioPort,
     });
-    const ak = ctx.s3AccessKeyId;
-    // Resource teardown first — each helper treats "already absent" as
-    // success, so partially-provisioned friends converge.
     const results: Record<string, boolean> = {
-      removeUser: await this.attempt(rlog, "removeUser", async () => {
-        if (ak) await mc.removeUser(ak);
-        // Stale users from a failed rotation die with the friend too.
-        await this.removeStaleUsers(mc, ctx.bucket, null, rlog);
-      }),
-      removePolicy: await this.attempt(
-        rlog,
-        "removePolicy",
-        () => mc.removePolicy(ctx.bucket),
-      ),
-      removeBucket: await this.attempt(
-        rlog,
-        "removeBucket",
-        () => mc.removeBucket(ctx.bucket),
-      ),
+      ...(await this.reapStorage(ctx, mc, rlog)),
       removeAcl: await this.attempt(
         rlog,
         "removeAcl",

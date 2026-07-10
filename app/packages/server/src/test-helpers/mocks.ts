@@ -337,6 +337,18 @@ export function mockContainerRuntime(
   };
 }
 
+/** An InstanceRuntime.diagnoseInstance that reports the container as absent. */
+export const absentInstance = (name: string) =>
+  Promise.resolve({
+    name,
+    state: "absent" as const,
+    health: "unknown" as const,
+    healthReason: null,
+    exitCode: null,
+    exitError: null,
+    recentLogs: "",
+  });
+
 export function mockInstanceRuntime(
   calls: Calls,
   opts: {
