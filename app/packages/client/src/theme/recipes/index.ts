@@ -1,3 +1,4 @@
+import { skeleton } from "./skeleton";
 import { toast } from "./toast";
 import { switchRecipe } from "./switch";
 import { spinner } from "./spinner";
@@ -31,5 +32,6 @@ export const recipes = {
   spinner,
   switchRecipe,
   toast,
+  skeleton,
 };
 export const slotRecipes = {};

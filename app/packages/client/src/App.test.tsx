@@ -24,6 +24,11 @@ vi.mock("./trpc.ts", async () => {
         get: { query: vi.fn() },
         diagnose: { query: vi.fn() },
       },
+      auth: {
+        status: { query: vi.fn() },
+        login: { mutate: vi.fn() },
+        logout: { mutate: vi.fn() },
+      },
     },
     queryClient: new QueryClient(),
   };
@@ -31,7 +36,7 @@ vi.mock("./trpc.ts", async () => {
 
 import { queryClient, trpc } from "./trpc.ts";
 import { App, createAddFlow } from "./App.tsx";
-import type { NewPortion } from "./AddPortion.tsx";
+import type { NewPortion } from "./components/AddPortion.tsx";
 
 describe("App dashboard", () => {
   // deno-lint-ignore no-explicit-any -- the mocked query/subscribe are vi.fns under real tRPC types
@@ -47,12 +52,51 @@ describe("App dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    // Default: auth off → the gate opens straight to the dashboard.
+    asMock(trpc.auth.status.query).mockResolvedValue({
+      enabled: false,
+      authenticated: true,
+    });
     // Default: an all-up snapshot so the footer reads Healthy unless a test
     // overrides it.
     asMock(trpc.status.get.query).mockResolvedValue({
       minio: [],
       tailscale: [],
       host: [{ name: "p0rt1on-api", detail: "control-plane API", state: "up" }],
+    });
+  });
+
+  describe("login gate", () => {
+    it("shows the login screen, not the dashboard, when auth is on and unauthenticated", async () => {
+      asMock(trpc.auth.status.query).mockResolvedValue({
+        enabled: true,
+        authenticated: false,
+      });
+      asMock(trpc.friends.list.query).mockResolvedValue([makeFriend({})]);
+
+      renderApp();
+
+      expect(await screen.findByText("Sign in")).toBeInTheDocument();
+      // Dashboard chrome must not render behind the gate.
+      expect(screen.queryByText("Portions")).not.toBeInTheDocument();
+      // Gated data queries never fire while locked.
+      expect(trpc.friends.list.query).not.toHaveBeenCalled();
+      expect(trpc.status.get.query).not.toHaveBeenCalled();
+    });
+
+    it("renders the dashboard once authenticated", async () => {
+      asMock(trpc.auth.status.query).mockResolvedValue({
+        enabled: true,
+        authenticated: true,
+      });
+      asMock(trpc.friends.list.query).mockResolvedValue([
+        makeFriend({ name: "alice" }),
+      ]);
+
+      renderApp();
+
+      expect(await screen.findByText("alice")).toBeInTheDocument();
+      expect(screen.queryByText("Sign in")).not.toBeInTheDocument();
     });
   });
 

@@ -28,6 +28,7 @@ import {
 import { RuntimeInventoryService } from "./services/InventoryService.ts";
 import { JobService } from "./jobs/JobService.ts";
 import { BootReconciler } from "./boot/BootReconciler.ts";
+import { AdminAuth } from "./auth/AdminAuth.ts";
 import type { Logger } from "./services/types.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
 
@@ -147,6 +148,11 @@ export async function buildApp(
     new McSmokeTester(runner, tempFiles),
     logger,
   );
+  // Env credentials → hashed auth at boot; absent → disabled (loopback only).
+  const adminCreds = env.adminAuth;
+  const auth = adminCreds
+    ? await AdminAuth.create(adminCreds)
+    : AdminAuth.disabled();
   const context: TrpcContext = {
     friendService: new FriendServiceImpl(
       queries,
@@ -167,6 +173,7 @@ export async function buildApp(
       logger,
     ),
     jobService: new JobService(logger),
+    auth,
     logger,
   };
   return {

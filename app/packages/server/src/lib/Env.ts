@@ -95,6 +95,19 @@ export class Env {
   get auditBindHost(): string {
     return this.#str("AUDIT_BIND_HOST", "0.0.0.0");
   }
+
+  // ---- admin auth ----
+  /** Admin credentials from env; null → auth disabled (loopback-only bind). */
+  get adminAuth(): { username: string; password: string } | null {
+    const username = this.#opt("ADMIN_USERNAME");
+    const password = this.#opt("ADMIN_PASSWORD");
+    return username && password ? { username, password } : null;
+  }
+  /** Admin listener bind. Non-loopback is refused unless auth is enabled
+   * (the boot guard) — a bare admin API must never face the network. */
+  get adminBindHost(): string {
+    return this.#str("ADMIN_BIND_HOST", "127.0.0.1");
+  }
   get dbPath(): string {
     return this.#str("DB_PATH", "./data/p0rt1on.db");
   }

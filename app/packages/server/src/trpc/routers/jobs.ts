@@ -1,5 +1,5 @@
 import { jobInput } from "@p0rt1on/shared/domain";
-import { loggedStream, publicProcedure, router } from "../trpc.ts";
+import { loggedStream, protectedProcedure, router } from "../trpc.ts";
 
 /**
  * Job observation. Jobs are STARTED by mutations (friends.addStart /
@@ -9,7 +9,7 @@ import { loggedStream, publicProcedure, router } from "../trpc.ts";
  * as `error` DATA events, never stream errors.
  */
 export const jobsRouter = router({
-  progress: publicProcedure
+  progress: protectedProcedure
     .input(jobInput)
     .subscription(async function* ({ ctx, input }) {
       // progress() never throws by design; loggedStream is a backstop so a
@@ -22,7 +22,7 @@ export const jobsRouter = router({
     }),
 
   /** Single-claim handover of an add job's once-shown bundle; wiped on return. */
-  claimBundle: publicProcedure
+  claimBundle: protectedProcedure
     .input(jobInput)
     .mutation(({ ctx, input }) => ctx.jobService.claimBundle(input.jobId)),
 });

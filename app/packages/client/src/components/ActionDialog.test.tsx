@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { makeFriend } from "./test-helpers/fixtures.ts";
+import { makeFriend } from "../test-helpers/fixtures.ts";
 
 // Mock the trpc/query module so the dialog's mutations and cache invalidation
 // are observable spies instead of real network calls. The dialog imports both
 // `trpc` and `queryClient` from ./trpc.ts.
-vi.mock("./trpc.ts", () => ({
+vi.mock("../trpc.ts", () => ({
   trpc: {
     friends: {
       rotateKey: { mutate: vi.fn() },
@@ -23,8 +23,8 @@ vi.mock("./trpc.ts", () => ({
   queryClient: { invalidateQueries: vi.fn() },
 }));
 
-import { trpc } from "./trpc.ts";
-import { ActionDialog, type Pending } from "./PortionActions.tsx";
+import { trpc } from "../trpc.ts";
+import { ActionDialog, type Pending } from "./ActionDialog.tsx";
 
 describe("ActionDialog", () => {
   // deno-lint-ignore no-explicit-any -- the mocked mutate is a vi.fn under a real tRPC type

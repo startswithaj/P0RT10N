@@ -75,9 +75,10 @@ await runBoot({
     startServer({
       port: env.port,
       context,
+      bindHost: env.adminBindHost,
       staticDir: env.staticDir,
       onListen: ({ port }) =>
-        logger.info(`p0rt1on admin listening on 127.0.0.1:${port}`),
+        logger.info(`p0rt1on admin listening on ${env.adminBindHost}:${port}`),
     });
     startAuditServer({
       port: env.auditPort,

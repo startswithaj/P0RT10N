@@ -1,6 +1,8 @@
 # secrets / local env
 .env
 *.local
+# local backup-client scratch (holds an instance env-file + test data)
+.backup-client-test/
 
 # local dev databases
 *.db

@@ -1,10 +1,12 @@
 import { createSignal, For, Show } from "solid-js";
 import { css } from "styled-system/css";
-import { Check, Copy, Eye, EyeOff, Mail, ShieldAlert } from "lucide-solid";
-import { Wordmark } from "./components/brand.tsx";
-import { Button } from "./components/ui/button.tsx";
-import { IconButton } from "./components/ui/icon-button.tsx";
-import { trpc } from "./trpc.ts";
+import { Check, Copy, Mail, ShieldAlert } from "lucide-solid";
+import { Wordmark } from "./Wordmark.tsx";
+import { Button } from "./ui/button.tsx";
+import { CopyButton } from "./CopyButton.tsx";
+import { CredentialsCard } from "./CredentialsCard.tsx";
+import { eyebrow, section } from "./bundle-styles.ts";
+import { trpc } from "../trpc.ts";
 
 // The "shown once" credentials hand-off, rendered from the real FriendBundle
 // that friends.add returned (s3 key/secret, endpoint, Tailscale up command,
@@ -37,49 +39,6 @@ const warn = css({
 });
 const warnIcon = css({ color: "spark", flexShrink: "0", mt: "0.5" });
 const warnText = css({ fontSize: "sm", lineHeight: "1.5" });
-
-const section = css({ mb: "6" });
-const eyebrow = css({
-  fontSize: "xs",
-  letterSpacing: "0.18em",
-  textTransform: "uppercase",
-  color: "fg.muted",
-  mb: "2",
-});
-const credCard = css({
-  bg: "bg.default",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  rounded: "l2",
-  px: "4",
-  boxShadow: "lg",
-});
-const fieldRow = css({
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "3",
-  py: "3",
-  borderBottomWidth: "1px",
-  borderColor: "border.default",
-  _last: { borderBottomWidth: "0" },
-});
-const fieldMeta = css({ minW: "0" });
-const fieldLabel = css({
-  fontSize: "xs",
-  color: "fg.muted",
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  mb: "1",
-});
-const fieldValue = css({
-  fontFamily: "body",
-  fontSize: "sm",
-  color: "fg.default",
-  wordBreak: "break-all",
-});
-const valueRow = css({ display: "flex", alignItems: "center", gap: "2" });
-const copiedIcon = css({ color: "cyan.9" });
 
 const codeWrap = css({ position: "relative" });
 const codeBlock = css({
@@ -135,31 +94,6 @@ const sparkBtn = css({
 // Secondary action: Park's outline variant, kept as a rounded-full pill to match.
 const pillOutline = css({ rounded: "full" });
 
-const DOTS = "••••••••••••••••••••••••";
-
-function CopyButton(
-  props: {
-    id: string;
-    value: string;
-    copied: () => string | null;
-    onCopy: (id: string, v: string) => void;
-  },
-) {
-  return (
-    <IconButton
-      variant="outline"
-      size="sm"
-      class={props.copied() === props.id ? copiedIcon : undefined}
-      aria-label="Copy"
-      onClick={() => props.onCopy(props.id, props.value)}
-    >
-      <Show when={props.copied() === props.id} fallback={<Copy size={15} />}>
-        <Check size={15} />
-      </Show>
-    </IconButton>
-  );
-}
-
 /** Non-fatal degradations from the server (e.g. rotate couldn't remove the
  * old credential) — must be visible, not buried in server logs. */
 function ServerWarnings(props: { warnings?: string[] }) {
@@ -176,89 +110,6 @@ function ServerWarnings(props: { warnings?: string[] }) {
         )}
       </For>
     </Show>
-  );
-}
-
-function CredentialsCard(
-  props: {
-    accessKey: string;
-    secret: string;
-    endpoint: string;
-    bucket: string;
-    revealed: () => boolean;
-    setRevealed: (fn: (r: boolean) => boolean) => void;
-    copied: () => string | null;
-    onCopy: (id: string, v: string) => void;
-  },
-) {
-  return (
-    <div class={section}>
-      <div class={eyebrow}>S3 credentials</div>
-      <div class={credCard}>
-        <div class={fieldRow}>
-          <div class={fieldMeta}>
-            <div class={fieldLabel}>Access key</div>
-            <div class={fieldValue}>{props.accessKey}</div>
-          </div>
-          <CopyButton
-            id="ak"
-            value={props.accessKey}
-            copied={props.copied}
-            onCopy={props.onCopy}
-          />
-        </div>
-        <div class={fieldRow}>
-          <div class={fieldMeta}>
-            <div class={fieldLabel}>Secret key</div>
-            <div class={fieldValue}>
-              {props.revealed() ? props.secret : DOTS}
-            </div>
-          </div>
-          <div class={valueRow}>
-            <IconButton
-              variant="outline"
-              size="sm"
-              aria-label="Reveal"
-              onClick={() => props.setRevealed((r) => !r)}
-            >
-              <Show when={props.revealed()} fallback={<Eye size={15} />}>
-                <EyeOff size={15} />
-              </Show>
-            </IconButton>
-            <CopyButton
-              id="sk"
-              value={props.secret}
-              copied={props.copied}
-              onCopy={props.onCopy}
-            />
-          </div>
-        </div>
-        <div class={fieldRow}>
-          <div class={fieldMeta}>
-            <div class={fieldLabel}>Endpoint</div>
-            <div class={fieldValue}>{props.endpoint}</div>
-          </div>
-          <CopyButton
-            id="ep"
-            value={props.endpoint}
-            copied={props.copied}
-            onCopy={props.onCopy}
-          />
-        </div>
-        <div class={fieldRow}>
-          <div class={fieldMeta}>
-            <div class={fieldLabel}>Bucket</div>
-            <div class={fieldValue}>{props.bucket}</div>
-          </div>
-          <CopyButton
-            id="bk"
-            value={props.bucket}
-            copied={props.copied}
-            onCopy={props.onCopy}
-          />
-        </div>
-      </div>
-    </div>
   );
 }
 

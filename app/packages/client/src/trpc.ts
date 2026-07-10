@@ -4,7 +4,7 @@ import {
   httpSubscriptionLink,
   splitLink,
 } from "@trpc/client";
-import { QueryClient } from "@tanstack/solid-query";
+import { QueryCache, QueryClient } from "@tanstack/solid-query";
 import type { AppRouter } from "@p0rt1on/server/router";
 
 // Vanilla tRPC proxy client (typed by AppRouter) used inside TanStack Solid
@@ -27,4 +27,18 @@ export const trpc = createTRPCClient<AppRouter>({
   ],
 });
 
-export const queryClient = new QueryClient();
+/** A tRPC error whose code is UNAUTHORIZED (session missing/expired). */
+function isUnauthorized(err: unknown): boolean {
+  return (err as { data?: { code?: string } })?.data?.code === "UNAUTHORIZED";
+}
+
+export const queryClient = new QueryClient({
+  // A session that expired mid-use → refetch auth so the app gates to login.
+  queryCache: new QueryCache({
+    onError: (err) => {
+      if (isUnauthorized(err)) {
+        queryClient.invalidateQueries({ queryKey: ["auth"] });
+      }
+    },
+  }),
+});

@@ -1,13 +1,23 @@
 import { createSignal, For, onCleanup, Show } from "solid-js";
 import { css } from "styled-system/css";
-import { ArrowLeft, Boxes, KeyRound, Mail, Server } from "lucide-solid";
+import { ArrowLeft, Boxes, Server } from "lucide-solid";
 import { addFriendInput } from "@p0rt1on/shared/domain";
-import { Button } from "./components/ui/button.tsx";
-import { IconButton } from "./components/ui/icon-button.tsx";
-import { Input } from "./components/ui/input.tsx";
-import * as Field from "./components/ui/field.tsx";
-import * as NumberInput from "./components/ui/number-input.tsx";
-import * as RadioGroup from "./components/ui/radio-group.tsx";
+import { Button } from "./ui/button.tsx";
+import { IconButton } from "./ui/icon-button.tsx";
+import { Input } from "./ui/input.tsx";
+import * as Field from "./ui/field.tsx";
+import * as NumberInput from "./ui/number-input.tsx";
+import * as RadioGroup from "./ui/radio-group.tsx";
+import { QuotaField } from "./QuotaField.tsx";
+import { EnrollPicker } from "./EnrollPicker.tsx";
+import {
+  hint,
+  modeCard,
+  modeGrid,
+  modeHead,
+  modeIcon,
+  radioDot,
+} from "./styles.ts";
 
 // "Add a portion" form. Collects a full AddFriendInput (+ enrollment choice) and
 // hands it up; App runs the real friends.add mutation.
@@ -52,45 +62,6 @@ const card = css({
   gap: "6",
   boxShadow: "lg",
 });
-const hint = css({ fontSize: "xs", color: "fg.muted" });
-
-const chips = css({ display: "flex", gap: "2", flexWrap: "wrap" });
-
-const modeGrid = css({
-  display: "grid",
-  gridTemplateColumns: "repeat(2, 1fr)",
-  gap: "3",
-});
-// Each RadioGroup.Item rendered as a selectable card; `_checked` marks the
-// currently-selected option (border + surface, no separate visible dot needed).
-const modeCard = css({
-  textAlign: "left",
-  p: "4",
-  rounded: "l2",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  // Unselected cards recede: cool near-white in light (NOT the cream canvas),
-  // page-indigo in dark. Selected pops to the card surface via _checked.
-  bg: { base: "gray.2", _dark: "bg.canvas" },
-  cursor: "pointer",
-  display: "flex",
-  flexDirection: "column",
-  gap: "1.5",
-  _hover: { borderColor: "border.outline" },
-  _checked: { borderColor: "cyan.9", bg: "bg.default" },
-});
-const modeHead = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "2",
-  fontWeight: "bold",
-  fontSize: "sm",
-  color: "fg.default",
-});
-const modeIcon = css({ color: "cyan.9" });
-// The radio indicator sits at the far right of the card header.
-const radioDot = css({ ml: "auto", flexShrink: "0" });
-
 const actions = css({
   display: "flex",
   justifyContent: "flex-end",
@@ -121,23 +92,6 @@ const sparkBtn = css({
   _hover: { bg: "spark", opacity: "0.9" },
 });
 
-const PRESETS = [10, 30, 50, 100];
-const ENROLL = [
-  {
-    id: "key" as const,
-    icon: KeyRound,
-    label: "Mint an auth key",
-    body:
-      "A pre-auth key they redeem with `tailscale up`. Headless — no account, joins as a tagged node.",
-  },
-  {
-    id: "invite" as const,
-    icon: Mail,
-    label: "Invite to tailnet",
-    body:
-      "Email them an invite to join with their own Tailscale identity and devices.",
-  },
-];
 const MODES = [
   {
     id: "dedicated" as const,
@@ -198,51 +152,6 @@ function createSettled(delayMs: number) {
     setSettled(true);
   };
   return { settled, touch, settleNow, dispose: () => clearTimeout(box.timer) };
-}
-
-function QuotaField(
-  props: {
-    quota: () => number;
-    setQuota: (n: number) => void;
-    error: () => string | null;
-  },
-) {
-  return (
-    <Field.Root invalid={props.error() !== null}>
-      <Field.Label>Storage quota (GB)</Field.Label>
-      <div class={chips}>
-        <For each={PRESETS}>
-          {(gb) => (
-            <Button
-              type="button"
-              size="sm"
-              variant={props.quota() === gb ? "solid" : "outline"}
-              onClick={() => props.setQuota(gb)}
-            >
-              {gb} GB
-            </Button>
-          )}
-        </For>
-      </div>
-      <NumberInput.Root
-        min={1}
-        value={String(props.quota())}
-        formatOptions={{ maximumFractionDigits: 0 }}
-        onValueChange={(d) => props.setQuota(d.valueAsNumber)}
-      >
-        {
-          /* v1 markup: Input is a sibling of Control; Control is only the
-            absolutely-positioned stepper column (triggers). */
-        }
-        <NumberInput.Input />
-        <NumberInput.Control>
-          <NumberInput.IncrementTrigger />
-          <NumberInput.DecrementTrigger />
-        </NumberInput.Control>
-      </NumberInput.Root>
-      <Field.ErrorText>Must be a positive whole number of GB</Field.ErrorText>
-    </Field.Root>
-  );
 }
 
 function RetentionField(
@@ -316,49 +225,6 @@ function ModePicker(
           instance-root compromise exposes all portions on it. Choose Dedicated
           for stronger isolation.
         </p>
-      </Show>
-    </RadioGroup.Root>
-  );
-}
-
-function EnrollPicker(
-  props: {
-    enroll: () => "key" | "invite";
-    setEnroll: (e: "key" | "invite") => void;
-  },
-) {
-  return (
-    <RadioGroup.Root
-      value={props.enroll()}
-      onValueChange={(d) => props.setEnroll(d.value as "key" | "invite")}
-    >
-      <RadioGroup.Label>Tailscale enrollment</RadioGroup.Label>
-      <div class={modeGrid}>
-        <For each={ENROLL}>
-          {(e) => (
-            <RadioGroup.Item value={e.id} class={modeCard}>
-              <span class={modeHead}>
-                <span class={modeIcon}>
-                  <e.icon size={16} />
-                </span>
-                <RadioGroup.ItemText>{e.label}</RadioGroup.ItemText>
-                <RadioGroup.ItemControl class={radioDot} />
-              </span>
-              <span class={hint}>{e.body}</span>
-              <RadioGroup.ItemHiddenInput />
-            </RadioGroup.Item>
-          )}
-        </For>
-      </div>
-      <Show when={props.enroll() === "invite"}>
-        <Field.Root>
-          <Field.Label>Email address</Field.Label>
-          <Input
-            type="email"
-            placeholder="friend@example.com"
-            autocomplete="off"
-          />
-        </Field.Root>
       </Show>
     </RadioGroup.Root>
   );

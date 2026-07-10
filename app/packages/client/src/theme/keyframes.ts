@@ -18,6 +18,11 @@ export const keyframes = defineKeyframes({
     from: { width: "var(--width)" },
     to: { width: "0" },
   },
+  // skeleton loading pulse
+  "pulse": {
+    "0%, 100%": { opacity: "1" },
+    "50%": { opacity: "0.45" },
+  },
   // fade
   "fade-in": {
     from: { opacity: "0" },

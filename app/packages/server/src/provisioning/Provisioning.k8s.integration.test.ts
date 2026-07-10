@@ -23,6 +23,7 @@ import { RuntimeInventoryService } from "../services/InventoryService.ts";
 import { JobService } from "../jobs/JobService.ts";
 import { HeadscaleHttpApi } from "../tailscale/HeadscaleHttpApi.ts";
 import { noopLogger, TEST_CONFIG } from "../test-helpers/mocks.ts";
+import { AdminAuth } from "../auth/AdminAuth.ts";
 import { createTestDatabase } from "../test-helpers/testDb.ts";
 
 // The PORTION-level k8s integration: a friend is added THROUGH THE tRPC API
@@ -240,6 +241,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           logger,
         ),
         jobService: new JobService(logger),
+        auth: AdminAuth.disabled(),
         logger,
       };
       const caller = createCallerFactory(appRouter)(context);

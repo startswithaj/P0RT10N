@@ -145,6 +145,16 @@ describe("Env", () => {
       .toBe("https");
   });
 
+  it("admin auth: null unless both username + password set; bind defaults loopback", () => {
+    expect(env({}).adminAuth).toBeNull();
+    expect(env({ ADMIN_USERNAME: "admin" }).adminAuth).toBeNull();
+    expect(env({ ADMIN_PASSWORD: "pw" }).adminAuth).toBeNull();
+    expect(env({ ADMIN_USERNAME: "admin", ADMIN_PASSWORD: "pw" }).adminAuth)
+      .toEqual({ username: "admin", password: "pw" });
+    expect(env({}).adminBindHost).toBe("127.0.0.1");
+    expect(env({ ADMIN_BIND_HOST: "0.0.0.0" }).adminBindHost).toBe("0.0.0.0");
+  });
+
   it("portion resources are all unset by default (no caps)", () => {
     expect(env({}).kubeSettings().resources).toEqual({
       cpuRequest: undefined,

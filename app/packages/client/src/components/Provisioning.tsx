@@ -2,9 +2,9 @@ import { Show } from "solid-js";
 import { css } from "styled-system/css";
 import { Check, XCircle } from "lucide-solid";
 import { PROVISION_STEPS, type ProvisionStepKey } from "@p0rt1on/shared/steps";
-import { Wordmark } from "./components/brand.tsx";
-import { Button } from "./components/ui/button.tsx";
-import { StepChecklist, stepStatusFor } from "./components/StepChecklist.tsx";
+import { Wordmark } from "./Wordmark.tsx";
+import { Button } from "./ui/button.tsx";
+import { StepChecklist, stepStatusFor } from "./StepChecklist.tsx";
 
 // Provisioning view. friends.addStream streams a `step` event as each real step
 // begins (and a `done`/error terminus), so the checklist reflects actual server

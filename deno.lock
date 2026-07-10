@@ -6,6 +6,7 @@
     "jsr:@cloudydeno/kubernetes-client@~0.8.1": "0.8.1",
     "jsr:@db/sqlite@0.12": "0.12.0",
     "jsr:@denosaurs/plug@1": "1.1.0",
+    "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@0.217": "0.217.0",
     "jsr:@std/assert@^1.0.17": "1.0.19",
     "jsr:@std/assert@^1.0.19": "1.0.19",
@@ -37,9 +38,10 @@
     "npm:@deno/vite-plugin@1": "1.0.6_vite@6.4.3",
     "npm:@pandacss/dev@*": "1.11.3_jsdom@29.1.1",
     "npm:@pandacss/dev@1": "1.11.3_jsdom@29.1.1",
+    "npm:@park-ui/cli@*": "1.0.1_typescript@6.0.3",
     "npm:@park-ui/cli@0.5": "0.5.0",
-    "npm:@park-ui/cli@1": "1.0.1_typescript@5.9.3",
-    "npm:@park-ui/cli@latest": "1.0.1_typescript@5.9.3",
+    "npm:@park-ui/cli@1": "1.0.1_typescript@6.0.3",
+    "npm:@park-ui/cli@latest": "1.0.1_typescript@6.0.3",
     "npm:@park-ui/panda-preset@*": "0.43.1_@pandacss+dev@1.11.3__jsdom@29.1.1_@internationalized+date@3.12.2",
     "npm:@park-ui/panda-preset@0.43.1": "0.43.1_@pandacss+dev@1.11.3__jsdom@29.1.1_@internationalized+date@3.12.2",
     "npm:@solidjs/testing-library@0.8": "0.8.10_solid-js@1.9.13",
@@ -1357,13 +1359,13 @@
       "integrity": "sha512-dShJWukLC9AuxRc5wSZHSZVPE9BbzHzaaGuxsoXHgbuySbHVRPVyFeHkC0rHt5yU+J+LvNeQLT/yjPX5uDbl+A==",
       "bin": true
     },
-    "@park-ui/cli@1.0.1_typescript@5.9.3": {
+    "@park-ui/cli@1.0.1_typescript@6.0.3": {
       "integrity": "sha512-kn6aqx9hme7kr3PnPHoF1yXlnRKclWrJCq6E77qrtHPlS7DnPijED7RNv+1vszk0LlczW3Uxe62HKDV4Xb7XFQ==",
       "dependencies": [
         "@better-fetch/fetch",
         "@clack/prompts@1.0.0-alpha.6",
         "commander",
-        "cosmiconfig@9.0.0_typescript@5.9.3",
+        "cosmiconfig@9.0.0_typescript@6.0.3",
         "effect@3.19.5",
         "fs-extra",
         "magicast@0.5.1",
@@ -1372,7 +1374,7 @@
         "ts-morph@27.0.2",
         "tsconfck",
         "tsconfig-paths",
-        "typescript@5.9.3",
+        "typescript@6.0.3",
         "zod@4.1.12"
       ],
       "bin": true
@@ -3539,17 +3541,17 @@
         "yaml"
       ]
     },
-    "cosmiconfig@9.0.0_typescript@5.9.3": {
+    "cosmiconfig@9.0.0_typescript@6.0.3": {
       "integrity": "sha512-itvL5h8RETACmOTFc4UfIyB2RfEHi71Ax6E/PivVxq9NseKbOWpeyHEOIbmAw1rs8Ak0VursQNww7lf7YtUwzg==",
       "dependencies": [
         "env-paths",
         "import-fresh",
         "js-yaml@4.2.0",
         "parse-json",
-        "typescript@5.9.3"
+        "typescript@6.0.3"
       ],
       "optionalPeers": [
-        "typescript@5.9.3"
+        "typescript@6.0.3"
       ]
     },
     "cross-spawn@7.0.6": {
@@ -6076,13 +6078,13 @@
     "ts-pattern@5.9.0": {
       "integrity": "sha512-6s5V71mX8qBUmlgbrfL33xDUwO0fq48rxAu2LBE11WBeGdpCPOsXksQbZJHvHwhrd3QjUusd3mAOM5Gg0mFBLg=="
     },
-    "tsconfck@3.1.6_typescript@5.9.3": {
+    "tsconfck@3.1.6_typescript@6.0.3": {
       "integrity": "sha512-ks6Vjr/jEw0P1gmOVwutM3B7fWxoWBL2KRDb1JfqGVawBmO5UsvmWOQFGHBPl5yxYz4eERr19E6L7NMv+Fej4w==",
       "dependencies": [
-        "typescript@5.9.3"
+        "typescript@6.0.3"
       ],
       "optionalPeers": [
-        "typescript@5.9.3"
+        "typescript@6.0.3"
       ],
       "deprecated": true,
       "bin": true

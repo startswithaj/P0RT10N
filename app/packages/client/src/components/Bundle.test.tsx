@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { Bundle } from "./Bundle.tsx";
-import { makeBundle } from "./test-helpers/fixtures.ts";
+import { makeBundle } from "../test-helpers/fixtures.ts";
 
 // Covers the shown-once bundle hand-off: the S3 secret must stay masked until
 // the user reveals it, and the Tailscale section must render the up-command

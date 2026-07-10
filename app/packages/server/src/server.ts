@@ -5,9 +5,19 @@ import { LimitedBytesTransformStream } from "@std/streams/limited-bytes-transfor
 import { join } from "@std/path";
 import { appRouter } from "./trpc/root.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
+import { SESSION_COOKIE } from "./trpc/routers/auth.ts";
 
 const TRPC_ENDPOINT = "/trpc";
 const AUDIT_ENDPOINT = "/internal/audit";
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
+
+/** Read one cookie value from a Cookie header (undefined if absent). */
+function readCookie(header: string | null, name: string): string | undefined {
+  return header
+    ?.split(/;\s*/)
+    .find((c) => c.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
 
 /** Token-guarded MinIO audit-webhook sink (loopback only, not on any tailnet). */
 export interface AuditHook {
@@ -19,6 +29,8 @@ export interface AuditHook {
 export interface ServerOptions {
   port: number;
   context: TrpcContext;
+  /** Admin listener bind. Default loopback; non-loopback requires auth on. */
+  bindHost?: string;
   /**
    * Built SPA assets dir to serve for non-API routes (production). Omit in dev —
    * the Vite dev server serves the frontend, so the API only handles tRPC.
@@ -103,9 +115,9 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
 }
 
 /**
- * Serve the tRPC router over HTTP. The admin surface binds LOOPBACK ONLY,
- * unconditionally — locality is the access control (PLAN); widening it waits
- * for real auth. `/health` is a plain liveness check; `/trpc` routes to tRPC.
+ * Serve the tRPC router over HTTP. The admin surface binds loopback by default;
+ * a non-loopback bind (`ADMIN_BIND_HOST`, behind a TLS proxy) is allowed ONLY
+ * with auth enabled. `/health` is a plain liveness check; `/trpc` routes to tRPC.
  * The audit webhook is deliberately NOT here (see startAuditServer): serving
  * it from this listener once forced `0.0.0.0` binds that exposed the whole
  * unauthenticated admin API to every container. When `staticDir` is set
@@ -113,16 +125,33 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
  * non-API requests fall through to tRPC (Vite serves the UI).
  */
 export function startServer(opts: ServerOptions): Deno.HttpServer {
+  const bind = opts.bindHost ?? "127.0.0.1";
+  // A bare admin API must never face the network — non-loopback needs auth.
+  if (!LOOPBACK.has(bind) && !opts.context.auth.enabled) {
+    throw new Error(
+      `ADMIN_BIND_HOST=${bind} is non-loopback but auth is disabled — set ` +
+        `ADMIN_USERNAME/ADMIN_PASSWORD or bind 127.0.0.1`,
+    );
+  }
   const handleTrpc = (req: Request) =>
     fetchRequestHandler({
       endpoint: TRPC_ENDPOINT,
       req,
       router: appRouter,
-      createContext: () => opts.context,
+      // Per-request: parse the session cookie + note the proxy's scheme, and
+      // hand the adapter's resHeaders through for Set-Cookie.
+      createContext: ({ resHeaders }) => ({
+        ...opts.context,
+        sessionToken: readCookie(req.headers.get("cookie"), SESSION_COOKIE),
+        secureCookie:
+          (req.headers.get("x-forwarded-proto") ?? "").toLowerCase() ===
+            "https",
+        responseHeaders: resHeaders,
+      }),
     });
   return Deno.serve({
     port: opts.port,
-    hostname: "127.0.0.1",
+    hostname: bind,
     signal: opts.signal,
     onListen: opts.onListen,
   }, (req) => {

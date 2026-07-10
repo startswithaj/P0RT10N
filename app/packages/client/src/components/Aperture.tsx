@@ -1,9 +1,8 @@
 import { css } from "styled-system/css";
 import { token } from "styled-system/tokens";
 
-// Brand marks from assets/svg. The aperture ring + wordmark letters use `logoInk`
-// (flips cyan↔indigo with the theme); the magenta `spark` never flips.
-
+// Brand aperture ring from assets/svg. The ring uses `logoInk` (flips
+// cyan↔indigo with the theme); the magenta `spark` wedge + dot never flip.
 export function Aperture(props: { size?: number }) {
   const s = props.size ?? 36;
   return (
@@ -25,17 +24,5 @@ export function Aperture(props: { size?: number }) {
       />
       <circle cx="160" cy="160" r="52" fill={token("colors.spark")} />
     </svg>
-  );
-}
-
-export function Wordmark(props: { size?: number }) {
-  const spark = css({ color: "spark" });
-  return (
-    <span
-      class={css({ fontFamily: "display", color: "logoInk", lineHeight: "1" })}
-      style={{ "font-size": `${props.size ?? 24}px` }}
-    >
-      p<span class={spark}>0</span>rt<span class={spark}>1</span>on
-    </span>
   );
 }

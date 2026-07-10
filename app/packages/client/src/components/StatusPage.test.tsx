@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import { QueryClientProvider } from "@tanstack/solid-query";
-import { makeService, makeStatusView } from "./test-helpers/fixtures.ts";
+import { makeService, makeStatusView } from "../test-helpers/fixtures.ts";
 
 // Mock trpc/query so `status.get` resolves from a fixture. `queryClient` must
 // stay a REAL QueryClient (StatusPage's createQuery + the provider need it), so
 // only `trpc` is faked — mirroring App.test.tsx, not the dialog tests.
-vi.mock("./trpc.ts", async () => {
+vi.mock("../trpc.ts", async () => {
   const { QueryClient } = await import("@tanstack/solid-query");
   return {
     trpc: {
@@ -19,7 +19,7 @@ vi.mock("./trpc.ts", async () => {
   };
 });
 
-import { queryClient, trpc } from "./trpc.ts";
+import { queryClient, trpc } from "../trpc.ts";
 import { StatusPage } from "./StatusPage.tsx";
 
 describe("StatusPage", () => {

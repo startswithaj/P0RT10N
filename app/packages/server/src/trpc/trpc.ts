@@ -1,5 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { ServiceError } from "../lib/ServiceError.ts";
+import type { AdminAuth } from "../auth/AdminAuth.ts";
 import type {
   ActivityService,
   FriendService,
@@ -19,7 +20,13 @@ export interface TrpcContext {
   inventoryService: InventoryService;
   jobService: JobService;
   logger: Logger;
-  // Populated by the HTTP adapter for the local-only admin session.
+  /** Admin auth (disabled → protectedProcedure lets everything through). */
+  auth: AdminAuth;
+  /** Session token from the request cookie (per-request; set by the adapter). */
+  sessionToken?: string;
+  /** External request was HTTPS (proxy `X-Forwarded-Proto`) → cookie `Secure`. */
+  secureCookie?: boolean;
+  // Populated by the HTTP adapter — Set-Cookie for the admin session.
   responseHeaders?: Headers;
 }
 
@@ -91,9 +98,24 @@ export async function* loggedStream<T>(
   }
 }
 
+/** Rejects unauthenticated calls when auth is enabled; a no-op when it's off
+ * (the boot guard forbids a non-loopback bind with auth off). */
+const authMiddleware = t.middleware(({ ctx, next }) => {
+  if (!ctx.auth.enabled) return next();
+  if (!ctx.sessionToken || !ctx.auth.validate(ctx.sessionToken)) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "authentication required",
+    });
+  }
+  return next();
+});
+
 export const router = t.router;
 export const mergeRouters = t.mergeRouters;
 export const publicProcedure = t.procedure
   .use(loggingMiddleware)
   .use(errorMiddleware);
+/** Every admin procedure — requires a valid session (auth.* stays public). */
+export const protectedProcedure = publicProcedure.use(authMiddleware);
 export const createCallerFactory = t.createCallerFactory;
