@@ -8,6 +8,9 @@ export const icon = defineRecipe({
     flexShrink: "0",
     verticalAlign: "middle",
     lineHeight: "1em",
+    // The child is a lucide <svg> with a fixed width/height; scale it to the
+    // box (the span is a normal HTML box, so this applies cleanly).
+    "& > svg": { width: "100%", height: "100%", display: "block" },
   },
   defaultVariants: {
     size: "md",

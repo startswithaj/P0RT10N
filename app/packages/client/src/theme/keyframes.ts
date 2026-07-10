@@ -23,6 +23,14 @@ export const keyframes = defineKeyframes({
     "0%, 100%": { opacity: "1" },
     "50%": { opacity: "0.45" },
   },
+  // spinner rotation (the Park Spinner recipe references `animation: spin`)
+  "spin": {
+    to: { transform: "rotate(360deg)" },
+  },
+  // looping conic-gradient border loader (drives the confirm button's --p0-angle)
+  "border-spin": {
+    to: { "--p0-angle": "360deg" },
+  },
   // fade
   "fade-in": {
     from: { opacity: "0" },

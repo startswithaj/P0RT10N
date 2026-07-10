@@ -10,6 +10,7 @@ import { AddPortion, type NewPortion } from "./components/AddPortion.tsx";
 import { Provisioning } from "./components/Provisioning.tsx";
 import { Bundle } from "./components/Bundle.tsx";
 import { ActionDialog, type Pending } from "./components/ActionDialog.tsx";
+import { Toaster } from "./components/ui/toast.tsx";
 
 type AddBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
 
@@ -192,9 +193,9 @@ export function App() {
 
   const rows = () => friends.data ?? [];
   const { totalUsed, totalQuota, overallPct } = createTotals(rows);
-
   return (
     <AuthGate gate={gate}>
+      <Toaster />
       <ActionDialog
         pending={pendingAction()}
         onClose={() => setPendingAction(null)}

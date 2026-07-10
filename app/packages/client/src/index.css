@@ -1,1 +1,10 @@
 @layer reset, base, tokens, recipes, utilities;
+
+/* Animatable angle for the looping conic-gradient border loader (see the
+   `border-spin` keyframe + the confirm button's loading state). Registering it
+   with @property is what lets the angle transition smoothly. */
+@property --p0-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}

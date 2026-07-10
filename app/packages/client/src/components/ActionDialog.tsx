@@ -11,6 +11,7 @@ import {
   type Pending,
 } from "./action-dialog-shared.ts";
 import { queryClient, trpc } from "../trpc.ts";
+import { toaster } from "./ui/toast.tsx";
 
 export type { ActionKind, Pending } from "./action-dialog-shared.ts";
 
@@ -18,6 +19,32 @@ const GB = 1_000_000_000;
 
 const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
+
+/** Past-tense confirmation for a completed action (the success toast title). */
+function succeededTitle(p: Pending): string {
+  const n = p.friend.name;
+  if (p.kind === "resize") return `Resized ${n}`;
+  if (p.kind === "suspend") return `Suspended ${n}`;
+  if (p.kind === "resume") return `Resumed ${n}`;
+  return `Offboarded ${n}`;
+}
+
+/** Title for a failed action (the error toast title; the cause is the body). */
+function failedTitle(p: Pending): string {
+  const n = p.friend.name;
+  if (p.kind === "resize") return `Couldn't resize ${n}`;
+  if (p.kind === "rotate-s3") return `Couldn't rotate S3 key for ${n}`;
+  if (p.kind === "rotate-ts") return `Couldn't re-issue Tailscale key for ${n}`;
+  if (p.kind === "suspend") return `Couldn't suspend ${n}`;
+  if (p.kind === "resume") return `Couldn't resume ${n}`;
+  return `Couldn't offboard ${n}`;
+}
+
+const toastSuccess = (title: string) =>
+  toaster.create({ title, type: "success" });
+
+const toastError = (title: string, description: string) =>
+  toaster.create({ title, description, type: "error" });
 
 type ActionResult =
   | { kind: "done" }
@@ -60,20 +87,22 @@ async function dispatchAction(
  * the observer stream is replayable, so a reconnect can never re-run teardown.
  */
 function subscribeOffboard(
-  friendId: number,
+  friend: { id: number; name: string },
   setOffboard: Setter<OffboardState>,
   onDone: () => void,
 ) {
   setOffboard({ kind: "running", step: null });
 
-  const fail = (message: string, step: OffboardStepKey | null) =>
+  const fail = (message: string, step: OffboardStepKey | null) => {
+    toastError(`Couldn't offboard ${friend.name}`, message);
     setOffboard((prev) => ({
       kind: "error",
       message,
       step: step ?? (prev.kind === "running" ? prev.step : null),
     }));
+  };
 
-  trpc.friends.offboardStart.mutate({ friendId })
+  trpc.friends.offboardStart.mutate({ friendId: friend.id })
     .then(({ jobId }) =>
       trpc.jobs.progress.subscribe({ jobId }, {
         onData: (ev) => {
@@ -84,6 +113,8 @@ function subscribeOffboard(
             fail(ev.message, ev.step as OffboardStepKey | null);
           } else {
             invalidate();
+            // The teardown itself is complete either way, so confirm it now.
+            toastSuccess(`Offboarded ${friend.name}`);
             // Manual ACL mode: keep the dialog open with the cleanup advice
             // instead of closing — the offboard itself is already complete.
             if (ev.manualAclCleanup) {
@@ -147,21 +178,27 @@ export function ActionDialog(
     if (!p) return;
     if (p.kind === "offboard") {
       // streams; dialog stays open showing per-step progress
-      subscribeOffboard(p.friend.id, setOffboard, props.onClose);
+      subscribeOffboard(p.friend, setOffboard, props.onClose);
       return;
     }
     setBusy(true);
     setErr(null);
     try {
       const r = await dispatchAction(p, Math.round(qty() * GB));
-      if (r.kind === "tsCmd") setTsCmd(r.cmd); // stay open, show the key
-      else {
+      if (r.kind === "tsCmd") {
+        setTsCmd(r.cmd); // stay open, show the key (its own on-screen result)
+      } else {
+        // rotate-s3 hands back a full-screen bundle (its own confirmation);
+        // the plain resize/suspend/resume close silently, so toast those.
         if (r.kind === "bundle") props.onBundle(r.bundle);
+        else toastSuccess(succeededTitle(p));
         invalidate();
         props.onClose();
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setErr(message);
+      toastError(failedTitle(p), message);
     } finally {
       setBusy(false);
     }

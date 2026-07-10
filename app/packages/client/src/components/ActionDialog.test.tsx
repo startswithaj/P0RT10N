@@ -24,6 +24,7 @@ vi.mock("../trpc.ts", () => ({
 }));
 
 import { trpc } from "../trpc.ts";
+import { toaster } from "./ui/toast.tsx";
 import { ActionDialog, type Pending } from "./ActionDialog.tsx";
 
 describe("ActionDialog", () => {
@@ -275,6 +276,45 @@ describe("ActionDialog", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
       expect(trpc.friends.rotateKey.mutate).not.toHaveBeenCalled();
       expect(trpc.friends.suspend.mutate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("toast feedback (6.1 US-002)", () => {
+    it("a completed action fires a success toast", async () => {
+      const create = vi.spyOn(toaster, "create");
+      const friend = makeFriend({ id: 9, name: "bob" });
+      renderDialog({ friend, kind: "suspend" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+
+      await waitFor(() =>
+        expect(create).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "success", title: "Suspended bob" }),
+        )
+      );
+      create.mockRestore();
+    });
+
+    it("a failed action fires an error toast carrying the cause", async () => {
+      mutateOf(trpc.friends.suspend.mutate).mockRejectedValue(
+        new Error("minio unreachable"),
+      );
+      const create = vi.spyOn(toaster, "create");
+      const friend = makeFriend({ id: 9, name: "bob" });
+      renderDialog({ friend, kind: "suspend" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+
+      await waitFor(() =>
+        expect(create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "error",
+            title: "Couldn't suspend bob",
+            description: "minio unreachable",
+          }),
+        )
+      );
+      create.mockRestore();
     });
   });
 });
