@@ -24,11 +24,18 @@ describe("AuditAggregator", () => {
   });
   afterEach(() => database.driver.close());
 
-  const seed = (name: string) =>
-    repo.reserveFriend(
+  // The friend's bucket-scoped S3 key; events must carry it to count (anything
+  // else is the manager's own root-key polling and is dropped).
+  const FRIEND_KEY = "FRIENDKEY000000000AB";
+
+  const seed = async (name: string) => {
+    const res = await repo.reserveFriend(
       makeAddInput(name, "dedicated"),
       namingFor(name, "dedicated"),
     );
+    await repo.recordAccessKey(res.friendId, FRIEND_KEY);
+    return res;
+  };
 
   const agg = () => new AuditAggregator(database.db, noopLogger(), () => "T");
 
@@ -41,6 +48,7 @@ describe("AuditAggregator", () => {
       rx: 100,
       tx: 5,
       time: "2026-06-30T10:00:00Z",
+      accessKey: FRIEND_KEY,
     });
     await agg().ingest({
       bucket: "alice",
@@ -49,6 +57,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 50,
       time: "2026-06-30T10:01:00Z",
+      accessKey: FRIEND_KEY,
     });
     await agg().ingest({
       bucket: "alice",
@@ -57,6 +66,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 0,
       time: "2026-06-30T10:02:00Z",
+      accessKey: FRIEND_KEY,
     });
 
     const act = await queries.activityFor(res.friendId);
@@ -74,11 +84,31 @@ describe("AuditAggregator", () => {
     const res = await seed("bob");
     await agg().ingestRaw({
       time: "2026-06-30T10:00:00Z",
+      accessKey: FRIEND_KEY,
       api: { name: "PutObject", bucket: "bob", statusCode: 200, rx: 10, tx: 2 },
     });
     const act = await queries.activityFor(res.friendId);
     expect(act.requestsTotal).toBe(1);
     expect(act.requestsByOp.PutObject).toBe(1);
+  });
+
+  it("drops the manager's own polling (non-friend access key)", async () => {
+    await seed("alice");
+    // mc du/admin authenticates with the instance root key, not the friend's —
+    // MinIO audits it back to us but it must not count as friend activity.
+    await agg().ingest({
+      bucket: "alice",
+      op: "HeadBucket",
+      statusCode: 200,
+      rx: 0,
+      tx: 0,
+      time: "2026-06-30T10:00:00Z",
+      accessKey: "ROOTKEY0000000000000",
+    });
+
+    const row = database.driver.prepare("SELECT COUNT(*) c FROM activity")
+      .get();
+    expect(row?.c).toBe(0);
   });
 
   it("counts ops under their raw MinIO name", async () => {
@@ -90,6 +120,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 0,
       time: "2026-06-30T10:00:00Z",
+      accessKey: FRIEND_KEY,
     });
 
     const act = await queries.activityFor(res.friendId);
@@ -106,6 +137,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 0,
       time: "2026-06-30T10:00:00Z",
+      accessKey: FRIEND_KEY,
     });
 
     const act = await queries.activityFor(res.friendId);
@@ -122,6 +154,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 0,
       time: newer,
+      accessKey: FRIEND_KEY,
     });
     // A back-dated event arrives after the newer one.
     await agg().ingest({
@@ -131,6 +164,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 0,
       time: "2026-06-30T10:00:00Z",
+      accessKey: FRIEND_KEY,
     });
 
     const act = await queries.activityFor(res.friendId);
@@ -145,6 +179,7 @@ describe("AuditAggregator", () => {
       rx: 0,
       tx: 0,
       time: "T",
+      accessKey: FRIEND_KEY,
     });
     await agg().ingestRaw({ nonsense: true });
 
