@@ -12,7 +12,7 @@ import {
   statGrid,
 } from "./styles.ts";
 import type { FriendRow } from "./types.ts";
-import type { Pending } from "./ActionDialog.tsx";
+import type { Pending } from "./action-dialog-shared.ts";
 
 export function PortionsView(
   props: {

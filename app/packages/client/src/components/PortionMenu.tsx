@@ -12,7 +12,7 @@ import {
 import * as Menu from "./ui/menu.tsx";
 import { dangerItem, iconBtn, menuItem } from "./styles.ts";
 import type { FriendRow } from "./types.ts";
-import type { ActionKind, Pending } from "./ActionDialog.tsx";
+import type { ActionKind, Pending } from "./action-dialog-shared.ts";
 
 // ---- actions ---- the burger menu opens a proper Park UI dialog (below).
 

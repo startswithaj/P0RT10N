@@ -21,11 +21,15 @@ export interface AuditEvent {
   rx: number;
   tx: number;
   time: string;
+  // Top-level access key of the caller; distinguishes friend traffic from the
+  // manager's own root-key polling (mc du/admin).
+  accessKey: string;
 }
 
 // MinIO audit entries nest the useful bits under `api`; parse defensively.
 const auditSchema = z.object({
   time: z.string().optional(),
+  accessKey: z.string().optional(),
   api: z.object({
     name: z.string().optional(),
     bucket: z.string().optional(),
@@ -65,10 +69,21 @@ export class AuditAggregator {
   }
 
   private ingestSync(event: AuditEvent): void {
-    const friend = this.db.select({ id: friends.id }).from(friends)
-      .where(eq(friends.bucket, event.bucket)).get();
+    const friend = this.db
+      .select({ id: friends.id, s3AccessKeyId: friends.s3AccessKeyId })
+      .from(friends).where(eq(friends.bucket, event.bucket)).get();
     if (!friend) {
       this.logger.debug("audit event for unknown bucket", {
+        bucket: event.bucket,
+      });
+      return;
+    }
+    // The manager polls each instance with its root key (mc du/admin), which
+    // MinIO audits back to us. Only the friend's bucket-scoped key is real
+    // activity; skip everything else so idle friends don't accrue phantom
+    // requests (and our own poll doesn't re-trigger the usage sampler below).
+    if (event.accessKey !== friend.s3AccessKeyId) {
+      this.logger.debug("skipping non-friend audit event", {
         bucket: event.bucket,
       });
       return;
@@ -135,6 +150,7 @@ export class AuditAggregator {
       rx: api.rx ?? 0,
       tx: api.tx ?? 0,
       time: parsed.data.time ?? this.now(),
+      accessKey: parsed.data.accessKey ?? "",
     };
   }
 }

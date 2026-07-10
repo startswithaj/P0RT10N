@@ -9,7 +9,8 @@ import type { ProvisionStepKey } from "@p0rt1on/shared/steps";
 import { AddPortion, type NewPortion } from "./components/AddPortion.tsx";
 import { Provisioning } from "./components/Provisioning.tsx";
 import { Bundle } from "./components/Bundle.tsx";
-import { ActionDialog, type Pending } from "./components/ActionDialog.tsx";
+import { ActionDialogs } from "./components/ActionDialogs.tsx";
+import type { Pending } from "./components/action-dialog-shared.ts";
 import { Toaster } from "./components/ui/toast.tsx";
 
 type AddBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
@@ -196,7 +197,7 @@ export function App() {
   return (
     <AuthGate gate={gate}>
       <Toaster />
-      <ActionDialog
+      <ActionDialogs
         pending={pendingAction()}
         onClose={() => setPendingAction(null)}
         onBundle={(b) => setShownBundle(b)}

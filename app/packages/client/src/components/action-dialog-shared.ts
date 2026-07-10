@@ -1,10 +1,59 @@
+import { createSignal } from "solid-js";
 import { css } from "styled-system/css";
 import { OFFBOARD_STEPS, type OffboardStepKey } from "@p0rt1on/shared/steps";
-import { trpc } from "../trpc.ts";
+import { queryClient, trpc } from "../trpc.ts";
+import { toaster } from "./ui/toast.tsx";
 
-// Shared types, copy and styles for the ActionDialog family (ActionDialog +
-// DialogBody + the per-mode body components). The dialog shell recipe styles the
-// frame; these are the inner bits.
+// Shared types, styles and runtime helpers for the per-action dialogs
+// (SuspendDialog, ResizeDialog, OffboardDialog, …) and their DialogShell /
+// ConfirmActions frame. The dialog shell recipe styles the frame; these are the
+// inner bits each dialog composes.
+
+/** Refetch the friends list after a mutation changes it. */
+export const invalidate = () =>
+  queryClient.invalidateQueries({ queryKey: ["friends"] });
+
+export const toastSuccess = (title: string) =>
+  toaster.create({ title, type: "success" });
+
+export const toastError = (title: string, description: string) =>
+  toaster.create({ title, description, type: "error" });
+
+/**
+ * The confirm flow shared by the plain mutate-then-close dialogs (suspend,
+ * resume, resize): run the mutation, toast success + refetch and close on
+ * success, or surface the error inline AND as a toast. Tracks `busy`/`err` for
+ * the dialog's button + error line.
+ */
+export function createConfirmAction(opts: {
+  run: () => Promise<unknown>;
+  success: string;
+  fail: string;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = createSignal(false);
+  const [err, setErr] = createSignal<string | null>(null);
+
+  const confirm = async () => {
+    if (busy()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await opts.run();
+      toastSuccess(opts.success);
+      invalidate();
+      opts.onDone();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setErr(message);
+      toastError(opts.fail, message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return { busy, err, confirm };
+}
 
 type FriendRow = Awaited<ReturnType<typeof trpc.friends.list.query>>[number];
 export type AddBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
@@ -25,40 +74,6 @@ export type OffboardState =
   // Manual ACL mode: teardown finished; the admin should remove the friend's
   // policy entries by hand (advisory, dismissible — never blocking).
   | { kind: "advice"; cleanup: string };
-
-export function actionTitle(p: Pending): string {
-  const n = p.friend.name;
-  if (p.kind === "resize") return `Resize ${n}`;
-  if (p.kind === "rotate-s3") return `Rotate S3 key for ${n}`;
-  if (p.kind === "rotate-ts") return `Re-issue Tailscale key for ${n}`;
-  if (p.kind === "suspend") return `Suspend ${n}`;
-  if (p.kind === "resume") return `Resume ${n}`;
-  return `Offboard ${n}`;
-}
-
-export function actionDesc(p: Pending): string {
-  if (p.kind === "resize") return "New hard quota — effective immediately.";
-  if (p.kind === "rotate-s3") {
-    return "Issues a new S3 key and revokes the current one. Their backups keep working once they update the key. The new secret is shown once and can't be retrieved again — copy it from the next screen.";
-  }
-  if (p.kind === "rotate-ts") {
-    return "Generates a new Tailscale client key so they can reconnect to the tailnet. The key is shown once and can't be retrieved again.";
-  }
-  if (p.kind === "suspend") {
-    return "Disables their S3 user and revokes their node. Data is kept; resume to re-enable.";
-  }
-  if (p.kind === "resume") return "Re-enables their S3 user.";
-  return `This permanently deletes ${p.friend.name}'s bucket and all backups. Type the name to confirm.`;
-}
-
-export function confirmLabel(kind: ActionKind): string {
-  if (kind === "resize") return "Save";
-  if (kind === "rotate-s3") return "Rotate key";
-  if (kind === "rotate-ts") return "Re-issue";
-  if (kind === "suspend") return "Suspend";
-  if (kind === "resume") return "Resume";
-  return "Offboard";
-}
 
 export const OFFBOARD_LABELS = OFFBOARD_STEPS.map((s) => s.label);
 

@@ -147,8 +147,43 @@ bespoke `css()` modal.
   `client-coverage-threshold.ts`, `deno.json`) on that assumption.
 - Your own composites go one level up in `src/components/` so they stay covered
   and linted.
-- Worked example: burger-menu actions open `ActionDialog` (`PortionActions.tsx`)
-  built on `components/ui/dialog.tsx` — not `confirm()`.
+- Worked example: burger-menu actions open a per-action dialog
+  (`OffboardDialog`, `SuspendDialog`, …) built on `components/ui/dialog.tsx` —
+  not `confirm()`.
+
+### Composing UI — small focused components, not switch-on-kind god-components
+
+One responsibility per component, one component per file (enforced by the
+`one-component-per-file` lint). When several UI states share a shell, factor the
+shell + building blocks out and write one focused component per case — don't
+funnel them into a single component that `switch`es on a `kind` prop (its copy,
+colour and logic all end up branching in one place and rot).
+
+- Worked example — the action dialogs: `DialogShell` (frame + title + Enter),
+  `ConfirmActions` (cancel/confirm row), `LoadingButton` (border-loader button),
+  then one dialog per action (`SuspendDialog`, `ResizeDialog`, `OffboardDialog`,
+  …) and an `ActionDialogs` router that renders the matching one. Each dialog
+  owns its own state, copy and mutation. There is no generic `ActionDialog`.
+- Variant/appearance comes from the caller, never a string check inside the
+  leaf: the confirm button's danger-red is a `destructive` prop each dialog
+  passes (`OffboardDialog` sets it) — not a `kind === "offboard"` inside the
+  button.
+- Icons: render a lucide icon directly (`<Trash2 size={15} />`). Only wrap in
+  `<Icon>` when you need recipe sizing/colour — and note `Icon` is a `<span>`
+  (an `<svg>` inside an `<svg>` gets clipped).
+
+Testing follows the same grain — one focused test file per component, not one
+that drives the whole app (Vitest + `@solidjs/testing-library`):
+
+- Render the component directly (`render(() => <SuspendDialog friend={…} …/>)`)
+  and drive it with `fireEvent`; don't route through `App`.
+- Mock the data boundary once at the top: `vi.mock("../trpc.ts", …)` with
+  `vi.fn()` mutations; shared fixtures/mocks live in `test-helpers/`
+  (`makeFriend`), never inline. Module-level test consts need `vi.hoisted` (the
+  `no-test-globals` lint rule).
+- Assert behaviour, not markup: the mutation args, `onClose`, and toast feedback
+  (`vi.spyOn(toaster, "create")` → success/error variant). See
+  `ActionDialogs.test.tsx`.
 
 ### Theme — Park UI v1 vendored as source (since 2026-07)
 

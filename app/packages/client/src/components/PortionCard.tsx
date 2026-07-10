@@ -21,7 +21,7 @@ import {
   usageRow,
 } from "./styles.ts";
 import type { FriendRow } from "./types.ts";
-import type { Pending } from "./ActionDialog.tsx";
+import type { Pending } from "./action-dialog-shared.ts";
 
 export function PortionCard(
   props: { friend: FriendRow; onAction: (p: Pending) => void },
