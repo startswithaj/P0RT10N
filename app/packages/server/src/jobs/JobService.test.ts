@@ -100,11 +100,13 @@ describe("JobService", () => {
     const svc = new JobService(noopLogger());
     // A generator gated on a promise so the observer attaches mid-run.
     const gate = Promise.withResolvers<void>();
+
     async function* gated(): AsyncGenerator<ProgressEvent<string, void>> {
       yield { type: "step", step: "storage" };
       await gate.promise;
       yield { type: "done", result: undefined };
     }
+
     const id = svc.start("offboard", gated());
     const drained = Array.fromAsync(svc.progress(id));
     gate.resolve();

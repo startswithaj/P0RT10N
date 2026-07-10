@@ -61,12 +61,14 @@ await runBoot({
   serve: () => {
     // Reap tombstones every 10 min after the boot-time pass.
     setInterval(sweep, 10 * 60 * 1000);
+
     // Usage samples: once now (dashboard never empty after a restart) and
     // hourly as the idle baseline; the audit debounce covers active friends.
     const sampleAll = () =>
       sampler.sampleAll().catch((err) =>
         logger.error("usage sampling failed", { error: String(err) })
       );
+
     sampleAll();
     setInterval(sampleAll, 60 * 60 * 1000);
     // Two listeners so the exposed surface is minimal: the admin API is

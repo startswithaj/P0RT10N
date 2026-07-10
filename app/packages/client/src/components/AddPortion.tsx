@@ -142,16 +142,42 @@ function blockReasonFor(name: string, issues: FormIssue[]): string | null {
 function createSettled(delayMs: number) {
   const [settled, setSettled] = createSignal(true);
   const box = { timer: 0 };
+
   const touch = () => {
     setSettled(false);
     clearTimeout(box.timer);
     box.timer = setTimeout(() => setSettled(true), delayMs);
   };
+
   const settleNow = () => {
     clearTimeout(box.timer);
     setSettled(true);
   };
+
   return { settled, touch, settleNow, dispose: () => clearTimeout(box.timer) };
+}
+
+/**
+ * The friend-name field's state: the name signal plus its debounced error
+ * visibility. `settled` is false while typing and true after a pause (or blur
+ * via `settleNow`), so the error only shows once the user stops mid-word.
+ */
+function createNameField() {
+  const [name, setName] = createSignal("");
+  const settle = createSettled(NAME_ERROR_DEBOUNCE_MS);
+  onCleanup(settle.dispose);
+
+  const onInput = (value: string) => {
+    setName(value);
+    settle.touch();
+  };
+
+  return {
+    name,
+    onInput,
+    settleNow: settle.settleNow,
+    settled: settle.settled,
+  };
 }
 
 function RetentionField(
@@ -236,7 +262,8 @@ export function AddPortion(
     onSubmit: (data: NewPortion) => void;
   },
 ) {
-  const [name, setName] = createSignal("");
+  const nameField = createNameField();
+  const name = nameField.name;
   const [mode, setMode] = createSignal<"dedicated" | "shared">("dedicated");
   const [quota, setQuota] = createSignal(30);
   const [retention, setRetention] = createSignal(14);
@@ -254,22 +281,16 @@ export function AddPortion(
     retentionDays: retention(),
     isolationMode: mode(),
   });
+
   const issues = () => formIssues(core());
   const errFor = (field: string) => issueFor(issues(), field);
   const valid = () => issues().length === 0;
   const blockReason = () => blockReasonFor(name(), issues());
 
-  // The name error is debounced: "al…" is invalid until the third letter, so
-  // flagging on every keystroke flashes an error at someone mid-word. Submit
-  // gating stays immediate — only the error's visibility waits for a typing
-  // pause (or blur, which settles instantly).
-  const nameSettle = createSettled(NAME_ERROR_DEBOUNCE_MS);
-  onCleanup(nameSettle.dispose);
-  const onNameInput = (value: string) => {
-    setName(value);
-    nameSettle.touch();
-  };
-  const nameError = () => (nameSettle.settled() ? errFor("name") : null);
+  // The name error is debounced (see createNameField): submit gating stays
+  // immediate, but the error's visibility waits for a typing pause so "al…"
+  // doesn't flash an error at someone mid-word.
+  const nameError = () => (nameField.settled() ? errFor("name") : null);
 
   return (
     <main class={page}>
@@ -302,8 +323,8 @@ export function AddPortion(
               placeholder="e.g. alice"
               autocomplete="off"
               value={name()}
-              onInput={(e) => onNameInput(e.currentTarget.value)}
-              onBlur={nameSettle.settleNow}
+              onInput={(e) => nameField.onInput(e.currentTarget.value)}
+              onBlur={nameField.settleNow}
             />
             <Field.HelperText>
               Lowercase; used for their bucket and alias.

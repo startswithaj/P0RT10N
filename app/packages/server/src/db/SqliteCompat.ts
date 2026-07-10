@@ -110,6 +110,7 @@ export class CompatDatabase implements DatabaseDriver {
     exclusive: (tx: T) => R;
   } {
     const db = this.native;
+
     const wrap = (begin: string) => (tx: T): R => {
       db.exec(begin);
       try {
@@ -121,6 +122,7 @@ export class CompatDatabase implements DatabaseDriver {
         throw e;
       }
     };
+
     return {
       deferred: wrap("BEGIN DEFERRED"),
       immediate: wrap("BEGIN IMMEDIATE"),

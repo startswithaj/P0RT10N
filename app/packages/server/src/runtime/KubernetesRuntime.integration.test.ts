@@ -136,6 +136,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
 
   maybe("the manager ServiceAccount is contained by its Role", async () => {
     const raw = fetchWithCa();
+
     const asManager = (path: string, init?: RequestInit) =>
       raw(`${server}${path}`, {
         ...init,

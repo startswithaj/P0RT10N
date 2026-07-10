@@ -3,6 +3,7 @@ import { queryClient } from "../trpc.ts";
 
 const GB = 1_000_000_000;
 export const gb = (bytes: number) => `${(bytes / GB).toFixed(1)} GB`;
+
 export const pct = (fraction: number) =>
   Math.min(100, Math.round(fraction * 100));
 

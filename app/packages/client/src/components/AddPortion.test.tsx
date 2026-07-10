@@ -15,13 +15,17 @@ describe("AddPortion", () => {
     render(() => <AddPortion onBack={onBack} onSubmit={onSubmit} />);
     return { onSubmit, onBack };
   };
+
   const createBtn = () =>
     screen.getByRole("button", { name: "Create portion" }) as HTMLButtonElement;
+
   // The friend-name field is the only free-text input on the form.
   const nameField = () => screen.getAllByRole("textbox")[0];
+
   // Two NumberInputs render as spinbuttons: [0] = quota, [1] = retention.
   const numberFields = () =>
     screen.getAllByRole("spinbutton") as HTMLInputElement[];
+
   const form = () => document.querySelector("form") as HTMLFormElement;
 
   describe("name gating", () => {

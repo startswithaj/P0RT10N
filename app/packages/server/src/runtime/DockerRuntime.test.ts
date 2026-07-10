@@ -98,6 +98,7 @@ describe("DockerRuntime.ensureInstance", () => {
       args[0] === "inspect"
         ? { code: 1, stdout: "", stderr: "no such object" }
         : { code: 125, stdout: "", stderr: "docker: cannot start" };
+
     const err = await new DockerRuntime(fakeRunner([], failing))
       .ensureInstance(RUN_SPEC)
       .then(() => null, (e: Error) => e.message);
@@ -123,8 +124,10 @@ describe("DockerRuntime.ensureInstance", () => {
 
   it("starts a stopped container (after retrofitting the restart policy)", async () => {
     const cmds: RecordedCommand[] = [];
+
     const respond = (args: string[]) =>
       args[0] === "inspect" ? ok("abc exited") : ok();
+
     await new DockerRuntime(fakeRunner(cmds, respond)).ensureInstance(RUN_SPEC);
     const verbs = cmds.map((c) => c.args[0]);
     expect(verbs.indexOf("update")).toBeLessThan(verbs.indexOf("start"));
@@ -142,8 +145,10 @@ describe("DockerRuntime.ensureStarted", () => {
 
   it("starts a stopped container", async () => {
     const cmds: RecordedCommand[] = [];
+
     const respond = (args: string[]) =>
       args[0] === "inspect" ? ok("abc exited") : ok();
+
     await new DockerRuntime(fakeRunner(cmds, respond)).ensureStarted("x");
     expect(cmds.some((c) => c.args[0] === "start")).toBe(true);
   });
@@ -182,8 +187,10 @@ describe("DockerRuntime.diagnose", () => {
       Error: "boom",
       Health: { Status: "unhealthy", Log: [{ Output: "minio not live\n" }] },
     });
+
     const respond = (args: string[]) =>
       args[0] === "inspect" ? ok(state) : ok("line1\nline2\n");
+
     const d = await new DockerRuntime(fakeRunner([], respond)).diagnose("x");
 
     expect(d.state).toBe("stopped");
@@ -246,6 +253,7 @@ describe("DockerRuntime lifecycle", () => {
   it("list parses labelled containers", async () => {
     const respond = () =>
       ok("p0rt1on-instance-a|1|running\np0rt1on-instance-b|2|exited\n");
+
     const list = await new DockerRuntime(fakeRunner([], respond)).list();
     expect(list).toEqual([
       { name: "p0rt1on-instance-a", id: "1", state: "running" },
@@ -270,6 +278,7 @@ describe("DockerInstanceRuntime", () => {
       id: "id",
       state: "running",
     });
+
     return {
       ensureInstance: (s) => {
         calls.push(`ensureInstance:${s.name}`);

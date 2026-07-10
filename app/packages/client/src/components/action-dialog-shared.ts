@@ -35,6 +35,7 @@ export function actionTitle(p: Pending): string {
   if (p.kind === "resume") return `Resume ${n}`;
   return `Offboard ${n}`;
 }
+
 export function actionDesc(p: Pending): string {
   if (p.kind === "resize") return "New hard quota — effective immediately.";
   if (p.kind === "rotate-s3") {
@@ -49,6 +50,7 @@ export function actionDesc(p: Pending): string {
   if (p.kind === "resume") return "Re-enables their S3 user.";
   return `This permanently deletes ${p.friend.name}'s bucket and all backups. Type the name to confirm.`;
 }
+
 export function confirmLabel(kind: ActionKind): string {
   if (kind === "resize") return "Save";
   if (kind === "rotate-s3") return "Rotate key";

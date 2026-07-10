@@ -38,6 +38,7 @@ export function createAddFlow() {
     setPhase("form");
     setAdding(true);
   };
+
   const finishAdd = () => {
     setAdding(false);
     setPhase("form");
@@ -49,6 +50,7 @@ export function createAddFlow() {
     setPending(null);
     invalidate();
   };
+
   const fail = (message: string) =>
     setAddState((prev) => ({
       kind: "error",
@@ -63,7 +65,7 @@ export function createAddFlow() {
       .then((bundle) => setAddState({ kind: "done", bundle }))
       .catch((err) => fail(String(err)));
   };
-  
+
   // Observe the background job: replayed + live step events; failures arrive
   // as `error` DATA events, so a reconnect can never re-run provisioning.
   const observeAdd = (jobId: string) => {
@@ -84,6 +86,7 @@ export function createAddFlow() {
       onError: (err) => fail(err instanceof Error ? err.message : String(err)),
     });
   };
+
   // Start provisioning as a background job, then observe its progress; the
   // screen reflects each step as the server reaches it and freezes on the
   // exact step that fails.
@@ -100,10 +103,12 @@ export function createAddFlow() {
       .then(({ jobId }) => observeAdd(jobId))
       .catch((err) => fail(err instanceof Error ? err.message : String(err)));
   };
+
   const doneBundle = () => {
     const s = addState();
     return s.kind === "done" ? s.bundle : null;
   };
+
   return {
     adding,
     phase,
@@ -121,10 +126,12 @@ export function createAddFlow() {
 function createTotals(rows: () => FriendRow[]) {
   const totalUsed = () => rows().reduce((s, f) => s + f.usage.bytesUsed, 0);
   const totalQuota = () => rows().reduce((s, f) => s + f.usage.quotaBytes, 0);
+
   const overallPct = () => {
     const q = totalQuota();
     return q > 0 ? pct(totalUsed() / q) : 0;
   };
+
   return { totalUsed, totalQuota, overallPct };
 }
 

@@ -112,6 +112,7 @@ class Job {
         this.waiters.delete(wake);
         resolve();
       };
+
       this.waiters.add(wake);
     });
   }

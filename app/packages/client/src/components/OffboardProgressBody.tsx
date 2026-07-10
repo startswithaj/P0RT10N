@@ -17,15 +17,18 @@ export function OffboardProgressBody(props: {
   onClose: () => void;
 }) {
   const failed = () => props.state().kind === "error";
+
   const activeIndex = () => {
     const s = props.state();
     const step = s.kind === "running" || s.kind === "error" ? s.step : null;
     return step === null ? 0 : OFFBOARD_STEPS.findIndex((x) => x.key === step);
   };
+
   const message = () => {
     const s = props.state();
     return s.kind === "error" ? s.message : null;
   };
+
   return (
     <>
       <p class={desc}>

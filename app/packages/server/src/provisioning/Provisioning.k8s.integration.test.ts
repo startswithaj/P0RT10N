@@ -134,6 +134,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       await new Promise((r) => setTimeout(r, 2000));
       return podPhase(attemptsLeft - 1);
     };
+
     const phase = await podPhase(60);
     if (phase !== "Succeeded") {
       const logRes = await fetch(

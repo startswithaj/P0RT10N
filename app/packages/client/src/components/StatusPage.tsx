@@ -114,8 +114,10 @@ export function StatusPage() {
     refetchInterval: 5000,
     retry: false,
   }));
+
   const view = (): View =>
     status.data ?? { minio: [], tailscale: [], host: [] };
+
   // The instance whose diagnostics accordion is open (one at a time). Held at
   // page scope (not per-row) so the 5s status poll re-rendering the rows can't
   // reset it and snap the accordion shut.

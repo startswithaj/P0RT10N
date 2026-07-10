@@ -53,6 +53,7 @@ describe("KubernetesRuntime", () => {
         ),
       );
     };
+
     return {
       performRequest: perform,
       close() {},
@@ -87,13 +88,16 @@ describe("KubernetesRuntime", () => {
     restartCount: 0,
     ...over,
   });
+
   const pod = (phase: string, cs?: Record<string, unknown>) => ({
     status: {
       phase,
       ...(cs ? { containerStatuses: [cstatus(cs)] } : {}),
     },
   });
+
   const readyPod = pod("Running", { ready: true, state: {} });
+
   const sts = (name: string, replicas: number) => ({
     metadata: { name },
     spec: {
@@ -108,6 +112,7 @@ describe("KubernetesRuntime", () => {
   });
 
   const last = (path: string) => path.split("/").at(-1);
+
   const bodyOf = (reqs: Recorded[], kind: string) =>
     reqs.find((r) => r.path.includes(`/${kind}/`))?.body as // deno-lint-ignore no-explicit-any
     any;
@@ -330,10 +335,12 @@ describe("KubernetesRuntime", () => {
     const reqs: Recorded[] = [];
     const rt = build(reqs, () => ({ json: {} }));
     await rt.removeInstance("alice", { removeData: false });
+
     const deleted = (from: number) =>
       reqs.slice(from).filter((r) => r.method === "DELETE").map((r) =>
         last(r.path)
       );
+
     expect(deleted(0)).toEqual(["alice", "alice", "alice-creds"]);
 
     const n = reqs.length;

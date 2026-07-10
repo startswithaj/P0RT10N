@@ -52,6 +52,7 @@ describe("McSmokeTester", () => {
       args[0] === "cp"
         ? { code: 1, stdout: "", stderr: "denied for http://AK:SK@host SK" }
         : cmdOk();
+
     const err = await new McSmokeTester(
       fakeRunner([], respond),
       fakeTempFiles([]),
@@ -65,6 +66,7 @@ describe("McSmokeTester", () => {
   it("throws when GET returns mismatched content", async () => {
     const respond = (args: string[]) =>
       args[0] === "cat" ? cmdOk("tampered") : cmdOk();
+
     await expect(
       new McSmokeTester(fakeRunner([], respond), fakeTempFiles([])).run(PARAMS),
     ).rejects.toThrow("unexpected content");
@@ -75,6 +77,7 @@ describe("McSmokeTester", () => {
       args[0] === "cp"
         ? { code: 1, stdout: "", stderr: "Access Denied" }
         : cmdOk();
+
     await expect(
       new McSmokeTester(fakeRunner([], respond), fakeTempFiles([])).run(PARAMS),
     ).rejects.toThrow("Access Denied");

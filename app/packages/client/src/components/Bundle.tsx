@@ -226,6 +226,7 @@ export function Bundle(
   };
 
   const authCmd = () => props.bundle.tailscaleUpCommand ?? "";
+
   const copyAll = () =>
     onCopy("all", buildCopyAllText(props.bundle, props.enroll));
 

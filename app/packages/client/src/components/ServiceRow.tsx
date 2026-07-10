@@ -74,6 +74,7 @@ function stateColor(s: SvcState): string {
   if (s === "provisioning") return provText;
   return downText;
 }
+
 function stateDot(s: SvcState): string {
   if (s === "up") return dotUp;
   if (s === "provisioning") return dotProv;

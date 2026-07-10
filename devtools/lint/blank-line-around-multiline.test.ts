@@ -31,7 +31,10 @@ Deno.test("puts the blank line ABOVE a leading comment, not below it", () => {
   // The fix inserts a newline at the comment's start (above it).
   const fixed = d[0].fix?.[0];
   assertEquals(fixed?.text, "\n");
-  assertEquals(src.slice(fixed!.range[0], fixed!.range[0] + 12), "  // documen");
+  assertEquals(
+    src.slice(fixed!.range[0], fixed!.range[0] + 12),
+    "  // documen",
+  );
 });
 
 Deno.test("leaves adjacent multi-line DATA declarations alone", () => {
@@ -56,6 +59,62 @@ Deno.test("leaves adjacent single-line statements alone", () => {
   const a = 1;
   const b = 2;
   const c = 3;
+}
+`;
+  const d = Deno.lint.runPlugin(plugin, "f.ts", src);
+  assertEquals(d.length, 0);
+});
+
+Deno.test("flags adjacent top-level multi-line function declarations", () => {
+  const src = `function a() {
+  return 1;
+}
+function b() {
+  return 2;
+}
+`;
+  const d = Deno.lint.runPlugin(plugin, "f.ts", src);
+  assertEquals(d.length, 1);
+});
+
+Deno.test("unwraps exported function declarations", () => {
+  const src = `export function A() {
+  return 1;
+}
+export function B() {
+  return 2;
+}
+`;
+  const d = Deno.lint.runPlugin(plugin, "f.ts", src);
+  assertEquals(d.length, 1);
+});
+
+Deno.test("recognises a function-expression const", () => {
+  const src = `function f() {
+  const a = function () {
+    return 1;
+  };
+  const b = function () {
+    return 2;
+  };
+}
+`;
+  const d = Deno.lint.runPlugin(plugin, "f.ts", src);
+  assertEquals(d.length, 1);
+});
+
+Deno.test("a comment detached by a blank line is not glued to the statement", () => {
+  // The comment sits a blank line above `b`, so it belongs to nobody — the
+  // block already has its separation and nothing is flagged.
+  const src = `function f() {
+  const a = () => {
+    return 1;
+  };
+
+  // a floating remark
+  const b = () => {
+    return 2;
+  };
 }
 `;
   const d = Deno.lint.runPlugin(plugin, "f.ts", src);

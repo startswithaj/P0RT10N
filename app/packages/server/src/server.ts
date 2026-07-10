@@ -133,6 +133,7 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
         `ADMIN_USERNAME/ADMIN_PASSWORD or bind 127.0.0.1`,
     );
   }
+
   const handleTrpc = (req: Request) =>
     fetchRequestHandler({
       endpoint: TRPC_ENDPOINT,
@@ -149,6 +150,7 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
         responseHeaders: resHeaders,
       }),
     });
+
   return Deno.serve({
     port: opts.port,
     hostname: bind,

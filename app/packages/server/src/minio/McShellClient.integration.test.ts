@@ -18,10 +18,12 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
   // this also grounds the env mechanism against the pinned mc release.
   const endpoint = () =>
     Deno.env.get("MINIO_ENDPOINT") ?? "http://127.0.0.1:9000";
+
   const rootCred = () => ({
     accessKeyId: Deno.env.get("MINIO_ROOT_USER") ?? "p0rtadmin",
     secretKey: Deno.env.get("MINIO_ROOT_PASSWORD") ?? "p0rtadmin123",
   });
+
   const buildClient = () => {
     const port = Number(new URL(endpoint()).port || 9000);
     return new McShellClient(
@@ -32,6 +34,7 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
       new DenoTempFiles(),
     );
   };
+
   const hostEnv = () => mcHostEnv(alias, endpoint(), rootCred());
 
   maybe("provisions a locked bucket + scoped user end-to-end", async () => {

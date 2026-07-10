@@ -5,6 +5,7 @@ import { runBoot } from "./boot.ts";
 describe("runBoot", () => {
   it("runs migrate → recover → reconcile → sweep, and only then serves", async () => {
     const order: string[] = [];
+
     const step = (name: string) => () => {
       order.push(name);
       return Promise.resolve();

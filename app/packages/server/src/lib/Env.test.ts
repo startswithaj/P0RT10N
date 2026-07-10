@@ -8,6 +8,7 @@ describe("Env", () => {
     P0RT1ON_MASTER_KEY: "k",
     TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
   };
+
   const env = (map: Record<string, string>) =>
     new Env({ get: (k) => ({ ...REQUIRED, ...map })[k] });
 

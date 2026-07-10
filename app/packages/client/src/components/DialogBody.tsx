@@ -136,6 +136,7 @@ export function DialogBody(props: {
   const enterAllowed = () =>
     props.offboard().kind === "idle" && props.tsCmd() === null &&
     props.canConfirm();
+
   return (
     <div
       class={body}

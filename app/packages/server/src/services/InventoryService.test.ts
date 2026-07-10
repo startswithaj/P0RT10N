@@ -33,6 +33,7 @@ describe("RuntimeInventoryService", () => {
     status,
     tsTag: "tag:p0rt1on-serve",
   });
+
   const svcOf = (health: InstanceHealth, status = "active") =>
     new RuntimeInventoryService(
       { instancesForStatus: () => Promise.resolve([instance(status)]) },

@@ -15,6 +15,7 @@ import { queryClient, trpc } from "../trpc.ts";
 export type { ActionKind, Pending } from "./action-dialog-shared.ts";
 
 const GB = 1_000_000_000;
+
 const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
 
@@ -64,12 +65,14 @@ function subscribeOffboard(
   onDone: () => void,
 ) {
   setOffboard({ kind: "running", step: null });
+
   const fail = (message: string, step: OffboardStepKey | null) =>
     setOffboard((prev) => ({
       kind: "error",
       message,
       step: step ?? (prev.kind === "running" ? prev.step : null),
     }));
+
   trpc.friends.offboardStart.mutate({ friendId })
     .then(({ jobId }) =>
       trpc.jobs.progress.subscribe({ jobId }, {

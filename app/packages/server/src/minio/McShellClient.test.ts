@@ -126,6 +126,7 @@ describe("McShellClient arg-building", () => {
       stderr:
         "mc: <ERROR> Unable to remove policy. Policy `backup` does not exist.",
     });
+
     await expect(client([], respond).removePolicy("backup")).resolves
       .toBeUndefined();
   });
@@ -259,11 +260,13 @@ describe("McShellClient policy", () => {
 describe("McShellClient parsing + errors", () => {
   it("du parses size + objects from the last JSON line", async () => {
     const cmds: RecordedCommand[] = [];
+
     const respond = () => ({
       code: 0,
       stdout: '{"status":"success","size":2048,"objects":7}\n',
       stderr: "",
     });
+
     const result = await client(cmds, respond).du("backup");
     expect(result).toEqual({ bytesUsed: 2048, objectCount: 7 });
   });
@@ -303,6 +306,7 @@ describe("McShellClient parsing + errors", () => {
       stderr:
         "mc: <ERROR> Unable to validate target `alice/backup`. Bucket `backup` does not exist.",
     });
+
     await expect(client([], respond).removeBucket("backup")).resolves
       .toBeUndefined();
   });
@@ -314,6 +318,7 @@ describe("McShellClient parsing + errors", () => {
       stderr:
         "mc: <ERROR> Unable to validate target `alice/do`. Bucket name cannot be shorter than 3 characters",
     });
+
     await expect(client([], respond).removeBucket("do")).resolves
       .toBeUndefined();
   });
@@ -330,11 +335,13 @@ describe("McShellClient parsing + errors", () => {
       stdout: "",
       stderr: "mc: <ERROR> The specified user does not exist.",
     });
+
     await expect(client([], respond).removeUser("AK")).resolves.toBeUndefined();
   });
 
   it("listUsers parses one JSON line per user and splits attached policies", async () => {
     const cmds: RecordedCommand[] = [];
+
     const respond = () => ({
       code: 0,
       stdout: [
@@ -344,6 +351,7 @@ describe("McShellClient parsing + errors", () => {
       ].join("\n"),
       stderr: "",
     });
+
     const users = await client(cmds, respond).listUsers();
     expect(cmds[0].args).toEqual(["admin", "user", "list", "--json", "alice"]);
     expect(users).toEqual([

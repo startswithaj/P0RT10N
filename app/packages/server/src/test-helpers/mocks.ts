@@ -229,6 +229,7 @@ export function mockMcClient(calls: Calls): McClient {
     calls.push(`mc:${m}`);
     return Promise.resolve();
   };
+
   return {
     target: { alias: "alias", minioPort: 9100 },
     makeBucketWithLock: note("makeBucketWithLock"),

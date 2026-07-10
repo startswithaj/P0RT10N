@@ -29,6 +29,7 @@ describe("AuditAggregator", () => {
       makeAddInput(name, "dedicated"),
       namingFor(name, "dedicated"),
     );
+
   const agg = () => new AuditAggregator(database.db, noopLogger(), () => "T");
 
   it("folds events into the friend's activity (insert then update)", async () => {

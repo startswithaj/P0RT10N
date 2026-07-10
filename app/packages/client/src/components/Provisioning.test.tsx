@@ -21,6 +21,7 @@ describe("Provisioning", () => {
       />
     ));
   };
+
   // The row div wrapping a given step's label (label span → nearest div).
   const rowFor = (label: string) =>
     screen.getByText(label).closest("div") as HTMLElement;
