@@ -14,7 +14,7 @@ import {
   LOCK_MODE_VALUES,
   type RequestsByOp,
 } from "@p0rt1on/shared/domain";
-import type { RequestBuckets } from "../audit/requestBuckets.ts";
+import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
 
 // ============================================================================
 // p0rt1on metadata DB (SQLite via Drizzle) — NO SECRETS.
@@ -108,7 +108,8 @@ export const activity = sqliteTable("activity", {
   // so the count decays as a friend goes idle rather than freezing.
   requests24h: integer("requests_24h").notNull().default(0),
   // Hourly request tallies (hour-epoch -> count) for the rolling-24h window.
-  // JSON map, pruned to the window on every ingest. See audit/requestBuckets.ts.
+  // JSON map, pruned to the window on every ingest. See
+  // minio-events/requestBuckets.ts.
   requestBuckets: text("request_buckets", { mode: "json" })
     .$type<RequestBuckets>().notNull().default(sql`'{}'`),
   lastRequestAt: text("last_request_at"),

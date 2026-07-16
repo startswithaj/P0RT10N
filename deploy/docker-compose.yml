@@ -4,7 +4,6 @@
 #
 #   docker compose -f deploy/docker-compose.yml up -d minio
 #   # then point mc at it and run the integration suite:
-#   export P0RT1ON_INTEGRATION=1
 #   export MINIO_ENDPOINT=http://127.0.0.1:9000
 #   export MINIO_ROOT_USER=p0rtadmin MINIO_ROOT_PASSWORD=p0rtadmin123
 #   deno task test:integration

@@ -1,15 +1,15 @@
 import type { Logger } from "../services/types.ts";
 
 // ============================================================================
-// One audit-bus subscription: a bounded ring buffer feeding a parked-until-
-// pushed async generator. Overflow drops the OLDEST event so a slow/stalled
-// consumer never back-pressures the publisher — it only loses its own tail.
+// One MinIO-event-bus subscription: a bounded ring buffer feeding a parked-
+// until-pushed async generator. Overflow drops the OLDEST event so a slow/
+// stalled consumer never back-pressures the publisher — it only loses its tail.
 // ============================================================================
 
 /** Rate-limit overflow warnings: log the 1st drop, then every Nth. */
 const DROP_LOG_EVERY = 1000;
 
-export class AuditSubscriber {
+export class MinioEventSubscriber {
   private readonly items: unknown[] = [];
   private wake: (() => void) | null = null;
   private closed = false;
@@ -27,10 +27,13 @@ export class AuditSubscriber {
       this.items.shift(); // drop oldest — a slow consumer never blocks ingest
       this.drops++;
       if (this.drops === 1 || this.drops % DROP_LOG_EVERY === 0) {
-        this.logger.warn("audit bus subscriber overflow — dropping oldest", {
-          subscriber: this.name,
-          drops: this.drops,
-        });
+        this.logger.warn(
+          "minio event bus subscriber overflow — dropping oldest",
+          {
+            subscriber: this.name,
+            drops: this.drops,
+          },
+        );
       }
     }
     this.items.push(raw);

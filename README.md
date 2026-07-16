@@ -262,8 +262,10 @@ runs (the auth key is single-use); `-v p0rt1on-cache:/cache` with
   DB. Shells out to `mc` and `docker` — stock upstream images, pinned.
 - **Instance image:** one container running **both** MinIO and tailscaled,
   published at `https://<name>.<tailnet>.ts.net` via `tailscale serve`.
-- **Activity:** MinIO audit webhooks → manager (`/internal/audit`), aggregated
-  into per-friend stats. Usage sampled via `mc du`.
+- **Activity:** MinIO audit webhooks → manager (`/internal/minio-events`),
+  aggregated into per-friend stats. Usage sampled via `mc du`. Set
+  `MINIO_FORWARD_URL` to also forward every event, byte-identical, to your own
+  webhook.
 
 ---
 

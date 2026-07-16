@@ -36,7 +36,7 @@
     "dev:web": "deno task --cwd app/packages/client dev",
     "test": "deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi --ignore=**/*.integration.test.ts,app/packages/client/",
     "test:coverage": "deno test --coverage=coverage --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi --ignore=**/*.integration.test.ts,app/packages/client/",
-    "test:integration": "deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi app/packages/server/src/**/*.integration.test.ts",
+    "test:integration": "deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi integration-tests/**/*.integration.test.ts",
     "test:client": "deno task --cwd app/packages/client test",
     "test:client:coverage": "deno task --cwd app/packages/client test:coverage",
     "coverage": "deno task test:coverage && deno coverage coverage --exclude=test",

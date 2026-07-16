@@ -327,7 +327,7 @@ export class McShellClient implements McClient {
       "audit_webhook:p0rt1on",
       `endpoint=${endpoint}`,
       // MinIO sends auth_token as the Authorization header VERBATIM, and the
-      // manager's /internal/audit expects the Bearer scheme — so the prefix
+      // manager's /internal/minio-events expects the Bearer scheme — so the prefix
       // must be baked in here. Quoted because mc's KV parser splits on the
       // embedded space otherwise.
       `auth_token="Bearer ${authToken}"`,

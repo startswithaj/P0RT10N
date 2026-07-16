@@ -68,7 +68,7 @@ export const TEST_CONFIG: ProvisioningConfig = {
   serveMode: "https",
   serveNodeTag: "tag:p0rt1on-serve",
   aclMode: "auto",
-  auditWebhookUrl: "http://manager/internal/audit",
+  auditWebhookUrl: "http://manager/internal/minio-events",
   auditWebhookToken: "tok",
 };
 

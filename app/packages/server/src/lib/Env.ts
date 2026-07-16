@@ -79,21 +79,33 @@ export class Env {
    * loopback — the two must not collide, checked here so a misconfig fails
    * at boot with a clear message.
    */
-  get auditPort(): number {
-    const p = this.#num("AUDIT_PORT", 8081);
+  get minioEventPort(): number {
+    const p = this.#num("MINIO_EVENT_PORT", 8081);
     if (p === this.port) {
       throw new Error(
-        `AUDIT_PORT (${p}) must differ from PORT (${this.port}) — the audit ` +
-          `webhook gets its own network-exposed listener; the admin API stays ` +
-          `loopback-only`,
+        `MINIO_EVENT_PORT (${p}) must differ from PORT (${this.port}) — the ` +
+          `MinIO event webhook gets its own network-exposed listener; the ` +
+          `admin API stays loopback-only`,
       );
     }
     return p;
   }
-  /** Audit listener bind address; `0.0.0.0` in-container is conventional —
-   * the host port publish (compose) controls real exposure. */
-  get auditBindHost(): string {
-    return this.#str("AUDIT_BIND_HOST", "0.0.0.0");
+  /** MinIO-event listener bind address; `0.0.0.0` in-container is conventional
+   * — the host port publish (compose) controls real exposure. */
+  get minioEventBindHost(): string {
+    return this.#str("MINIO_EVENT_BIND_HOST", "0.0.0.0");
+  }
+
+  // ---- MinIO event forwarding ----
+  /** Operator webhook to forward every MinIO event to, byte-identical. Unset →
+   * forwarding disabled (no forwarder attached). */
+  get minioForwardUrl(): string | undefined {
+    return this.#opt("MINIO_FORWARD_URL");
+  }
+  /** Sent verbatim as the Authorization header on forwarded events. Secret —
+   * env-only, never logged (prefer this over a token in the URL). */
+  get minioForwardAuthorization(): string | undefined {
+    return this.#opt("MINIO_FORWARD_AUTHORIZATION");
   }
 
   // ---- admin auth ----
@@ -262,7 +274,7 @@ export class Env {
       // Points at the dedicated audit listener, never the admin port.
       auditWebhookUrl: this.#str(
         "AUDIT_WEBHOOK_URL",
-        `http://host.docker.internal:${this.auditPort}/internal/audit`,
+        `http://host.docker.internal:${this.minioEventPort}/internal/minio-events`,
       ),
     };
   }

@@ -16,8 +16,10 @@ describe("Env", () => {
     const e = env({});
     expect(e.logLevel).toBe("info");
     expect(e.port).toBe(8080);
-    expect(e.auditPort).toBe(8081);
-    expect(e.auditBindHost).toBe("0.0.0.0");
+    expect(e.minioEventPort).toBe(8081);
+    expect(e.minioEventBindHost).toBe("0.0.0.0");
+    expect(e.minioForwardUrl).toBeUndefined();
+    expect(e.minioForwardAuthorization).toBeUndefined();
     expect(e.dbPath).toBe("./data/p0rt1on.db");
 
     const c = e.provisioningConfig();
@@ -50,6 +52,15 @@ describe("Env", () => {
     expect(e.provisioningConfig().portRange.min).toBe(9200);
   });
 
+  it("reads MinIO event forwarding config", () => {
+    const e = env({
+      MINIO_FORWARD_URL: "https://sink.example/hook",
+      MINIO_FORWARD_AUTHORIZATION: "Bearer tok",
+    });
+    expect(e.minioForwardUrl).toBe("https://sink.example/hook");
+    expect(e.minioForwardAuthorization).toBe("Bearer tok");
+  });
+
   it("rejects non-numeric values for numeric vars, naming the variable", () => {
     expect(() => env({ PORT: "abc" }).port).toThrow(
       'PORT must be a number, got "abc"',
@@ -61,13 +72,14 @@ describe("Env", () => {
   it("rejects an audit port that collides with the admin port", () => {
     // The whole point of the split is two distinct listeners — a collision
     // must fail at boot, not surface as a bind error.
-    expect(() => env({ AUDIT_PORT: "8080" }).auditPort).toThrow(
+    expect(() => env({ MINIO_EVENT_PORT: "8080" }).minioEventPort).toThrow(
       "must differ from PORT",
     );
-    expect(() => env({ PORT: "9000", AUDIT_PORT: "9000" }).auditPort).toThrow(
-      "must differ from PORT",
-    );
-    expect(env({ PORT: "9000" }).auditPort).toBe(8081);
+    expect(() => env({ PORT: "9000", MINIO_EVENT_PORT: "9000" }).minioEventPort)
+      .toThrow(
+        "must differ from PORT",
+      );
+    expect(env({ PORT: "9000" }).minioEventPort).toBe(8081);
   });
 
   it("falls back to info for an unknown log level", () => {

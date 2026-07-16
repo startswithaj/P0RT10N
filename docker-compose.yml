@@ -22,12 +22,15 @@ services:
     user: root
     environment:
       # Container overrides (the app's own defaults suit host-run dev).
-      # The admin API binds loopback unconditionally; only the dedicated
-      # audit-webhook listener (AUDIT_PORT) faces the container network.
+      # The admin API binds loopback unconditionally; only the dedicated MinIO
+      # event webhook listener (MINIO_EVENT_PORT) faces the container network.
       # Reach instances by container name over p0rt1on-net (see networks below).
       INSTANCE_ADDRESSING: "network"
-      AUDIT_WEBHOOK_URL: "http://host.docker.internal:8081/internal/audit"
+      AUDIT_WEBHOOK_URL: "http://host.docker.internal:8081/internal/minio-events"
       DB_PATH: "/app/data/p0rt1on.db"
+      # Forward every MinIO event to your own webhook (optional, byte-identical):
+      # MINIO_FORWARD_URL: "https://example.com/minio-events"
+      # MINIO_FORWARD_AUTHORIZATION: "Bearer your-token"
     ports:
       - "127.0.0.1:8080:8080" # admin API — loopback only (Vite proxies here)
       - "8081:8081" # audit webhook — instances POST via the host gateway

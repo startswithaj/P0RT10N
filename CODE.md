@@ -48,6 +48,36 @@ mc CLI           │  McShellClient               │
     network (containerized manager; loopback publishes are unreachable
     cross-container on Linux).
 
+### MinIO events — `src/minio-events/`
+
+- Instances POST audit webhooks to a dedicated listener (`MINIO_EVENT_PORT`
+  :8081, `/internal/minio-events`, token-guarded) — never the admin API.
+- The sink just `bus.publish(raw)`. `MinioEventBus` fans each RAW payload to N
+  independent subscribers via bounded, drop-oldest queues — a slow consumer
+  never back-pressures ingestion. A 204 means "enqueued", not "persisted"
+  (best-effort; overflow drops the tail).
+- The bus owns the shared shutdown `AbortController` (passed to its
+  constructor); `bus.subscribe(name)` wires that signal into each subscription,
+  so callers pass no signal. SIGTERM aborts it → every subscription tears down.
+- Each consumer takes its subscription and **starts on construction** (no
+  `run()` call); a `readonly done` promise resolves when its stream ends, and it
+  catches its own errors so a fire-and-forget never rejects.
+- Consumers `.pipe(...)` stream stages. Parse + friend-resolution each live in
+  ONE place, chained at the call site:
+  `bus.subscribe(name).pipe(parseMinioEvent)
+  .pipe(resolveFriend(lookup))` —
+  `resolveFriend` does bucket→friend + drops the manager's own root-key polling
+  (which also stops the sampler self-triggering). Each metrics consumer gets its
+  OWN subscription (own queue) so both see every event; sharing one would split
+  the stream.
+  - `MinioEventAggregator` — folds the resolved stream into per-friend
+    `activity`.
+  - `UsageSampler` — debounces `mc du` off the same stream (a peer, NOT chained
+    off the aggregator).
+  - `MinioEventForwarder` — ships RAW payloads byte-identical to
+    `MINIO_FORWARD_URL` (optional; `MINIO_FORWARD_AUTHORIZATION` sent verbatim),
+    mirroring MinIO's client (retry 5×1s, best-effort, failures logged).
+
 ### Runtimes — `src/runtime/`
 
 `InstanceRuntime` is the only seam; callers speak domain language (a tripwire
@@ -78,15 +108,15 @@ test bans docker literals outside `runtime/`). Selected by
     `K8S_CA_FILE` for dev — no more `DENO_CERT`. Config:
     `K8S_NAMESPACE/K8S_API/K8S_TOKEN/K8S_CA_FILE/
     K8S_DATA_SIZE/K8S_STATE_SIZE/K8S_STORAGE_CLASS`.
-  - Verified on k3d by `deploy/k8s/run-integration.sh` (no secrets needed — an
-    in-cluster HEADSCALE is the control plane; REAL images only): runtime tier
-    (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection, real
-    tailnet enrollment) + portion tier (full tRPC addStart→rotate→offboard, zero
-    mocks: real enrollment, serve in HTTP mode, node deleted on offboard; uid
-    1000 under PSA `restricted`). The portion tier ALSO runs the friend's real
-    backup: a `backup-client` pod joins the same tailnet under its friend tag
-    and snapshots with Kopia through the instance's serve (WireGuard) using only
-    bundle contents — proving the ACL grant, MagicDNS, serve, and an actual
+  - Verified on k3d by `integration-tests/run-integration.sh` (no secrets needed
+    — an in-cluster HEADSCALE is the control plane; REAL images only): runtime
+    tier (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection,
+    real tailnet enrollment) + portion tier (full tRPC addStart→rotate→offboard,
+    zero mocks: real enrollment, serve in HTTP mode, node deleted on offboard;
+    uid 1000 under PSA `restricted`). The portion tier ALSO runs the friend's
+    real backup: a `backup-client` pod joins the same tailnet under its friend
+    tag and snapshots with Kopia through the instance's serve (WireGuard) using
+    only bundle contents — proving the ACL grant, MagicDNS, serve, and an actual
     write to the bucket. That pod runs as ROOT in the non-restricted
     `p0rt1on-it-clients` namespace (like a friend's docker host); a test-only
     Role there lets the manager SA launch it — the production Role has no

@@ -11,7 +11,7 @@ import {
   seedUsage,
   TEST_REPO_CONFIG,
 } from "../test-helpers/testDb.ts";
-import { hourKey } from "../audit/requestBuckets.ts";
+import { hourKey } from "../minio-events/requestBuckets.ts";
 
 describe("FriendQueries", () => {
   // Fixed "now" so the rolling-24h window is deterministic; the seeded buckets
@@ -36,6 +36,16 @@ describe("FriendQueries", () => {
       makeAddInput(name, "dedicated"),
       namingFor(name, "dedicated"),
     );
+
+  it("friendByBucket: resolves id + access key, undefined for unknown", async () => {
+    const res = await addFriend("alice");
+    await repo.recordAccessKey(res.friendId, "AKIAALICE");
+    expect(queries.friendByBucket("alice")).toEqual({
+      id: res.friendId,
+      s3AccessKeyId: "AKIAALICE",
+    });
+    expect(queries.friendByBucket("ghost")).toBeUndefined();
+  });
 
   it("list: reflects the newest usage sample and rolling activity", async () => {
     const res = await addFriend("alice");

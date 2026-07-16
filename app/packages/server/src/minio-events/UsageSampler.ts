@@ -1,6 +1,8 @@
 import type { McClientFactory } from "../minio/mc.ts";
 import type { UsageSampleTarget } from "../db/FriendQueries.ts";
 import type { Logger } from "../services/types.ts";
+import type { MinioEventSubscription } from "./MinioEventSubscription.ts";
+import type { FriendEvent } from "./resolveFriend.ts";
 
 /** The two queries the sampler needs (FriendQueries satisfies structurally). */
 export interface UsageStore {
@@ -39,14 +41,36 @@ const DEFAULT_RETRY: SampleRetry = { attempts: 3, delayMs: 3_000 };
 export class UsageSampler {
   /** Pending per-friend debounce timers (friendId → timer id). */
   private readonly pending = new Map<number, ReturnType<typeof setTimeout>>();
+  /** Resolves when the event stream ends (shutdown). The stream trigger starts
+   * on construction; await this in tests / for a clean stop. */
+  readonly done: Promise<void>;
 
   constructor(
+    private readonly events: MinioEventSubscription<FriendEvent>,
     private readonly queries: UsageStore,
     private readonly mc: McClientFactory,
     private readonly logger: Logger,
     private readonly debounceMs: number = ACTIVITY_DEBOUNCE_MS,
     private readonly retry: SampleRetry = DEFAULT_RETRY,
-  ) {}
+  ) {
+    this.done = this.run();
+  }
+
+  /**
+   * Debounce a `mc du` sample per friend off the resolved event stream. The
+   * resolveFriend stage (piped in at the call site) already dropped this
+   * sampler's own root-key polls, so measuring never re-triggers itself.
+   */
+  private async run(): Promise<void> {
+    try {
+      // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
+      for await (const { friendId } of this.events.events) {
+        this.noteActivity(friendId);
+      }
+    } catch (err) {
+      this.logger.error("minio event sampler stopped", { error: String(err) });
+    }
+  }
 
   /** Measure every active friend (boot + hourly). Returns sampled count. */
   async sampleAll(): Promise<number> {

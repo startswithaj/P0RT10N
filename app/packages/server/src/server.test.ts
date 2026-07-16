@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { startAuditServer, startServer } from "./server.ts";
+import { startMinioEventServer, startServer } from "./server.ts";
 import { buildContext } from "./app.ts";
 import { createTestDatabase } from "./test-helpers/testDb.ts";
 import { noopLogger, testEnv } from "./test-helpers/mocks.ts";
@@ -51,12 +51,15 @@ describe("startServer (HTTP)", () => {
     const port = await listening.promise;
 
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
-        method: "POST",
-        headers: { authorization: "Bearer anything" },
-        body: "{}",
-      });
-      // Falls through to tRPC (no such procedure), never to handleAudit.
+      const res = await fetch(
+        `http://127.0.0.1:${port}/internal/minio-events`,
+        {
+          method: "POST",
+          headers: { authorization: "Bearer anything" },
+          body: "{}",
+        },
+      );
+      // Falls through to tRPC (no such procedure), never to handleMinioEvent.
       expect(res.status).not.toBe(204);
       expect(res.status).not.toBe(401);
       await res.body?.cancel();
@@ -70,10 +73,10 @@ describe("startServer (HTTP)", () => {
   it("audit listener serves ONLY the webhook: tRPC paths are 404", async () => {
     const abort = new AbortController();
     const listening = Promise.withResolvers<number>();
-    const server = startAuditServer({
+    const server = startMinioEventServer({
       port: 0,
       hostname: "127.0.0.1", // loopback in tests; 0.0.0.0 is the deploy default
-      audit: { token: "sekret", onEvent: () => Promise.resolve() },
+      sink: { token: "sekret", onEvent: () => {} },
       signal: abort.signal,
       onListen: ({ port }) => listening.resolve(port),
     });
@@ -97,14 +100,13 @@ describe("startServer (HTTP)", () => {
     const received: unknown[] = [];
     const abort = new AbortController();
     const listening = Promise.withResolvers<number>();
-    const server = startAuditServer({
+    const server = startMinioEventServer({
       port: 0,
       hostname: "127.0.0.1",
-      audit: {
+      sink: {
         token: "sekret",
         onEvent: (raw) => {
           received.push(raw);
-          return Promise.resolve();
         },
       },
       signal: abort.signal,
@@ -113,15 +115,18 @@ describe("startServer (HTTP)", () => {
     const port = await listening.promise;
 
     try {
-      const noAuth = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
-        method: "POST",
-        body: "{}",
-      });
+      const noAuth = await fetch(
+        `http://127.0.0.1:${port}/internal/minio-events`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      );
       expect(noAuth.status).toBe(401);
       await noAuth.body?.cancel();
 
       const wrongToken = await fetch(
-        `http://127.0.0.1:${port}/internal/audit`,
+        `http://127.0.0.1:${port}/internal/minio-events`,
         {
           method: "POST",
           headers: { authorization: "Bearer wrong" },
@@ -132,11 +137,14 @@ describe("startServer (HTTP)", () => {
       await wrongToken.body?.cancel();
 
       // >1 MiB body rejected up front (413) — never reaches onEvent.
-      const huge = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
-        method: "POST",
-        headers: { authorization: "Bearer sekret" },
-        body: `{"pad":"${"x".repeat(1024 * 1024 + 1)}"}`,
-      });
+      const huge = await fetch(
+        `http://127.0.0.1:${port}/internal/minio-events`,
+        {
+          method: "POST",
+          headers: { authorization: "Bearer sekret" },
+          body: `{"pad":"${"x".repeat(1024 * 1024 + 1)}"}`,
+        },
+      );
       expect(huge.status).toBe(413);
       await huge.body?.cancel();
       expect(received.length).toBe(0);
@@ -148,7 +156,7 @@ describe("startServer (HTTP)", () => {
       // the invariant is that the event is never ingested.
       const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
       const chunkedOutcome = await fetch(
-        `http://127.0.0.1:${port}/internal/audit`,
+        `http://127.0.0.1:${port}/internal/minio-events`,
         {
           method: "POST",
           headers: { authorization: "Bearer sekret" },
@@ -172,15 +180,18 @@ describe("startServer (HTTP)", () => {
       expect([413, "reset"]).toContain(chunkedOutcome);
       expect(received.length).toBe(0);
 
-      const badJson = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
-        method: "POST",
-        headers: { authorization: "Bearer sekret" },
-        body: "not json",
-      });
+      const badJson = await fetch(
+        `http://127.0.0.1:${port}/internal/minio-events`,
+        {
+          method: "POST",
+          headers: { authorization: "Bearer sekret" },
+          body: "not json",
+        },
+      );
       expect(badJson.status).toBe(400);
       await badJson.body?.cancel();
 
-      const ok = await fetch(`http://127.0.0.1:${port}/internal/audit`, {
+      const ok = await fetch(`http://127.0.0.1:${port}/internal/minio-events`, {
         method: "POST",
         headers: { authorization: "Bearer sekret" },
         body: JSON.stringify({ api: { name: "PutObject", bucket: "alice" } }),

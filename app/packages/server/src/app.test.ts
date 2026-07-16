@@ -14,7 +14,7 @@ import {
   seedUsage,
   TEST_REPO_CONFIG,
 } from "./test-helpers/testDb.ts";
-import { hourKey } from "./audit/requestBuckets.ts";
+import { hourKey } from "./minio-events/requestBuckets.ts";
 
 describe("app wiring (tRPC caller over a real DB)", () => {
   const createCaller = createCallerFactory(appRouter);

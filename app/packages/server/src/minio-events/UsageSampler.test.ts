@@ -8,6 +8,11 @@ import {
   noopLogger,
 } from "../test-helpers/mocks.ts";
 import { UsageSampler, type UsageStore } from "./UsageSampler.ts";
+import {
+  type MinioEventSubscription,
+  subscription,
+} from "./MinioEventSubscription.ts";
+import type { FriendEvent } from "./resolveFriend.ts";
 
 describe("UsageSampler", () => {
   const TARGETS: UsageSampleTarget[] = [
@@ -28,12 +33,21 @@ describe("UsageSampler", () => {
     return { store, inserted };
   }
 
+  // Empty stream for tests that drive sampleAll/noteActivity directly.
+  const emptyStream = (): MinioEventSubscription<FriendEvent> =>
+    subscription(
+      (async function* (): AsyncGenerator<FriendEvent> {})(),
+      new AbortController().signal,
+    );
+
   const buildSampler = (
     store: UsageStore,
     duCalls: string[] = [],
     du = () => Promise.resolve({ bytesUsed: 42, objectCount: 3 }),
+    events: MinioEventSubscription<FriendEvent> = emptyStream(),
   ) =>
     new UsageSampler(
+      events,
       store,
       {
         ...mockMcFactory(mockMcClient([])),
@@ -62,6 +76,7 @@ describe("UsageSampler", () => {
   it("sampleAll tolerates one friend's du failing (best-effort)", async () => {
     const { store, inserted } = fakeStore(TARGETS);
     const sampler = new UsageSampler(
+      emptyStream(),
       store,
       {
         ...mockMcFactory(mockMcClient([])),
@@ -113,6 +128,64 @@ describe("UsageSampler", () => {
     await time.tickAsync(30_000);
     await time.runMicrotasks();
     expect(inserted).toEqual([]);
+  });
+
+  it("run debounces a sample per friend event on the stream", async () => {
+    using time = new FakeTime();
+    const { store, inserted } = fakeStore(TARGETS);
+    const duCalls: string[] = [];
+
+    async function* events(): AsyncGenerator<FriendEvent> {
+      yield {
+        event: {
+          bucket: "alice",
+          op: "PutObject",
+          statusCode: 200,
+          rx: 0,
+          tx: 0,
+          time: "T",
+          accessKey: "KEY1",
+        },
+        friendId: 1,
+      };
+    }
+
+    // Constructing starts the stream trigger; `done` resolves when it ends.
+    const sampler = buildSampler(
+      store,
+      duCalls,
+      undefined,
+      subscription(events(), new AbortController().signal),
+    );
+    await sampler.done;
+
+    await time.tickAsync(30_000);
+    await time.runMicrotasks();
+    expect(duCalls).toEqual(["p0rt1on-alice/alice"]);
+    expect(inserted).toEqual([1]);
+  });
+
+  it("a mid-stream error stops the consumer, logged — done never rejects", async () => {
+    const errors: string[] = [];
+    const logger = {
+      ...noopLogger(),
+      error: (m: string) => void errors.push(m),
+    };
+    const { store } = fakeStore(TARGETS);
+
+    const boom: AsyncIterable<FriendEvent> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.reject(new Error("stream broke")),
+      }),
+    };
+
+    await new UsageSampler(
+      subscription(boom, new AbortController().signal),
+      store,
+      mockMcFactory(mockMcClient([])),
+      logger,
+    ).done;
+    expect(errors.some((m) => m.includes("sampler stopped"))).toBe(true);
   });
 
   it("dispose cancels pending debounce timers", async () => {

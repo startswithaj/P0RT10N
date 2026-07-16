@@ -8,7 +8,7 @@ import type { TrpcContext } from "./trpc/trpc.ts";
 import { SESSION_COOKIE } from "./trpc/routers/auth.ts";
 
 const TRPC_ENDPOINT = "/trpc";
-const AUDIT_ENDPOINT = "/internal/audit";
+const MINIO_EVENT_ENDPOINT = "/internal/minio-events";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
 
 /** Read one cookie value from a Cookie header (undefined if absent). */
@@ -19,11 +19,11 @@ function readCookie(header: string | null, name: string): string | undefined {
     ?.slice(name.length + 1);
 }
 
-/** Token-guarded MinIO audit-webhook sink (loopback only, not on any tailnet). */
-export interface AuditHook {
+/** Token-guarded MinIO audit-webhook sink (loopback/container-net only). */
+export interface MinioEventSink {
   token: string;
-  /** Ingest one raw audit event (parse + aggregate). */
-  onEvent: (raw: unknown) => Promise<void>;
+  /** Publish one raw event to the bus. Sync + non-blocking by contract. */
+  onEvent: (raw: unknown) => void;
 }
 
 export interface ServerOptions {
@@ -42,7 +42,7 @@ export interface ServerOptions {
   onListen?: (addr: { port: number }) => void;
 }
 
-export interface AuditServerOptions {
+export interface MinioEventServerOptions {
   port: number;
   /**
    * Bind address for the audit listener. `0.0.0.0` when containerized so
@@ -50,7 +50,7 @@ export interface AuditServerOptions {
    * this listener serves ONLY the token-guarded webhook, never the admin API.
    */
   hostname?: string;
-  audit: AuditHook;
+  sink: MinioEventSink;
   signal?: AbortSignal;
   onListen?: (addr: { port: number }) => void;
 }
@@ -79,12 +79,15 @@ function parseJson(text: string): unknown | null {
 }
 
 /** Handle a MinIO audit webhook POST: token-guard, parse, fan out to onEvent. */
-async function handleAudit(req: Request, audit: AuditHook): Promise<Response> {
+async function handleMinioEvent(
+  req: Request,
+  sink: MinioEventSink,
+): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("method not allowed", { status: 405 });
   }
   const auth = req.headers.get("authorization") ?? "";
-  if (!safeEqual(auth, `Bearer ${audit.token}`)) {
+  if (!safeEqual(auth, `Bearer ${sink.token}`)) {
     return new Response("unauthorized", { status: 401 });
   }
   // Reject oversized payloads BEFORE reading the body into memory — declared
@@ -100,7 +103,9 @@ async function handleAudit(req: Request, audit: AuditHook): Promise<Response> {
   const body = parseJson(text);
   if (body === null) return new Response("bad request", { status: 400 });
   const events = Array.isArray(body) ? body : [body];
-  await Promise.all(events.map((e) => audit.onEvent(e)));
+  // publish is non-blocking and never throws — fan out directly (a 204 means
+  // "enqueued", not "persisted"; consumers fold/forward off the bus).
+  events.forEach((e) => sink.onEvent(e));
   return new Response(null, { status: 204 });
 }
 
@@ -118,7 +123,7 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
  * Serve the tRPC router over HTTP. The admin surface binds loopback by default;
  * a non-loopback bind (`ADMIN_BIND_HOST`, behind a TLS proxy) is allowed ONLY
  * with auth enabled. `/health` is a plain liveness check; `/trpc` routes to tRPC.
- * The audit webhook is deliberately NOT here (see startAuditServer): serving
+ * The audit webhook is deliberately NOT here (see startMinioEventServer): serving
  * it from this listener once forced `0.0.0.0` binds that exposed the whole
  * unauthenticated admin API to every container. When `staticDir` is set
  * (production), everything else serves the built SPA; in dev it's unset and
@@ -177,7 +182,9 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
  * deliver events without the admin API ever leaving loopback. Every other
  * path — including anything tRPC-shaped — is a 404 by construction.
  */
-export function startAuditServer(opts: AuditServerOptions): Deno.HttpServer {
+export function startMinioEventServer(
+  opts: MinioEventServerOptions,
+): Deno.HttpServer {
   return Deno.serve({
     port: opts.port,
     hostname: opts.hostname ?? "0.0.0.0",
@@ -188,8 +195,8 @@ export function startAuditServer(opts: AuditServerOptions): Deno.HttpServer {
     if (url.pathname === "/health") {
       return new Response("ok", { status: 200 });
     }
-    if (url.pathname === AUDIT_ENDPOINT) {
-      return handleAudit(req, opts.audit);
+    if (url.pathname === MINIO_EVENT_ENDPOINT) {
+      return handleMinioEvent(req, opts.sink);
     }
     return new Response("not found", { status: 404 });
   });

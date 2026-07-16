@@ -1,13 +1,14 @@
 import { z } from "zod";
 
 // ============================================================================
-// Parse+validate a raw MinIO audit-webhook payload into the typed view OUR OWN
-// consumers use (the aggregator's counting, the live stream's per-friend
-// filter). The forwarder never calls this — it ships the raw payload untouched.
+// Parse+validate a raw MinIO audit-webhook payload into the typed view OUR
+// consumers use (the aggregator's counting, the sampler's friend resolution).
+// THE single parse in the system. The forwarder never calls this — it ships
+// the raw payload untouched.
 // ============================================================================
 
 /** The fields we fold from a MinIO audit entry. */
-export interface AuditEvent {
+export interface MinioEvent {
   bucket: string;
   op: string;
   statusCode: number;
@@ -20,7 +21,7 @@ export interface AuditEvent {
 }
 
 // MinIO audit entries nest the useful bits under `api`; parse defensively.
-const auditSchema = z.object({
+const minioEventSchema = z.object({
   time: z.string().optional(),
   accessKey: z.string().optional(),
   api: z.object({
@@ -33,11 +34,11 @@ const auditSchema = z.object({
 });
 
 /** Parse+validate a raw MinIO audit payload once; null if not a usable event. */
-export function parseAuditEvent(
+export function parseMinioEvent(
   raw: unknown,
-  now: () => string,
-): AuditEvent | null {
-  const parsed = auditSchema.safeParse(raw);
+  now: () => string = () => new Date().toISOString(),
+): MinioEvent | null {
+  const parsed = minioEventSchema.safeParse(raw);
   if (!parsed.success) return null;
   const api = parsed.data.api;
   if (!api?.bucket || !api.name) return null;
@@ -50,4 +51,15 @@ export function parseAuditEvent(
     time: parsed.data.time ?? now(),
     accessKey: parsed.data.accessKey ?? "",
   };
+}
+
+/** Stream stage: raw payloads → typed events, dropping unparseable ones. */
+export async function* parseMinioEvents(
+  src: AsyncIterable<unknown>,
+): AsyncIterable<MinioEvent> {
+  // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
+  for await (const raw of src) {
+    const event = parseMinioEvent(raw);
+    if (event) yield event;
+  }
 }

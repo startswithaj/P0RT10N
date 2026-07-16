@@ -7,7 +7,7 @@ import type {
 } from "@p0rt1on/shared/domain";
 import type { Db } from "./Database.ts";
 import { activity, friends, instances, usage } from "./Schema.ts";
-import { sumLast24h } from "../audit/requestBuckets.ts";
+import { sumLast24h } from "../minio-events/requestBuckets.ts";
 import { defer } from "../lib/defer.ts";
 
 /**
@@ -47,6 +47,16 @@ export class FriendQueries {
     // Injected clock so the rolling-24h window is deterministic in tests.
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
+
+  /** Resolve a bucket to its friend's id + bucket-scoped access key (or none).
+   * Synchronous — the MinIO-event stream stages resolve per event. */
+  friendByBucket(
+    bucket: string,
+  ): { id: number; s3AccessKeyId: string | null } | undefined {
+    return this.db
+      .select({ id: friends.id, s3AccessKeyId: friends.s3AccessKeyId })
+      .from(friends).where(eq(friends.bucket, bucket)).get();
+  }
 
   // Synchronous SQLite reads exposed as Promises (service contract); each
   // body runs via defer() so a throw rejects rather than escaping

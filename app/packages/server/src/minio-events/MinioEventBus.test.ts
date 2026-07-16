@@ -1,14 +1,22 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { AuditBus } from "./AuditBus.ts";
+import { MinioEventBus } from "./MinioEventBus.ts";
 import { noopLogger } from "../test-helpers/mocks.ts";
 
-describe("AuditBus", () => {
+describe("MinioEventBus", () => {
+  // The bus owns the shutdown signal; subscribe() takes no signal.
+  const build = (capacity?: number) => {
+    const abort = new AbortController();
+    const bus = capacity === undefined
+      ? new MinioEventBus(noopLogger(), abort)
+      : new MinioEventBus(noopLogger(), abort, capacity);
+    return { bus, abort };
+  };
+
   it("fans one event out to every subscriber", async () => {
-    const bus = new AuditBus(noopLogger());
-    const ac = new AbortController();
-    const a = bus.subscribe("a", ac.signal)[Symbol.asyncIterator]();
-    const b = bus.subscribe("b", ac.signal)[Symbol.asyncIterator]();
+    const { bus } = build();
+    const a = bus.subscribe("a").events[Symbol.asyncIterator]();
+    const b = bus.subscribe("b").events[Symbol.asyncIterator]();
     expect(bus.size).toBe(2);
 
     bus.publish({ n: 1 });
@@ -17,10 +25,9 @@ describe("AuditBus", () => {
   });
 
   it("gives each subscriber an independent queue (no cross-consumption)", async () => {
-    const bus = new AuditBus(noopLogger());
-    const ac = new AbortController();
-    const a = bus.subscribe("a", ac.signal)[Symbol.asyncIterator]();
-    const b = bus.subscribe("b", ac.signal)[Symbol.asyncIterator]();
+    const { bus } = build();
+    const a = bus.subscribe("a").events[Symbol.asyncIterator]();
+    const b = bus.subscribe("b").events[Symbol.asyncIterator]();
 
     bus.publish("1");
     bus.publish("2");
@@ -32,11 +39,10 @@ describe("AuditBus", () => {
   });
 
   it("a stalled subscriber never blocks publish or starves the others", async () => {
-    const bus = new AuditBus(noopLogger(), 2);
-    const ac = new AbortController();
+    const { bus } = build(2);
     // "stalled" subscribes but never consumes → its bounded queue overflows.
-    bus.subscribe("stalled", ac.signal);
-    const healthy = bus.subscribe("healthy", ac.signal)[Symbol.asyncIterator]();
+    bus.subscribe("stalled");
+    const healthy = bus.subscribe("healthy").events[Symbol.asyncIterator]();
 
     // Publishing past capacity must return synchronously each time (a throw or
     // hang here would fail the test) despite the stalled subscriber.
@@ -49,23 +55,22 @@ describe("AuditBus", () => {
     expect((await healthy.next()).value).toBe("3");
   });
 
-  it("abort removes the subscriber and ends its stream", async () => {
-    const bus = new AuditBus(noopLogger());
-    const ac = new AbortController();
-    const a = bus.subscribe("a", ac.signal)[Symbol.asyncIterator]();
+  it("abort removes every subscriber and ends its stream", async () => {
+    const { bus, abort } = build();
+    const a = bus.subscribe("a").events[Symbol.asyncIterator]();
     expect(bus.size).toBe(1);
 
     const pending = a.next(); // parked (nothing published)
-    ac.abort();
+    abort.abort();
     expect(bus.size).toBe(0);
     expect((await pending).done).toBe(true);
   });
 
-  it("subscribing with an already-aborted signal is inert", () => {
-    const bus = new AuditBus(noopLogger());
-    const ac = new AbortController();
-    ac.abort();
-    bus.subscribe("late", ac.signal);
+  it("subscribing after the signal already aborted is inert", () => {
+    const abort = new AbortController();
+    abort.abort();
+    const bus = new MinioEventBus(noopLogger(), abort);
+    bus.subscribe("late");
     expect(bus.size).toBe(0);
   });
 });

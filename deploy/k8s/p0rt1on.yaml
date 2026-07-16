@@ -115,7 +115,7 @@ spec:
             # Instances POST audit events to the manager Service in-cluster —
             # no host-gateway anywhere.
             - name: AUDIT_WEBHOOK_URL
-              value: http://p0rt1on-manager.p0rt1on.svc:8081/internal/audit
+              value: http://p0rt1on-manager.p0rt1on.svc:8081/internal/minio-events
           ports:
             - containerPort: 8080 # admin UI/API (loopback-only by design;
             # reach it via `kubectl port-forward` — do NOT expose it)

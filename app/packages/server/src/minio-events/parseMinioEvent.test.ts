@@ -1,12 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { parseAuditEvent } from "./parseAuditEvent.ts";
+import { parseMinioEvent } from "./parseMinioEvent.ts";
 
-describe("parseAuditEvent", () => {
+describe("parseMinioEvent", () => {
   const now = () => "NOW";
 
   it("parses MinIO's nested {api:{…}} shape into a typed event", () => {
-    const event = parseAuditEvent({
+    const event = parseMinioEvent({
       time: "2026-06-30T10:00:00Z",
       accessKey: "FRIENDKEY",
       api: { name: "PutObject", bucket: "bob", statusCode: 200, rx: 10, tx: 2 },
@@ -23,7 +23,7 @@ describe("parseAuditEvent", () => {
   });
 
   it("defaults missing time/accessKey/counters", () => {
-    const event = parseAuditEvent({
+    const event = parseMinioEvent({
       api: { name: "GetObject", bucket: "bob" },
     }, now);
     expect(event?.time).toBe("NOW");
@@ -34,13 +34,13 @@ describe("parseAuditEvent", () => {
   });
 
   it("returns null when bucket or op name is absent", () => {
-    expect(parseAuditEvent({ api: { name: "PutObject" } }, now)).toBeNull();
-    expect(parseAuditEvent({ api: { bucket: "bob" } }, now)).toBeNull();
+    expect(parseMinioEvent({ api: { name: "PutObject" } }, now)).toBeNull();
+    expect(parseMinioEvent({ api: { bucket: "bob" } }, now)).toBeNull();
   });
 
   it("returns null on unparseable input", () => {
-    expect(parseAuditEvent({ nonsense: true }, now)).toBeNull();
-    expect(parseAuditEvent("not-json", now)).toBeNull();
-    expect(parseAuditEvent(null, now)).toBeNull();
+    expect(parseMinioEvent({ nonsense: true }, now)).toBeNull();
+    expect(parseMinioEvent("not-json", now)).toBeNull();
+    expect(parseMinioEvent(null, now)).toBeNull();
   });
 });
