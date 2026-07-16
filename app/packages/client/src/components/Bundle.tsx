@@ -42,7 +42,9 @@ const warnIcon = css({ color: "spark", flexShrink: "0", mt: "0.5" });
 const warnText = css({ fontSize: "sm", lineHeight: "1.5" });
 
 const codeWrap = css({ position: "relative" });
-const codeBlock = css({
+// Kept as an object so the Tailscale block can merge a wrapping override over
+// it (Panda's `cx` only concatenates — `css(base, override)` resolves).
+const codeBlockStyles = {
   fontFamily: "body",
   fontSize: "xs",
   lineHeight: "1.9",
@@ -56,6 +58,13 @@ const codeBlock = css({
   overflowX: "auto",
   whiteSpace: "pre",
   boxShadow: "lg",
+} as const;
+const codeBlock = css(codeBlockStyles);
+// The auth key is one long unbroken token: wrap it rather than scroll, so it
+// stops at the reserved right padding instead of running under the copy button.
+const codeBlockWrapped = css(codeBlockStyles, {
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-all",
 });
 const codeCopy = css({ position: "absolute", top: "2.5", right: "2.5" });
 
@@ -137,7 +146,7 @@ function TailscaleSection(
         }
       >
         <div class={codeWrap}>
-          <pre class={codeBlock}>{props.authCmd}</pre>
+          <pre class={codeBlockWrapped}>{props.authCmd}</pre>
           <span class={codeCopy}>
             <CopyButton
               id="ts"
