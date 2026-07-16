@@ -1,6 +1,7 @@
 import { type JSX, Show } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { Login } from "./Login.tsx";
+import { toastError } from "./action-dialog-shared.ts";
 import { queryClient, trpc } from "../trpc.ts";
 
 /** Auth gate: session state + the login/logout transitions the App renders on. */
@@ -20,8 +21,15 @@ export function createAuthGate() {
     },
     refetch,
     logout: async () => {
-      await trpc.auth.logout.mutate();
-      refetch();
+      try {
+        await trpc.auth.logout.mutate();
+        refetch();
+      } catch (e) {
+        toastError(
+          "Couldn't sign out",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
     },
   };
 }

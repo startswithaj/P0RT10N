@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { Bundle } from "./Bundle.tsx";
+import { toaster } from "./ui/toast.tsx";
 import { makeBundle } from "../test-helpers/fixtures.ts";
 
 // Covers the shown-once bundle hand-off: the S3 secret must stay masked until
@@ -72,6 +73,25 @@ describe("Bundle", () => {
       expect(text).toContain(bundle.tailscaleUpCommand as string);
       expect(text).toContain(bundle.manualAclInstructions as string);
       expect(text).toContain(bundle.kopiaQuickstart);
+      vi.unstubAllGlobals();
+    });
+
+    // A denied clipboard permission must not fail silently — the "Copied"
+    // indicator only appears on success, so without the toast the button
+    // looks dead.
+    it("toasts when the clipboard write is rejected", async () => {
+      const writeText = vi.fn(() => Promise.reject(new Error("denied")));
+      vi.stubGlobal("navigator", { clipboard: { writeText } });
+      const create = vi.spyOn(toaster, "create");
+      renderBundle();
+
+      fireEvent.click(screen.getByRole("button", { name: /copy all/i }));
+
+      await waitFor(() =>
+        expect(create).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "error", description: "denied" }),
+        )
+      );
       vi.unstubAllGlobals();
     });
   });

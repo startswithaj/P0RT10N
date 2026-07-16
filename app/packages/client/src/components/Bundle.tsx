@@ -6,6 +6,7 @@ import { Button } from "./ui/button.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { CredentialsCard } from "./CredentialsCard.tsx";
 import { eyebrow, section } from "./bundle-styles.ts";
+import { toastError } from "./action-dialog-shared.ts";
 import { trpc } from "../trpc.ts";
 
 // The "shown once" credentials hand-off, rendered from the real FriendBundle
@@ -222,7 +223,12 @@ export function Bundle(
     navigator.clipboard?.writeText(value).then(() => {
       setCopied(id);
       setTimeout(() => setCopied((c) => (c === id ? null : c)), 1500);
-    }).catch(() => {});
+    }).catch((e) => {
+      toastError(
+        "Couldn't copy to clipboard",
+        e instanceof Error ? e.message : String(e),
+      );
+    });
   };
 
   const authCmd = () => props.bundle.tailscaleUpCommand ?? "";
