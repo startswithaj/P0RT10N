@@ -1,27 +1,36 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { buildRestClient, KubernetesRuntime } from "./KubernetesRuntime.ts";
+import {
+  buildRestClient,
+  KubernetesRuntime,
+} from "../app/packages/server/src/runtime/KubernetesRuntime.ts";
 import { CoreV1Api } from "@cloudydeno/kubernetes-apis/core/v1";
-import type { FetchLike } from "../tailscale/TailscaleHttpApi.ts";
-import type { InstanceSpec } from "./runtime.ts";
+import type { FetchLike } from "../app/packages/server/src/tailscale/TailscaleHttpApi.ts";
+import type { InstanceSpec } from "../app/packages/server/src/runtime/runtime.ts";
 
 // Drives a REAL k8s API server (k3d/kind), authenticated as the
 // p0rt1on-manager ServiceAccount — so this proves both the API mechanics a
 // fake can't (server-side apply adopt, scale, PSA admission) AND that the
 // least-privilege Role actually suffices / contains.
-// Driver: deploy/k8s/run-integration.sh (creates the cluster, applies the
+// Driver: integration-tests/run-integration.sh (creates the cluster, applies the
 // manifests, mints the SA token + a headscale preauth key, imports the REAL
-// instance image — readiness means tailscaled actually enrolled). Skipped
-// unless P0RT1ON_INTEGRATION + K8S_IT_* are set. No secrets needed — the
-// tailnet is the local headscale.
+// instance image — readiness means tailscaled actually enrolled). No secrets
+// needed — the tailnet is the local headscale. Missing K8S_IT_* config FAILS
+// (never skips): run it via the driver, not by hand.
 describe("KubernetesRuntime (integration: real k8s API)", () => {
   const server = Deno.env.get("K8S_IT_SERVER");
   const token = Deno.env.get("K8S_IT_TOKEN");
   const caFile = Deno.env.get("K8S_IT_CA");
   const image = Deno.env.get("K8S_IT_IMAGE") ?? "p0rt1on-instance:it";
-  const enabled = Boolean(Deno.env.get("P0RT1ON_INTEGRATION")) &&
-    Boolean(server && token && caFile);
-  const maybe = enabled ? it : it.ignore;
+  beforeAll(() => {
+    if (!(server && token && caFile)) {
+      throw new Error(
+        "K8S_IT_SERVER/K8S_IT_TOKEN/K8S_IT_CA not set — run via " +
+          "./integration-tests/run-integration.sh tier1 (it derives them from " +
+          "the k3d cluster).",
+      );
+    }
+  });
 
   // Deno's fetch trusts the cluster CA via an explicit HTTP client.
   const fetchWithCa = (): FetchLike => {
@@ -82,7 +91,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
     tsAuthKey: Deno.env.get("K8S_IT_AUTHKEY") ?? "tskey-it-fake",
   };
 
-  maybe(
+  it(
     "full lifecycle: apply → ready → scale → gated teardown",
     async () => {
       const rt = await build();
@@ -134,7 +143,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
     },
   );
 
-  maybe("the manager ServiceAccount is contained by its Role", async () => {
+  it("the manager ServiceAccount is contained by its Role", async () => {
     const raw = fetchWithCa();
 
     const asManager = (path: string, init?: RequestInit) =>
@@ -168,7 +177,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
     expect(nodes.status).toBe(403);
   });
 
-  maybe(
+  it(
     "PSA restricted rejects a privileged pod in the namespace",
     async () => {
       // The manager Role has no pod-create verb, so this must be proven with

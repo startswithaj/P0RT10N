@@ -1,0 +1,127 @@
+name: CI
+
+# PRs get fast, secretless checks. Merge to main (or a manual run) additionally
+# runs the full integration suite, and the image build/publish is gated behind
+# it — a red suite means no image is produced.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: static + unit + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.8.2" # match the Dockerfile's pinned Deno
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock') }}
+          restore-keys: deno-${{ runner.os }}-
+      # Read-only: fmt --check, lint, typecheck, unit tests, coverage gates.
+      - run: deno task verify
+
+  # ---------------------------------------------------------------------------
+  # Integration tiers — only on merge to main / manual (skipped on PRs). Each
+  # is a `needs` of `build`, so a failure blocks the image. They fail (never
+  # skip) when their infra/config is absent, so a green job is a real run.
+  # ---------------------------------------------------------------------------
+  mc-integration:
+    name: integration — mc ↔ MinIO
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=p0rtadmin -e MINIO_ROOT_PASSWORD=p0rtadmin123 \
+            minio/minio:RELEASE.2025-04-08T15-41-24Z server /data
+      - name: Build manager image + run the suite inside it (pinned mc)
+        run: |
+          docker build -t p0rt1on-manager:ci .
+          docker run --rm --network host \
+            -e MINIO_ENDPOINT=http://127.0.0.1:9000 \
+            -e MINIO_ROOT_USER=p0rtadmin -e MINIO_ROOT_PASSWORD=p0rtadmin123 \
+            --entrypoint deno p0rt1on-manager:ci \
+            test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
+            --allow-run --unstable-ffi \
+            integration-tests/McShellClient.integration.test.ts
+
+  k8s:
+    name: k8s e2e (secretless — k3d + in-cluster headscale)
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.8.2" # tier1 runs `deno test` on the host as the SA
+      - name: Install k3d + kubectl
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          curl -fsSLO "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -m 0755 kubectl /usr/local/bin/kubectl
+      - name: Build images + tier1 + tier2
+        run: ./integration-tests/run-integration.sh
+
+  docker-tailnet:
+    name: docker runtime — real tailnet
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    env:
+      # Use an EPHEMERAL, tag:p0rt1on-serve auth key so the node auto-removes
+      # when the job ends. If the secret is unset this job FAILS (never skips),
+      # which blocks the build — set the secret or drop this job.
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.8.2"
+      - name: Build instance image
+        run: docker build -t p0rt1on-instance:latest instance
+      - name: DockerRuntime integration (real tailnet enrollment)
+        run: |
+          deno test --allow-read --allow-write --allow-env --allow-ffi \
+            --allow-net --allow-run --unstable-ffi \
+            integration-tests/DockerRuntime.integration.test.ts
+
+  # ---------------------------------------------------------------------------
+  # Build + publish the images — ONLY if every check + integration tier passed.
+  # Defaults to GHCR with the built-in GITHUB_TOKEN (no extra secret); swap the
+  # registry/tags for your deploy target.
+  # ---------------------------------------------------------------------------
+  build:
+    name: build + publish images
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: [check, mc-integration, k8s, docker-tailnet]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { name: manager, context: . }
+          - { name: instance, context: instance }
+          - { name: backup-client, context: backup-client }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/p0rt1on-${{ matrix.name }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/p0rt1on-${{ matrix.name }}:latest

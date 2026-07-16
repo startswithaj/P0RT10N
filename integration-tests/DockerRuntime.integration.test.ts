@@ -1,23 +1,33 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DockerRuntime } from "./DockerRuntime.ts";
-import { DenoCommandRunner, DenoTempFiles } from "../lib/CommandRunner.ts";
-import { hasBinary } from "../lib/hasBinary.ts";
-import type { ContainerRunSpec } from "./runtime.ts";
+import { DockerRuntime } from "../app/packages/server/src/runtime/DockerRuntime.ts";
+import {
+  DenoCommandRunner,
+  DenoTempFiles,
+} from "../app/packages/server/src/lib/CommandRunner.ts";
+import { hasBinary } from "../app/packages/server/src/lib/hasBinary.ts";
+import type { ContainerRunSpec } from "../app/packages/server/src/runtime/runtime.ts";
 
-// Drives the REAL host Docker daemon with the combined p0rt1on-instance image, so
-// it needs a real Tailscale auth key too. Runs on the host (not in-container like
-// the mc IT). Skipped unless P0RT1ON_INTEGRATION + TAILSCALE_AUTHKEY are set.
-// Excluded from the default test + coverage runs.
+// Drives the REAL host Docker daemon with the combined p0rt1on-instance image,
+// so it needs a real Tailscale auth key too. Runs on the host (not in-container
+// like the mc IT). Excluded from the default test + coverage runs; invoked via
+// `deno task test:integration` — a missing prerequisite FAILS (never skips).
 describe("DockerRuntime (integration: real docker + instance image)", () => {
-  const dockerReady = Boolean(Deno.env.get("P0RT1ON_INTEGRATION")) &&
-    hasBinary("docker");
-  const enabled = dockerReady && Boolean(Deno.env.get("TAILSCALE_AUTHKEY"));
-  const maybe = enabled ? it : it.ignore;
+  beforeAll(() => {
+    const missing: string[] = [];
+    if (!hasBinary("docker")) missing.push("`docker` on PATH");
+    if (!Deno.env.get("TAILSCALE_AUTHKEY")) missing.push("TAILSCALE_AUTHKEY");
+    if (missing.length) {
+      throw new Error(
+        `not configured: ${missing.join(", ")} (also needs the ` +
+          `p0rt1on-instance image); see integration-tests.md.`,
+      );
+    }
+  });
   const runtime = new DockerRuntime(new DenoCommandRunner());
   const tmp = new DenoTempFiles("./.p0rt1on-it-tmp");
 
-  maybe(
+  it(
     "starts an instance container, is idempotent + healthy, then tears it down",
     async () => {
       const id = crypto.randomUUID().slice(0, 8);

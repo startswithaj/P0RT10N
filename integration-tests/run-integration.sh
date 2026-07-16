@@ -11,15 +11,15 @@
 #      the real instance image and the real HeadscaleHttpApi. Zero mocks.
 #
 # Usage:
-#   ./deploy/k8s/run-integration.sh          # build images + both tiers
-#   ./deploy/k8s/run-integration.sh build    # (re)build + import images only
-#   ./deploy/k8s/run-integration.sh tier1    # runtime tier (images built)
-#   ./deploy/k8s/run-integration.sh tier2    # portion tier (images built)
+#   ./integration-tests/run-integration.sh          # build images + both tiers
+#   ./integration-tests/run-integration.sh build    # (re)build + import images only
+#   ./integration-tests/run-integration.sh tier1    # runtime tier (images built)
+#   ./integration-tests/run-integration.sh tier2    # portion tier (images built)
 #
 # Rebuild rule: app/ changed → build (manager image); instance/ changed →
 # build; backup-client/ changed → build. Test-file-only edits: rerun a tier.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 
 MODE="${1:-all}"
 CLUSTER="${K8S_IT_CLUSTER:-p0rt1on-it}"
@@ -47,7 +47,7 @@ setup() {
   k3d cluster list "$CLUSTER" >/dev/null 2>&1 ||
     k3d cluster create "$CLUSTER" --wait --timeout 120s
   kc apply -f deploy/k8s/p0rt1on.yaml
-  kc apply -f deploy/k8s/headscale-it.yaml
+  kc apply -f integration-tests/headscale-it.yaml
   # The manager Deployment isn't exercised by these tiers (the runner pod
   # plays the manager) and its unimported :latest image would just
   # crash-loop and waste node disk — keep it at 0 during tests.
@@ -79,8 +79,7 @@ tier1() {
 
   # A tier-1-only tag: its node must never satisfy tier 2's
   # tag:p0rt1on-serve assertions.
-  P0RT1ON_INTEGRATION=1 \
-    K8S_IT_SERVER="$SERVER" \
+  K8S_IT_SERVER="$SERVER" \
     K8S_IT_TOKEN="$TOKEN" \
     K8S_IT_CA="$CA_FILE" \
     K8S_IT_IMAGE="$INSTANCE_IMAGE" \
@@ -88,7 +87,7 @@ tier1() {
     K8S_IT_LOGIN_SERVER="$HEADSCALE_URL" \
     deno test --allow-read --allow-write --allow-env --allow-net \
     --unstable-net \
-    app/packages/server/src/runtime/KubernetesRuntime.integration.test.ts
+    integration-tests/KubernetesRuntime.integration.test.ts
 }
 
 # ---- tier 2: portion-level, in-cluster (real headscale tailnet) -------------
@@ -120,9 +119,8 @@ tier2() {
       "command": ["deno", "test",
         "--allow-read", "--allow-write", "--allow-env", "--allow-ffi",
         "--allow-net", "--allow-run", "--unstable-ffi",
-        "app/packages/server/src/provisioning/Provisioning.k8s.integration.test.ts"],
+        "integration-tests/Provisioning.k8s.integration.test.ts"],
       "env": [
-        {"name": "P0RT1ON_K8S_PORTION_IT", "value": "1"},
         {"name": "K8S_NAMESPACE", "value": "p0rt1on"},
         {"name": "INSTANCE_IMAGE", "value": "$INSTANCE_IMAGE"},
         {"name": "CLIENT_IMAGE", "value": "$CLIENT_IMAGE"},

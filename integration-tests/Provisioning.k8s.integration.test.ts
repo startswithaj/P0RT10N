@@ -1,47 +1,62 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createCallerFactory } from "../trpc/trpc.ts";
-import { appRouter } from "../trpc/root.ts";
-import type { TrpcContext } from "../trpc/trpc.ts";
-import { ProvisioningService } from "./ProvisioningService.ts";
+import { createCallerFactory } from "../app/packages/server/src/trpc/trpc.ts";
+import { appRouter } from "../app/packages/server/src/trpc/root.ts";
+import type { TrpcContext } from "../app/packages/server/src/trpc/trpc.ts";
+import { ProvisioningService } from "../app/packages/server/src/provisioning/ProvisioningService.ts";
 import {
   buildRestClient,
   KubernetesRuntime,
-} from "../runtime/KubernetesRuntime.ts";
-import { CryptoKeyGen } from "./CryptoKeyGen.ts";
-import { McShellClientFactory } from "../minio/McShellClient.ts";
-import { McSmokeTester } from "./McSmokeTester.ts";
-import { DrizzleProvisioningRepo } from "../db/ProvisioningRepo.ts";
-import { FriendQueries } from "../db/FriendQueries.ts";
-import { DenoCommandRunner, DenoTempFiles } from "../lib/CommandRunner.ts";
+} from "../app/packages/server/src/runtime/KubernetesRuntime.ts";
+import { CryptoKeyGen } from "../app/packages/server/src/provisioning/CryptoKeyGen.ts";
+import { McShellClientFactory } from "../app/packages/server/src/minio/McShellClient.ts";
+import { McSmokeTester } from "../app/packages/server/src/provisioning/McSmokeTester.ts";
+import { DrizzleProvisioningRepo } from "../app/packages/server/src/db/ProvisioningRepo.ts";
+import { FriendQueries } from "../app/packages/server/src/db/FriendQueries.ts";
+import {
+  DenoCommandRunner,
+  DenoTempFiles,
+} from "../app/packages/server/src/lib/CommandRunner.ts";
 import {
   ActivityServiceImpl,
   FriendServiceImpl,
   UsageServiceImpl,
-} from "../services/DbServices.ts";
-import { RuntimeInventoryService } from "../services/InventoryService.ts";
-import { JobService } from "../jobs/JobService.ts";
-import { HeadscaleHttpApi } from "../tailscale/HeadscaleHttpApi.ts";
-import { noopLogger, TEST_CONFIG } from "../test-helpers/mocks.ts";
-import { AdminAuth } from "../auth/AdminAuth.ts";
-import { createTestDatabase } from "../test-helpers/testDb.ts";
+} from "../app/packages/server/src/services/DbServices.ts";
+import { RuntimeInventoryService } from "../app/packages/server/src/services/InventoryService.ts";
+import { JobService } from "../app/packages/server/src/jobs/JobService.ts";
+import { HeadscaleHttpApi } from "../app/packages/server/src/tailscale/HeadscaleHttpApi.ts";
+import {
+  noopLogger,
+  TEST_CONFIG,
+} from "../app/packages/server/src/test-helpers/mocks.ts";
+import { AdminAuth } from "../app/packages/server/src/auth/AdminAuth.ts";
+import { createTestDatabase } from "../app/packages/server/src/test-helpers/testDb.ts";
 
 // The PORTION-level k8s integration: a friend is added THROUGH THE tRPC API
 // (friends.addStart → jobs.progress → jobs.claimBundle) and the instance pod
 // materialises in the cluster as a side effect — real router, real services,
 // real SQLite, real `mc` (bundled in the manager image), the real instance
 // image (tailscaled ENABLED) and the real KubernetesRuntime. ZERO mocks: an
-// in-cluster HEADSCALE control plane (deploy/k8s/headscale-it.yaml) makes the
+// in-cluster HEADSCALE control plane (integration-tests/headscale-it.yaml) makes the
 // tailnet real too — the preauth key is actually minted, the pod's userspace
 // tailscaled actually enrolls, and offboard actually deletes the node. What
 // this still can't prove: `tailscale serve` over HTTPS (headscale issues no
 // certs — serve runs HTTP here) — that stays with the nightly real-tailnet
 // tier. MUST run IN-cluster (needs `mc` + cluster DNS + the mounted
-// ServiceAccount): deploy/k8s/run-integration.sh launches it as a pod.
-// Skipped unless P0RT1ON_K8S_PORTION_IT is set.
+// ServiceAccount): integration-tests/run-integration.sh launches it as a pod.
+// Missing config FAILS (never skips): run it via the driver, not by hand.
 describe("Portion lifecycle over tRPC on k8s (integration)", () => {
-  const enabled = Boolean(Deno.env.get("P0RT1ON_K8S_PORTION_IT"));
-  const maybe = enabled ? it : it.ignore;
+  beforeAll(() => {
+    const missing: string[] = [];
+    if (!Deno.env.get("HEADSCALE_URL")) missing.push("HEADSCALE_URL");
+    if (!Deno.env.get("HEADSCALE_API_KEY")) missing.push("HEADSCALE_API_KEY");
+    if (missing.length) {
+      throw new Error(
+        `${missing.join(", ")} not set — run via ` +
+          `./integration-tests/run-integration.sh tier2 (in-cluster).`,
+      );
+    }
+  });
 
   // The test's OWN k8s API access (mounted SA token + cluster CA via DENO_CERT).
   // The friend's client pod has nothing to do with the app's InstanceRuntime,
@@ -157,7 +172,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     expect(du.objectCount).toBeGreaterThan(0);
   };
 
-  maybe(
+  it(
     "addStart creates the pod; rotate + offboard leave it clean",
     async () => {
       const namespace = Deno.env.get("K8S_NAMESPACE") ?? "p0rt1on";

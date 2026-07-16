@@ -1,16 +1,27 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DenoCommandRunner, DenoTempFiles } from "../lib/CommandRunner.ts";
-import { hasBinary } from "../lib/hasBinary.ts";
-import { mcHostEnv, McShellClient } from "./McShellClient.ts";
+import {
+  DenoCommandRunner,
+  DenoTempFiles,
+} from "../app/packages/server/src/lib/CommandRunner.ts";
+import { hasBinary } from "../app/packages/server/src/lib/hasBinary.ts";
+import {
+  mcHostEnv,
+  McShellClient,
+} from "../app/packages/server/src/minio/McShellClient.ts";
 
-// Real `mc` against a real MinIO. Skipped unless P0RT1ON_INTEGRATION is set
-// (see deploy/docker-compose.yml). Excluded from the default test + coverage
-// runs; invoked via `deno task test:integration`.
+// Real `mc` against a real MinIO. Excluded from the default test + coverage
+// runs; invoked via `deno task test:integration` — running the suite IS the
+// opt-in, so a missing prerequisite FAILS (never skips).
 describe("McShellClient (integration: real mc + MinIO)", () => {
-  const enabled = Boolean(Deno.env.get("P0RT1ON_INTEGRATION")) &&
-    hasBinary("mc");
-  const maybe = enabled ? it : it.ignore;
+  beforeAll(() => {
+    if (!hasBinary("mc")) {
+      throw new Error(
+        "`mc` not on PATH — run this suite in the manager image (bundles the " +
+          "pinned mc) against a MinIO at MINIO_ENDPOINT; see integration-tests.md.",
+      );
+    }
+  });
   const runner = new DenoCommandRunner();
   const alias = "p0rt1on-it";
 
@@ -37,7 +48,7 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
 
   const hostEnv = () => mcHostEnv(alias, endpoint(), rootCred());
 
-  maybe("provisions a locked bucket + scoped user end-to-end", async () => {
+  it("provisions a locked bucket + scoped user end-to-end", async () => {
     // Block until MinIO is accepting requests (handles container startup race).
     await runner.run("mc", ["ready", alias], hostEnv());
 
@@ -68,7 +79,7 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
     }
   });
 
-  maybe(
+  it(
     "removeBucket deletes GOVERNANCE-locked objects (root bypass)",
     async () => {
       // The offboard-blocker regression: `rb --force` alone cannot delete
