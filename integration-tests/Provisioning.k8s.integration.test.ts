@@ -370,6 +370,23 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           await tempFiles.remove(canaryFile);
         }
 
+        // NEGATIVE PATH — the quota is what makes this a *portion* of the
+        // disk rather than the whole thing. addStart set 10 MiB; a write past
+        // it must be refused, or a friend can fill the host.
+        const oversizeFile = await tempFiles.write(
+          "x".repeat(11 * 1024 * 1024),
+        );
+        try {
+          const overQuota = await asFriend(bundle, (a) => [
+            "cp",
+            oversizeFile,
+            `${a}/${bundle.bucket}/oversize`,
+          ]);
+          expect(overQuota.code).not.toBe(0);
+        } finally {
+          await tempFiles.remove(oversizeFile);
+        }
+
         // ROTATE via the API: create-before-remove against the live MinIO.
         const rotated = await caller.friends.rotateKey({ friendId });
         expect(rotated.s3AccessKeyId).not.toBe(bundle.s3AccessKeyId);
@@ -399,6 +416,39 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           .toEqual([]);
         expect(await tailscale.nodesByTag("tag:p0rt1on-friend-k8sit"))
           .toEqual([]);
+
+        // LEAK CHECK — listInstances() only sees StatefulSets. The PVCs,
+        // Secrets and Services are separate objects, and a surviving data PVC
+        // means the friend's bytes outlive their offboard (a disk leak AND a
+        // retention problem). Tripwire for the teardown ordering rules.
+        // Fetched BY NAME, not listed: the manager SA deliberately has `get`
+        // but not `list` on these (RBAC containment — tier 1 asserts it), so
+        // a label list would 403. Gone (404) or condemned (deletionTimestamp
+        // set) both count as cleaned up: k8s deletion is async, and a PVC
+        // lingering in Terminating until the pod unmounts is not a leak.
+        const cleanedUp = async (kind: string, name: string) => {
+          const res = await fetch(
+            `https://kubernetes.default.svc/api/v1/namespaces/${namespace}` +
+              `/${kind}/${name}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (res.status === 404) {
+            await res.body?.cancel();
+            return true;
+          }
+          const obj = await res.json() as {
+            metadata?: { deletionTimestamp?: string };
+          };
+          return obj.metadata?.deletionTimestamp !== undefined;
+        };
+
+        const instance = "p0rt1on-k8sit";
+        expect(await cleanedUp("persistentvolumeclaims", `${instance}-data`))
+          .toBe(true);
+        expect(await cleanedUp("persistentvolumeclaims", `${instance}-state`))
+          .toBe(true);
+        expect(await cleanedUp("secrets", `${instance}-creds`)).toBe(true);
+        expect(await cleanedUp("services", instance)).toBe(true);
       } finally {
         // Best-effort teardown if any step failed mid-way.
         await k8s(
