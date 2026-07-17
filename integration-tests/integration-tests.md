@@ -54,33 +54,50 @@ MINIO_ENDPOINT=http://127.0.0.1:9000 \
 
 ---
 
-## 2. `DockerRuntime.integration.test.ts` — real Docker + instance image
+## 2. `Provisioning.docker.integration.test.ts` — REAL tailnet portion e2e
 
-**Verifies:** `DockerRuntime.ensureInstance` launches the combined
-MinIO+tailscaled instance container, asserts it's `running`, **idempotent** (a
-second `ensureInstance` adopts the same container id) and listed, then removes
-the container **and its volumes**.
+The only tier that touches a real tailnet, and the only one that can prove
+**`tailscale serve` over HTTPS with a real cert** — headscale issues none.
 
-**Needs:** a Docker daemon, the `p0rt1on-instance` image, and
-`TAILSCALE_AUTHKEY` — a Tailscale auth key. An **OAuth client secret also
-works** as the key, because the instance advertises its tag
-(`--advertise-tags`).
+**Verifies:** the **real manager image** runs as a container (docker socket
+mounted) and is driven through its **HTTP tRPC surface** — login → `addStart` →
+`claimBundle` → `offboardStart`. The manager mints the tailnet key from the
+OAuth client secret; the instance container enrols for real; then a **friend
+container** joins the same tailnet with the **minted bundle key** and writes a
+real Kopia backup through `tailscale serve`.
 
-**⚠ Tailnet cleanup:** this test removes only the container/volumes — it does
-**not** delete the tailnet node it enrolls (that belongs to the
-provisioning/offboard layer, not the runtime). If the node isn't ephemeral,
-delete the stray `p0rtit*` device afterward. The full offboard path (which does
-delete the node) is covered by the k8s portion tier below.
+The test process never joins the tailnet — the friend container does, exactly
+like a friend's machine. So **no host Tailscale is needed**.
 
-**Run (on the host):**
+**Needs:** a Docker daemon and a real tailnet: `TAILSCALE_OAUTH_CLIENT_SECRET`,
+`TAILNET_DOMAIN`, `P0RT1ON_MASTER_KEY`, and `ADMIN_USERNAME`/`ADMIN_PASSWORD`
+(auth is mandatory — the test manager binds non-loopback so it can be driven
+from outside the container). Optional: `TAILSCALE_TAG_OWNER` — who owns each
+friend tag in the policy's `tagOwners` (e.g. `tag:p0rt1on`, matching the
+tailnet's OAuth client tag); the API defaults to `autogroup:admin`. Passed
+through when set. The driver reads `.env`, so locally there is nothing to set
+up.
+
+**⚠ Use a throwaway CI tailnet in CI, never a personal one** — the job mints
+keys and creates nodes.
+
+**Note:** the test manager runs on a per-run `/tmp` DB and its own MinIO port
+range (9400-9410). A fresh DB cannot see ports a **dev** manager already handed
+out on the same host, and overlapping ranges fail with "port is already
+allocated".
+
+**Run:**
 
 ```sh
-docker build -t p0rt1on-instance:latest instance
-TAILSCALE_AUTHKEY=<tskey…> \
-  deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
-  --allow-run --unstable-ffi \
-  integration-tests/DockerRuntime.integration.test.ts
+./integration-tests/run-docker-tailnet.sh       # build images + run
+./integration-tests/run-docker-tailnet.sh run   # images already built
 ```
+
+_(Replaced `DockerRuntime.integration.test.ts`, deleted 2026-07-17: it burned a
+real auth key to assert only that Docker reported `running` — it never started a
+manager, created a portion, or connected to anything. Its one unique assertion,
+idempotent adopt, is covered by the `DockerRuntime.test.ts` unit test "adopts a
+running container without starting a second", which needs no tailnet.)_
 
 ---
 

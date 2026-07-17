@@ -24,11 +24,14 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
     "TAILSCALE_OAUTH_CLIENT_SECRET",
-    "TAILSCALE_TAG_OWNER",
     "TAILNET_DOMAIN",
     "ADMIN_USERNAME",
     "ADMIN_PASSWORD",
   ];
+  // Optional in the app (Env.tagOwner is `#opt`), so optional here too — a
+  // test must not demand more config than the code does. It declares who owns
+  // the friend tags in the tailnet policy; without it the API defaults.
+  const OPTIONAL = ["TAILSCALE_TAG_OWNER"];
 
   beforeAll(() => {
     const missing = REQUIRED.filter((k) => !Deno.env.get(k));
@@ -83,7 +86,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
     async () => {
       // Secrets ride an env-file, never argv (`ps` is world-readable).
       const managerEnv = await tmp.write(
-        REQUIRED.map((k) => `${k}=${env(k)}`).join("\n") +
+        [...REQUIRED, ...OPTIONAL.filter((k) => env(k))]
+          .map((k) => `${k}=${env(k)}`).join("\n") +
           // A non-loopback admin bind is allowed ONLY with auth on — it is.
           // DB under /tmp: `/app/data` is a compose volume mount, absent from
           // a bare `docker run`, and a per-run throwaway DB is what a test
