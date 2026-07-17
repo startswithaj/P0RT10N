@@ -9,7 +9,10 @@ import {
   KubernetesRuntime,
 } from "../app/packages/server/src/runtime/KubernetesRuntime.ts";
 import { CryptoKeyGen } from "../app/packages/server/src/provisioning/CryptoKeyGen.ts";
-import { McShellClientFactory } from "../app/packages/server/src/minio/McShellClient.ts";
+import {
+  mcHostEnv,
+  McShellClientFactory,
+} from "../app/packages/server/src/minio/McShellClient.ts";
 import { McSmokeTester } from "../app/packages/server/src/provisioning/McSmokeTester.ts";
 import { DrizzleProvisioningRepo } from "../app/packages/server/src/db/ProvisioningRepo.ts";
 import { FriendQueries } from "../app/packages/server/src/db/FriendQueries.ts";
@@ -262,6 +265,25 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       };
       const caller = createCallerFactory(appRouter)(context);
 
+      // Drive `mc` as the FRIEND, with their bundle creds — the same
+      // env-scoped mechanism McSmokeTester uses (nothing secret on argv).
+      // Returns the raw result instead of throwing: these calls are EXPECTED
+      // to fail, and the refusal IS the assertion.
+      const asFriend = (
+        cred: { s3AccessKeyId: string; s3SecretKey: string },
+        args: (alias: string) => string[],
+      ) => {
+        const alias = `p0rt1on-neg-${crypto.randomUUID().slice(0, 8)}`;
+        return runner.run(
+          "mc",
+          args(alias),
+          mcHostEnv(alias, runtime.adminEndpoint("p0rt1on-k8sit", 9000), {
+            accessKeyId: cred.s3AccessKeyId,
+            secretKey: cred.s3SecretKey,
+          }),
+        );
+      };
+
       try {
         // ADD via the API: the mutation detaches a job; the pod, bucket,
         // scoped user, smoke test, retention and quota all happen behind it.
@@ -304,9 +326,64 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         // The friend backs up for real over the tailnet (see helper above).
         await backupOverTailnet(k8s, mc, token, headscaleUrl, bundle);
 
+        // NEGATIVE PATH — the claim the whole product rests on. The friend
+        // HOLDS s3:DeleteObject, so a plain `rm` is MEANT to succeed: it
+        // writes a delete marker and every byte survives underneath as a
+        // version. What they must never manage is destroying those versions —
+        // that needs s3:DeleteObjectVersion (never granted) plus
+        // BypassGovernanceRetention (explicitly denied). An attacker holding
+        // the friend's keys can make backups look gone; not BE gone.
+        // Runs with the CLAIMED keys, before rotate revokes them.
+        // Use a canary the friend writes THEMSELVES, now that retention is
+        // armed, rather than leaning on Kopia's blobs: Kopia churns unretained
+        // index/marker objects, and `du` counts delete markers, so neither is
+        // a sound proxy for "the data survived".
+        const canary = `ransom-canary-${crypto.randomUUID().slice(0, 8)}`;
+        const canaryFile = await tempFiles.write(canary);
+        try {
+          const put = await asFriend(bundle, (a) => [
+            "cp",
+            canaryFile,
+            `${a}/${bundle.bucket}/${canary}`,
+          ]);
+          expect(put.code).toBe(0);
+
+          // Destroying the version needs s3:DeleteObjectVersion (never
+          // granted) and BypassGovernanceRetention (explicitly denied).
+          const purge = await asFriend(bundle, (a) => [
+            "rm",
+            "--versions",
+            "--bypass",
+            "--force",
+            `${a}/${bundle.bucket}/${canary}`,
+          ]);
+          expect(purge.code).not.toBe(0);
+
+          // The refusal is only half of it — prove the bytes are still there.
+          const read = await asFriend(bundle, (a) => [
+            "cat",
+            `${a}/${bundle.bucket}/${canary}`,
+          ]);
+          expect(read.code).toBe(0);
+          expect(read.stdout.trim()).toBe(canary);
+        } finally {
+          await tempFiles.remove(canaryFile);
+        }
+
         // ROTATE via the API: create-before-remove against the live MinIO.
         const rotated = await caller.friends.rotateKey({ friendId });
         expect(rotated.s3AccessKeyId).not.toBe(bundle.s3AccessKeyId);
+        // A DIFFERENT key is not a REVOKED key: rotation exists because the
+        // old credential is presumed compromised, so prove the old one is
+        // dead...
+        expect(
+          (await asFriend(bundle, (a) => ["ls", `${a}/${bundle.bucket}`])).code,
+        ).not.toBe(0);
+        // ...and that rotation did not just break access for everyone.
+        expect(
+          (await asFriend(rotated, (a) => ["ls", `${a}/${bundle.bucket}`]))
+            .code,
+        ).toBe(0);
 
         // OFFBOARD via the API: full teardown, then the cluster is clean.
         const off = await caller.friends.offboardStart({ friendId });
