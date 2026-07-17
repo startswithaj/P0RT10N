@@ -22,3 +22,8 @@ node_modules/
 
 # Downloaded CLIs for arg verification (mc, tailscale)
 .tools/
+
+# Temp dirs for secret-bearing env files (mc creds, auth keys) written by
+# DenoTempFiles at runtime and by the integration tests. Never commit these.
+.p0rt1on-tmp/
+.p0rt1on-it-tmp/
