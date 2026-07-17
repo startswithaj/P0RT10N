@@ -44,7 +44,7 @@ jobs:
             minio/minio:RELEASE.2025-04-08T15-41-24Z server /data
       - name: Build manager image + run the suite inside it (pinned mc)
         run: |
-          docker build -t p0rt1on-manager:ci .
+          docker build --target integration -t p0rt1on-manager:ci .
           docker run --rm --network host \
             -e MINIO_ENDPOINT=http://127.0.0.1:9000 \
             -e MINIO_ROOT_USER=p0rtadmin -e MINIO_ROOT_PASSWORD=p0rtadmin123 \

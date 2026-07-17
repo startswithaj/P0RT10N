@@ -36,7 +36,9 @@ HEADSCALE_URL="http://headscale.p0rt1on.svc:8080"
 
 build_images() {
   docker build -t "$INSTANCE_IMAGE" instance
-  docker build -t "$MANAGER_IMAGE" .
+  # --target integration: the suites live only in that stage, not in the
+  # published manager image.
+  docker build --target integration -t "$MANAGER_IMAGE" .
   docker build -t "$CLIENT_IMAGE" backup-client
   k3d image import "$INSTANCE_IMAGE" "$MANAGER_IMAGE" "$CLIENT_IMAGE" \
     -c "$CLUSTER"
@@ -44,8 +46,11 @@ build_images() {
 
 # Cluster + manifests + a ready headscale — idempotent, runs in every mode.
 setup() {
+  # k3d switches the default context on create; kc pins --context, so the
+  # switch would only clobber the user's current-context for no gain.
   k3d cluster list "$CLUSTER" >/dev/null 2>&1 ||
-    k3d cluster create "$CLUSTER" --wait --timeout 120s
+    k3d cluster create "$CLUSTER" --wait --timeout 120s \
+      --kubeconfig-switch-context=false
   kc apply -f deploy/k8s/p0rt1on.yaml
   kc apply -f integration-tests/headscale-it.yaml
   # The manager Deployment isn't exercised by these tiers (the runner pod

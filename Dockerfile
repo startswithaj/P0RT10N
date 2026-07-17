@@ -1,7 +1,11 @@
 # p0rt1on manager image: Deno app + bundled `mc` + the docker CLI. The manager
 # launches the combined instance image (see instance/) by shelling out to
 # `docker` against the host daemon (mount /var/run/docker.sock at runtime).
-FROM denoland/deno:2.8.2
+#
+# Three stages: `base` does all the work, `integration` adds the test suites,
+# and `manager` (production) is LAST so a bare `docker build` — what the GHCR
+# publish job runs — resolves to it and can never ship test code.
+FROM denoland/deno:2.8.2 AS base
 
 # Bundle the two external binaries the app shells out to: `mc` (MinIO admin) and
 # the docker CLI (launch/inspect instance containers). TARGETARCH is provided by
@@ -39,3 +43,13 @@ EXPOSE 8080
 CMD ["deno", "run", \
   "--allow-read", "--allow-write", "--allow-env", "--allow-ffi", "--allow-net", "--allow-run", \
   "--unstable-ffi", "app/packages/server/src/main.ts"]
+
+# Test-only image: the integration suites layered onto the real manager image,
+# so CI exercises exactly what ships (pinned `mc`, real SPA build). Built with
+# `--target integration` — see integration-tests/integration-tests.md.
+FROM base AS integration
+COPY integration-tests ./integration-tests
+
+# Production. Deliberately last and deliberately empty: the default build target
+# is the final stage, so forgetting `--target` yields the image WITHOUT tests.
+FROM base AS manager
