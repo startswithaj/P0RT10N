@@ -84,9 +84,9 @@ jobs:
       # secrets are for things that grant access.
       TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
       TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
-      # Who owns each friend tag in the CI tailnet's `tagOwners` (e.g.
-      # `tag:p0rt1on`, matching that tailnet's OAuth client tag). Optional —
-      # the API defaults to autogroup:admin.
+      # Who owns each friend tag in the CI tailnet's `tagOwners` — set it to
+      # that tailnet's OAuth client tag (e.g. `tag:p0rt1on`). REQUIRED: the
+      # client can only mint keys for tags it owns.
       TAILSCALE_TAG_OWNER: ${{ vars.TAILSCALE_TAG_OWNER }}
       ADMIN_USERNAME: p0rt1on-it
     steps:

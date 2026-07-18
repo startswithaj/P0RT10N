@@ -211,8 +211,19 @@ export class Env {
   get tailscaleOauthClientSecret(): string {
     return this.#required("TAILSCALE_OAUTH_CLIENT_SECRET");
   }
+  /**
+   * Who owns each friend tag in the policy's `tagOwners` (e.g. `tag:p0rt1on`).
+   * REQUIRED on the real Tailscale backend: the manager authenticates as the
+   * OAuth client, and Tailscale only mints keys for tags that client OWNS — so
+   * the API's `autogroup:admin` fallback always 400s ("requested tags are
+   * invalid or not permitted"), and only at the authkey step, AFTER the
+   * instance container is up. Fail at boot instead. Headscale derives its own
+   * default, so it stays optional there.
+   */
   get tagOwner(): string | undefined {
-    return this.#opt("TAILSCALE_TAG_OWNER");
+    return this.tailscaleBackend === "tailscale"
+      ? this.#required("TAILSCALE_TAG_OWNER")
+      : this.#opt("TAILSCALE_TAG_OWNER");
   }
   /** Which control plane the manager talks to. `headscale` is the self-hosted
    * test-tier backend — see HeadscaleHttpApi for what it can't do (HTTPS certs). */
