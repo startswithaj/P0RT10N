@@ -72,11 +72,12 @@ like a friend's machine. So **no host Tailscale is needed**.
 **Needs:** a Docker daemon and a real tailnet: `TAILSCALE_OAUTH_CLIENT_SECRET`,
 `TAILNET_DOMAIN`, `P0RT1ON_MASTER_KEY`, and `ADMIN_USERNAME`/`ADMIN_PASSWORD`
 (auth is mandatory — the test manager binds non-loopback so it can be driven
-from outside the container). Optional: `TAILSCALE_TAG_OWNER` — who owns each
-friend tag in the policy's `tagOwners` (e.g. `tag:p0rt1on`, matching the
-tailnet's OAuth client tag); the API defaults to `autogroup:admin`. Passed
-through when set. The driver reads `.env`, so locally there is nothing to set
-up.
+from outside the container). Also `TAILSCALE_TAG_OWNER` — who owns each friend
+tag in the policy's `tagOwners`; set it to the tailnet's OAuth client tag (e.g.
+`tag:p0rt1on`). REQUIRED on the real Tailscale backend: the client can only
+mint keys for tags it owns, so the API's `autogroup:admin` default 400s at the
+authkey step (headscale keeps it optional). The driver reads `.env`, so locally
+there is nothing to set up.
 
 **⚠ Use a throwaway CI tailnet in CI, never a personal one** — the job mints
 keys and creates nodes.
