@@ -69,23 +69,24 @@ real Kopia backup through `tailscale serve`.
 The test process never joins the tailnet — the friend container does, exactly
 like a friend's machine. So **no host Tailscale is needed**.
 
-**Needs:** a Docker daemon and a real tailnet: `TAILSCALE_OAUTH_CLIENT_SECRET`,
-`TAILNET_DOMAIN`, `P0RT1ON_MASTER_KEY`, and `ADMIN_USERNAME`/`ADMIN_PASSWORD`
+**Needs:** a Docker daemon and a real tailnet:
+`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`, `P0RT1ON_TAILSCALE_TAILNET_DOMAIN`,
+`P0RT1ON_MASTER_KEY`, and `P0RT1ON_ADMIN_USERNAME`/`P0RT1ON_ADMIN_PASSWORD`
 (auth is mandatory — the test manager binds non-loopback so it can be driven
-from outside the container). Also `TAILSCALE_TAG_OWNER` — who owns each friend
-tag in the policy's `tagOwners`; set it to the tailnet's OAuth client tag (e.g.
-`tag:p0rt1on`). REQUIRED on the real Tailscale backend: the client can only
-mint keys for tags it owns, so the API's `autogroup:admin` default 400s at the
-authkey step (headscale keeps it optional). The driver reads `.env`, so locally
-there is nothing to set up.
+from outside the container). Also `P0RT1ON_TAILSCALE_TAG_OWNER` — who owns each
+friend tag in the policy's `tagOwners`; set it to the tailnet's OAuth client tag
+(e.g. `tag:p0rt1on`). REQUIRED on the real Tailscale backend: the client can
+only mint keys for tags it owns, so the API's `autogroup:admin` default 400s at
+the authkey step (headscale keeps it optional). The driver reads `.env`, so
+locally there is nothing to set up.
 
 **⚠ Use a throwaway CI tailnet in CI, never a personal one** — the job mints
 keys and creates nodes.
 
-**Note:** the test manager runs on a per-run `/tmp` DB and its own MinIO port
-range (9400-9410). A fresh DB cannot see ports a **dev** manager already handed
-out on the same host, and overlapping ranges fail with "port is already
-allocated".
+**Note:** the test manager runs on a per-run `/tmp` DB, so its allocator cannot
+see ports a **dev** manager already handed out on the same host. It bind-probes
+each candidate, so it only collides with a dev instance that is stopped (its
+port reads as free) and gets started again mid-run.
 
 **Run:**
 

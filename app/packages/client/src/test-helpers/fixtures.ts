@@ -43,7 +43,6 @@ export function makeBundle(
   return {
     name: "alice",
     s3Endpoint: "https://alice.tail1a2b.ts.net",
-    region: "us-east-1",
     bucket: "alice-backups",
     s3AccessKeyId: "AKIAEXAMPLEACCESSKEY",
     s3SecretKey: "s3cr3t-shown-once-value",

@@ -6,9 +6,10 @@ import { join } from "@std/path";
 import { appRouter } from "./trpc/root.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
 import { SESSION_COOKIE } from "./trpc/routers/auth.ts";
+import { MINIO_EVENT_PATH } from "./lib/Env.ts";
 
 const TRPC_ENDPOINT = "/trpc";
-const MINIO_EVENT_ENDPOINT = "/internal/minio-events";
+const MINIO_EVENT_ENDPOINT = MINIO_EVENT_PATH;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
 
 /** Read one cookie value from a Cookie header (undefined if absent). */
@@ -121,7 +122,7 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
 
 /**
  * Serve the tRPC router over HTTP. The admin surface binds loopback by default;
- * a non-loopback bind (`ADMIN_BIND_HOST`, behind a TLS proxy) is allowed ONLY
+ * a non-loopback bind (`P0RT1ON_ADMIN_BIND_HOST`, behind a TLS proxy) is ONLY
  * with auth enabled. `/health` is a plain liveness check; `/trpc` routes to tRPC.
  * The audit webhook is deliberately NOT here (see startMinioEventServer): serving
  * it from this listener once forced `0.0.0.0` binds that exposed the whole
@@ -134,8 +135,8 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
   // A bare admin API must never face the network — non-loopback needs auth.
   if (!LOOPBACK.has(bind) && !opts.context.auth.enabled) {
     throw new Error(
-      `ADMIN_BIND_HOST=${bind} is non-loopback but auth is disabled — set ` +
-        `ADMIN_USERNAME/ADMIN_PASSWORD or bind 127.0.0.1`,
+      `P0RT1ON_ADMIN_BIND_HOST=${bind} is non-loopback but auth is disabled ` +
+        `— set P0RT1ON_ADMIN_USERNAME/P0RT1ON_ADMIN_PASSWORD or bind 127.0.0.1`,
     );
   }
 

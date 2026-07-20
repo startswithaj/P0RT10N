@@ -7,7 +7,7 @@ import { DrizzleProvisioningRepo } from "../app/packages/server/src/db/Provision
 import { activity, usage } from "../app/packages/server/src/db/Schema.ts";
 import type { IsolationMode } from "../app/packages/shared/domain.ts";
 
-const path = Deno.env.get("DB_PATH") ?? "./.p0rt1on-dev.db";
+const path = Deno.env.get("P0RT1ON_DB_PATH") ?? "./.p0rt1on-dev.db";
 await Deno.remove(path).catch(() => {/* fresh start */});
 
 const { db, driver } = openDatabase(path);

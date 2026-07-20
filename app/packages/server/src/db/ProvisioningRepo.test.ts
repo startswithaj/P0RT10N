@@ -159,7 +159,7 @@ describe("DrizzleProvisioningRepo", () => {
       makeAddInput("bob", "shared"),
       namingFor("bob", "shared", "pool"),
     );
-    // ...then SHARED_INSTANCE_NAME changes in config before carol is added.
+    // ...then the shared instance name changes in config before carol is added.
     const carol = await repo.reserveFriend(
       makeAddInput("carol", "shared"),
       namingFor("carol", "shared", "renamed-pool"),

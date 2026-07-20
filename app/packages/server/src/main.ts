@@ -2,7 +2,7 @@ import { openDatabase } from "./db/Database.ts";
 import { runMigrations } from "./db/MigrationRunner.ts";
 import { ConsoleLogger } from "./lib/ConsoleLogger.ts";
 import { CryptoKeyGen } from "./provisioning/CryptoKeyGen.ts";
-import { Env } from "./lib/Env.ts";
+import { Env, EVENT_BIND_HOST, EVENT_PORT } from "./lib/Env.ts";
 import { FriendQueries } from "./db/FriendQueries.ts";
 import { buildApp } from "./app.ts";
 import { runBoot } from "./boot/boot.ts";
@@ -24,6 +24,12 @@ import {
 // path have their own tests.
 
 const env = new Env(); // validates required vars — refuses to boot without them
+// The production image builds the SPA next to the server; in dev it is absent
+// and the Vite dev server serves the frontend instead.
+const distDir = `${import.meta.dirname}/../dist`;
+const staticDir = await Deno.stat(distDir)
+  .then((s) => s.isDirectory ? distDir : undefined)
+  .catch(() => undefined);
 const logger = new ConsoleLogger({ level: env.logLevel });
 logger.info("p0rt1on starting", { level: env.logLevel, pid: Deno.pid });
 
@@ -114,13 +120,13 @@ await runBoot({
       port: env.port,
       context,
       bindHost: env.adminBindHost,
-      staticDir: env.staticDir,
+      staticDir,
       onListen: ({ port }) =>
         logger.info(`p0rt1on admin listening on ${env.adminBindHost}:${port}`),
     });
     startMinioEventServer({
-      port: env.minioEventPort,
-      hostname: env.minioEventBindHost,
+      port: EVENT_PORT,
+      hostname: EVENT_BIND_HOST,
       sink: {
         // Derived from the master key — same value buildApp wires into
         // setAuditWebhook, so instances and listener always agree.
@@ -129,7 +135,7 @@ await runBoot({
       },
       onListen: ({ port }) =>
         logger.info(
-          `p0rt1on minio-event webhook listening on ${env.minioEventBindHost}:${port}`,
+          `p0rt1on minio-event webhook listening on ${EVENT_BIND_HOST}:${port}`,
         ),
     });
     // Stop the consumers (ends their loops, cancels in-flight forwards), exit.

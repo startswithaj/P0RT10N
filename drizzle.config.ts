@@ -7,6 +7,6 @@ export default defineConfig({
   schema: "./app/packages/server/src/db/Schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: `file:${Deno.env.get("DB_PATH") ?? "./data/p0rt1on.db"}`,
+    url: `file:${Deno.env.get("P0RT1ON_DB_PATH") ?? "./data/p0rt1on.db"}`,
   },
 });

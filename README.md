@@ -88,7 +88,7 @@ choice (Kopia recommended; any S3 client works).
 ## Quick start (manager)
 
 ```bash
-cp .env.example .env   # fill in P0RT1ON_MASTER_KEY, TAILSCALE_OAUTH_CLIENT_SECRET, TAILNET_DOMAIN
+cp .env.example .env   # fill in the four required values; everything else has a default
 docker compose up
 ```
 
@@ -98,8 +98,9 @@ docker compose up
   and two volumes: the metadata DB and `mc` aliases. The provided
   `docker-compose.yml` wires all of this, including the audit-webhook path from
   instances back to the manager.
-- `P0RT1ON_MASTER_KEY` and `TAILSCALE_OAUTH_CLIENT_SECRET` are required — the
-  manager refuses to start without them (no stubs, no degraded mode).
+- Four settings are required — the master key, the OAuth client secret, the tag
+  owner and your tailnet domain. The manager refuses to start without them (no
+  stubs, no degraded mode); `.env.example` explains each one.
 
 ## Setup — Tailscale OAuth client
 
@@ -135,7 +136,7 @@ hand — the app adds them at provision time (owned by `tag:p0rt1on`).
 | **Keys → Auth Keys** | **Write** | mint + revoke each friend's auth key                          |
 
 Attach the tag **`tag:p0rt1on`**, then **Generate** and copy the **client
-secret** (shown once) → this is `TAILSCALE_OAUTH_CLIENT_SECRET`.
+secret** (shown once) → this is `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
 
 > **⚠️ Security limitation — read this before using a shared tailnet.** The
 > **Policy File → Write** permission is broad. Tailscale does **not** let you
@@ -172,8 +173,8 @@ per-friend grant allows — their own storage box, nothing else on your tailnet.
 **Least-privilege alternative (no Policy File permission).** If you'd rather the
 client be _provably_ unable to widen access (see the warning in step 2), omit
 the **Policy File** permission when creating the client and set
-`TAILSCALE_ACL_MODE=manual` — P0RT1ON then skips ACL edits and shows you the
-grant lines to paste by hand. Either one static rule for all friends:
+`P0RT1ON_TAILSCALE_ACL_MODE=manual` — P0RT1ON then skips ACL edits and shows you
+the grant lines to paste by hand. Either one static rule for all friends:
 
 ```jsonc
 { "src": ["tag:p0rt1on-friend"], "dst": ["tag:p0rt1on-serve:443"] }
@@ -192,15 +193,11 @@ a leaked client can only mint friend-tagged keys — never grant them new reach.
 
 ### 4. Environment
 
-| Var                             | Value                                                                                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `P0RT1ON_MASTER_KEY`            | strong random value; derives every instance's root credential — **stable, backed up, secret**   |
-| `TAILSCALE_OAUTH_CLIENT_SECRET` | the OAuth client **secret** (`tskey-client-…`) — not a personal API token                       |
-| `TAILSCALE_TAG_OWNER`           | `tag:p0rt1on`                                                                                   |
-| `TAILNET_DOMAIN`                | your MagicDNS base (e.g. `tailXXXX.ts.net`) — used to build `https://<name>.<domain>` endpoints |
-| `TAILSCALE_ACL_MODE`            | `auto` (API edits the policy) or `manual` (you paste the grants — step 3)                       |
-
-Put these in `.env` (gitignored — see `.env.example` for the full list).
+Copy `.env.example` to `.env` (gitignored) and fill in the four required values:
+the master key, the OAuth client **secret** from step 2 (not a personal API
+token), the tag owner you attached to it, and your tailnet's MagicDNS name. Set
+`P0RT1ON_TAILSCALE_ACL_MODE=manual` as well if you skipped the Policy File
+permission (step 3). Every setting is explained in `.env.example` itself.
 
 ## How to be a client
 
@@ -264,8 +261,8 @@ runs (the auth key is single-use); `-v p0rt1on-cache:/cache` with
   published at `https://<name>.<tailnet>.ts.net` via `tailscale serve`.
 - **Activity:** MinIO audit webhooks → manager (`/internal/minio-events`),
   aggregated into per-friend stats. Usage sampled via `mc du`. Set
-  `MINIO_FORWARD_URL` to also forward every event, byte-identical, to your own
-  webhook.
+  `P0RT1ON_MINIO_FORWARD_URL` to also forward every event, byte-identical, to
+  your own webhook.
 
 ---
 

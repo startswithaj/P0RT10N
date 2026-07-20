@@ -9,6 +9,7 @@ import { HeadscaleHttpApi } from "./tailscale/HeadscaleHttpApi.ts";
 import type { TailscaleApi } from "./tailscale/tailscale.ts";
 import { McShellClientFactory } from "./minio/McShellClient.ts";
 import {
+  DOCKER_NETWORK,
   DockerInstanceRuntime,
   DockerRuntime,
 } from "./runtime/DockerRuntime.ts";
@@ -45,7 +46,7 @@ export interface App {
   mcFactory: McShellClientFactory;
 }
 
-/** RUNTIME=docker (default) or kubernetes — the only place this branches. */
+/** P0RT1ON_RUNTIME=docker (default) or kubernetes — the only branch point. */
 async function buildInstanceRuntime(
   env: Env,
   runner: DenoCommandRunner,
@@ -54,7 +55,8 @@ async function buildInstanceRuntime(
   if (env.runtimeKind === "kubernetes") {
     const settings = env.kubeSettings();
     // No explicit overrides → the client auto-detects the mounted in-cluster
-    // ServiceAccount (token + CA + server); dev passes K8S_API/K8S_TOKEN.
+    // ServiceAccount (token + CA + server); dev passes P0RT1ON_K8S_API and
+    // P0RT1ON_K8S_TOKEN.
     const client = await buildRestClient({
       apiBase: settings.apiBase,
       token: settings.tokenInline,
@@ -72,15 +74,15 @@ async function buildInstanceRuntime(
     }, client);
   }
   return new DockerInstanceRuntime(new DockerRuntime(runner), tempFiles, {
-    network: env.dockerNetwork,
+    network: DOCKER_NETWORK,
     addressing: env.provisioningConfig().instanceAddressing,
     tailscale: env.instanceTailscale(),
     resources: env.dockerPortionResources(),
   });
 }
 
-/** TAILSCALE_BACKEND=tailscale (default) or headscale — the only place this
- * branches. Headscale is the self-hosted test-tier control plane. */
+/** P0RT1ON_TAILSCALE_BACKEND=tailscale (default) or headscale — the only place
+ * this branches. Headscale is the self-hosted test-tier control plane. */
 function buildTailscaleApi(env: Env): TailscaleApi {
   if (env.tailscaleBackend === "headscale") {
     return new HeadscaleHttpApi({

@@ -23,13 +23,13 @@ import { hasBinary } from "../app/packages/server/src/lib/hasBinary.ts";
 describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => {
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
-    "TAILSCALE_OAUTH_CLIENT_SECRET",
-    "TAILNET_DOMAIN",
+    "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET",
+    "P0RT1ON_TAILSCALE_TAILNET_DOMAIN",
     // Required on the real Tailscale backend — the OAuth client can only mint
     // keys for tags it owns (see Env.tagOwner).
-    "TAILSCALE_TAG_OWNER",
-    "ADMIN_USERNAME",
-    "ADMIN_PASSWORD",
+    "P0RT1ON_TAILSCALE_TAG_OWNER",
+    "P0RT1ON_ADMIN_USERNAME",
+    "P0RT1ON_ADMIN_PASSWORD",
   ];
 
   beforeAll(() => {
@@ -47,7 +47,9 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const managerName = `p0rt1on-it-manager-${id}`;
   const friendName = `p0rt1on-it-friend-${id}`;
   const portion = `dockerit${id}`;
-  const network = Deno.env.get("P0RT1ON_NETWORK") ?? "p0rt1on-net";
+  // The network instances join is fixed in the runtime (DOCKER_NETWORK); the
+  // manager container has to be on it too, or it cannot reach them by name.
+  const network = "p0rt1on-net";
   const port = 18080;
   const base = `http://127.0.0.1:${port}`;
   const tmp = new DenoTempFiles("./.p0rt1on-it-tmp");
@@ -89,16 +91,15 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           // A non-loopback admin bind is allowed ONLY with auth on — it is.
           // DB under /tmp: `/app/data` is a compose volume mount, absent from
           // a bare `docker run`, and a per-run throwaway DB is what a test
-          // wants anyway.
-          // Its own MinIO port range: this manager runs on a throwaway DB, so
-          // its port allocator cannot see ports a DEV manager already handed
-          // out on the same host. Overlapping ranges = "port is already
-          // allocated" at instance start.
-          `\nADMIN_BIND_HOST=0.0.0.0\nINSTANCE_ADDRESSING=network` +
-          `\nMINIO_PORT_MIN=9400\nMINIO_PORT_MAX=9410` +
-          `\nP0RT1ON_NETWORK=${network}\nDB_PATH=/tmp/p0rt1on.db` +
-          `\nINSTANCE_IMAGE=${
-            Deno.env.get("INSTANCE_IMAGE") ?? "p0rt1on-instance:it"
+          // wants anyway. This manager's allocator therefore cannot see ports
+          // a DEV manager already handed out; it bind-probes each candidate,
+          // so it only collides with a dev instance that is stopped (its port
+          // reads as free) and is started again mid-run.
+          `\nP0RT1ON_ADMIN_BIND_HOST=0.0.0.0` +
+          `\nP0RT1ON_INSTANCE_ADDRESSING=network` +
+          `\nP0RT1ON_DB_PATH=/tmp/p0rt1on.db` +
+          `\nP0RT1ON_INSTANCE_IMAGE=${
+            Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ?? "p0rt1on-instance:it"
           }\n`,
       );
       let cookie = "";
@@ -163,8 +164,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
 
         // 2. Auth is REQUIRED for the non-loopback bind — log in for real.
         await trpc("auth.login", {
-          username: env("ADMIN_USERNAME"),
-          password: env("ADMIN_PASSWORD"),
+          username: env("P0RT1ON_ADMIN_USERNAME"),
+          password: env("P0RT1ON_ADMIN_PASSWORD"),
         });
 
         // 3. Create the portion. The manager mints the tailnet key from the
@@ -196,7 +197,9 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
 
         // Real serve endpoint on the real tailnet — HTTPS with a real cert,
         // the thing headscale structurally cannot prove.
-        expect(bundle.s3Endpoint).toContain(env("TAILNET_DOMAIN"));
+        expect(bundle.s3Endpoint).toContain(
+          env("P0RT1ON_TAILSCALE_TAILNET_DOMAIN"),
+        );
         expect(bundle.s3Endpoint.startsWith("https://")).toBe(true);
         expect(bundle.tsAuthKey ?? "").not.toBe("");
 

@@ -6,7 +6,8 @@ describe("Env", () => {
   // Required vars supplied by default; construction validates them.
   const REQUIRED = {
     P0RT1ON_MASTER_KEY: "k",
-    TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
+    P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
+    P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
   };
 
   const env = (map: Record<string, string>) =>
@@ -16,85 +17,88 @@ describe("Env", () => {
     const e = env({});
     expect(e.logLevel).toBe("info");
     expect(e.port).toBe(8080);
-    expect(e.minioEventPort).toBe(8081);
-    expect(e.minioEventBindHost).toBe("0.0.0.0");
     expect(e.minioForwardUrl).toBeUndefined();
     expect(e.minioForwardAuthorization).toBeUndefined();
     expect(e.dbPath).toBe("./data/p0rt1on.db");
 
     const c = e.provisioningConfig();
     expect(c.instanceImage).toBe("p0rt1on-instance:latest");
-    expect(e.dockerNetwork).toBe("p0rt1on-net");
     expect(c.serveNodeTag).toBe("tag:p0rt1on-serve");
     expect(c.portRange).toEqual({ min: 9100, max: 9999 });
     expect(c.aclMode).toBe("auto");
   });
 
-  it("reads TAILSCALE_ACL_MODE=manual", () => {
-    expect(env({ TAILSCALE_ACL_MODE: "manual" }).provisioningConfig().aclMode)
-      .toBe("manual");
-    expect(env({ TAILSCALE_ACL_MODE: "bogus" }).provisioningConfig().aclMode)
-      .toBe("auto");
+  it("reads the ACL mode, ignoring bogus values", () => {
+    expect(
+      env({ P0RT1ON_TAILSCALE_ACL_MODE: "manual" }).provisioningConfig()
+        .aclMode,
+    ).toBe("manual");
+    expect(
+      env({ P0RT1ON_TAILSCALE_ACL_MODE: "bogus" }).provisioningConfig().aclMode,
+    ).toBe("auto");
   });
 
   it("reads overrides, including numbers", () => {
     const e = env({
-      LOG_LEVEL: "debug",
-      PORT: "9999",
-      INSTANCE_IMAGE: "img:1",
-      MINIO_PORT_MIN: "9200",
-      TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
+      P0RT1ON_LOG_LEVEL: "debug",
+      P0RT1ON_PORT: "9999",
+      P0RT1ON_INSTANCE_IMAGE: "img:1",
     });
     expect(e.logLevel).toBe("debug");
     expect(e.port).toBe(9999);
     expect(e.tailscaleOauthClientSecret).toBe("tok");
     expect(e.provisioningConfig().instanceImage).toBe("img:1");
-    expect(e.provisioningConfig().portRange.min).toBe(9200);
   });
 
   it("reads MinIO event forwarding config", () => {
     const e = env({
-      MINIO_FORWARD_URL: "https://sink.example/hook",
-      MINIO_FORWARD_AUTHORIZATION: "Bearer tok",
+      P0RT1ON_MINIO_FORWARD_URL: "https://sink.example/hook",
+      P0RT1ON_MINIO_FORWARD_AUTHORIZATION: "Bearer tok",
     });
     expect(e.minioForwardUrl).toBe("https://sink.example/hook");
     expect(e.minioForwardAuthorization).toBe("Bearer tok");
   });
 
   it("rejects non-numeric values for numeric vars, naming the variable", () => {
-    expect(() => env({ PORT: "abc" }).port).toThrow(
-      'PORT must be a number, got "abc"',
+    expect(() => env({ P0RT1ON_PORT: "abc" }).port).toThrow(
+      'P0RT1ON_PORT must be a number, got "abc"',
     );
-    expect(() => env({ MINIO_PORT_MIN: "abc" }).provisioningConfig())
-      .toThrow("MINIO_PORT_MIN");
   });
 
-  it("rejects an audit port that collides with the admin port", () => {
+  it("rejects an admin port that collides with the audit listener", () => {
     // The whole point of the split is two distinct listeners — a collision
     // must fail at boot, not surface as a bind error.
-    expect(() => env({ MINIO_EVENT_PORT: "8080" }).minioEventPort).toThrow(
-      "must differ from PORT",
+    expect(() => env({ P0RT1ON_PORT: "8081" }).port).toThrow(
+      "must differ from the audit listener's port",
     );
-    expect(() => env({ PORT: "9000", MINIO_EVENT_PORT: "9000" }).minioEventPort)
-      .toThrow(
-        "must differ from PORT",
-      );
-    expect(env({ PORT: "9000" }).minioEventPort).toBe(8081);
+    expect(env({ P0RT1ON_PORT: "9000" }).port).toBe(9000);
   });
 
   it("falls back to info for an unknown log level", () => {
-    expect(env({ LOG_LEVEL: "bogus" }).logLevel).toBe("info");
+    expect(env({ P0RT1ON_LOG_LEVEL: "bogus" }).logLevel).toBe("info");
+  });
+
+  it("derives where instances post audit events, per runtime", () => {
+    // Never 127.0.0.1 — that would be the instance itself, not the manager.
+    expect(env({}).provisioningConfig().auditWebhookUrl).toBe(
+      "http://host.docker.internal:8081/internal/minio-events",
+    );
+    expect(
+      env({ P0RT1ON_RUNTIME: "kubernetes", P0RT1ON_K8S_NAMESPACE: "portions" })
+        .provisioningConfig().auditWebhookUrl,
+    ).toBe("http://p0rt1on-manager.portions.svc:8081/internal/minio-events");
   });
 
   it("construction fails naming every missing required var", () => {
     expect(() => new Env({ get: () => undefined })).toThrow(
-      "P0RT1ON_MASTER_KEY, TAILSCALE_OAUTH_CLIENT_SECRET is not set",
+      "P0RT1ON_MASTER_KEY, P0RT1ON_TAILSCALE_TAILNET_DOMAIN, " +
+        "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set",
     );
     expect(() =>
       new Env({
         get: (k) => ({ P0RT1ON_MASTER_KEY: "k" } as Record<string, string>)[k],
       })
-    ).toThrow("TAILSCALE_OAUTH_CLIENT_SECRET is not set");
+    ).toThrow("P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set");
     // Empty string counts as unset.
     expect(() =>
       new Env({
@@ -113,9 +117,10 @@ describe("Env", () => {
       get: (k) =>
         ({
           P0RT1ON_MASTER_KEY: "k",
-          TAILSCALE_BACKEND: "headscale",
-          HEADSCALE_URL: "http://hs:8080",
-          HEADSCALE_API_KEY: "hs-key",
+          P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
+          P0RT1ON_TAILSCALE_BACKEND: "headscale",
+          P0RT1ON_HEADSCALE_URL: "http://hs:8080",
+          P0RT1ON_HEADSCALE_API_KEY: "hs-key",
         } as Record<string, string>)[k],
     });
     expect(headscale.tailscaleBackend).toBe("headscale");
@@ -130,15 +135,16 @@ describe("Env", () => {
         get: (k) =>
           ({
             P0RT1ON_MASTER_KEY: "k",
-            TAILSCALE_BACKEND: "headscale",
+            P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
+            P0RT1ON_TAILSCALE_BACKEND: "headscale",
           } as Record<string, string>)[k],
       })
-    ).toThrow("HEADSCALE_URL, HEADSCALE_API_KEY is not set");
+    ).toThrow("P0RT1ON_HEADSCALE_URL, P0RT1ON_HEADSCALE_API_KEY is not set");
   });
 
   it("defaults to the tailscale backend, ignoring bogus values", () => {
     expect(env({}).tailscaleBackend).toBe("tailscale");
-    expect(env({ TAILSCALE_BACKEND: "bogus" }).tailscaleBackend)
+    expect(env({ P0RT1ON_TAILSCALE_BACKEND: "bogus" }).tailscaleBackend)
       .toBe("tailscale");
   });
 
@@ -149,23 +155,28 @@ describe("Env", () => {
     });
     expect(
       env({
-        TAILSCALE_LOGIN_SERVER: "http://hs:8080",
-        TAILSCALE_SERVE_MODE: "http",
+        P0RT1ON_TAILSCALE_LOGIN_SERVER: "http://hs:8080",
+        P0RT1ON_TAILSCALE_SERVE_MODE: "http",
       }).instanceTailscale(),
     ).toEqual({ loginServer: "http://hs:8080", serveMode: "http" });
     // Anything but the explicit opt-out stays https.
-    expect(env({ TAILSCALE_SERVE_MODE: "bogus" }).instanceTailscale().serveMode)
-      .toBe("https");
+    expect(
+      env({ P0RT1ON_TAILSCALE_SERVE_MODE: "bogus" }).instanceTailscale()
+        .serveMode,
+    ).toBe("https");
   });
 
   it("admin auth: null unless both username + password set; bind defaults loopback", () => {
     expect(env({}).adminAuth).toBeNull();
-    expect(env({ ADMIN_USERNAME: "admin" }).adminAuth).toBeNull();
-    expect(env({ ADMIN_PASSWORD: "pw" }).adminAuth).toBeNull();
-    expect(env({ ADMIN_USERNAME: "admin", ADMIN_PASSWORD: "pw" }).adminAuth)
-      .toEqual({ username: "admin", password: "pw" });
+    expect(env({ P0RT1ON_ADMIN_USERNAME: "admin" }).adminAuth).toBeNull();
+    expect(env({ P0RT1ON_ADMIN_PASSWORD: "pw" }).adminAuth).toBeNull();
+    expect(
+      env({ P0RT1ON_ADMIN_USERNAME: "admin", P0RT1ON_ADMIN_PASSWORD: "pw" })
+        .adminAuth,
+    ).toEqual({ username: "admin", password: "pw" });
     expect(env({}).adminBindHost).toBe("127.0.0.1");
-    expect(env({ ADMIN_BIND_HOST: "0.0.0.0" }).adminBindHost).toBe("0.0.0.0");
+    expect(env({ P0RT1ON_ADMIN_BIND_HOST: "0.0.0.0" }).adminBindHost)
+      .toBe("0.0.0.0");
   });
 
   it("portion resources are all unset by default (no caps)", () => {
@@ -186,10 +197,10 @@ describe("Env", () => {
   it("reads the per-portion k8s + docker resource vars", () => {
     expect(
       env({
-        PORTION_K8S_CPU_REQUEST: "250m",
-        PORTION_K8S_CPU_LIMIT: "1",
-        PORTION_K8S_MEMORY_REQUEST: "256Mi",
-        PORTION_K8S_MEMORY_LIMIT: "1Gi",
+        P0RT1ON_PORTION_K8S_CPU_REQUEST: "250m",
+        P0RT1ON_PORTION_K8S_CPU_LIMIT: "1",
+        P0RT1ON_PORTION_K8S_MEMORY_REQUEST: "256Mi",
+        P0RT1ON_PORTION_K8S_MEMORY_LIMIT: "1Gi",
       }).kubeSettings().resources,
     ).toEqual({
       cpuRequest: "250m",
@@ -199,10 +210,10 @@ describe("Env", () => {
     });
     expect(
       env({
-        PORTION_DOCKER_CPU_REQUEST: "512",
-        PORTION_DOCKER_CPU_LIMIT: "0.5",
-        PORTION_DOCKER_MEMORY_REQUEST: "256m",
-        PORTION_DOCKER_MEMORY_LIMIT: "1g",
+        P0RT1ON_PORTION_DOCKER_CPU_REQUEST: "512",
+        P0RT1ON_PORTION_DOCKER_CPU_LIMIT: "0.5",
+        P0RT1ON_PORTION_DOCKER_MEMORY_REQUEST: "256m",
+        P0RT1ON_PORTION_DOCKER_MEMORY_LIMIT: "1g",
       }).dockerPortionResources(),
     ).toEqual({
       cpuShares: "512",

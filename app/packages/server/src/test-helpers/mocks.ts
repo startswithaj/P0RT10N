@@ -61,7 +61,6 @@ export function recordingLogger(): { logger: Logger; warns: string[] } {
 export const TEST_CONFIG: ProvisioningConfig = {
   instanceImage: "p0rt1on-instance:pinned",
   instanceAddressing: "host",
-  region: "us-east-1",
   portRange: { min: 9000, max: 9100 },
   sharedInstanceName: "pool",
   tailnetDomain: "tailnet.ts.net",
@@ -76,9 +75,10 @@ export const TEST_CONFIG: ProvisioningConfig = {
 export function testEnv(overrides: Record<string, string> = {}): Env {
   const base: Record<string, string> = {
     P0RT1ON_MASTER_KEY: "test-master-key",
-    TAILSCALE_OAUTH_CLIENT_SECRET: "test-oauth-secret",
+    P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "test-oauth-secret",
+    P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
     // Required on the default (tailscale) backend — see Env.tagOwner.
-    TAILSCALE_TAG_OWNER: "tag:p0rt1on",
+    P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
     ...overrides,
   };
   return new Env({ get: (k) => base[k] });

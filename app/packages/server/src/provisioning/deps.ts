@@ -23,7 +23,6 @@ export interface ProvisioningConfig {
    * shared docker network, containerized manager). See runtime/adminEndpoint.ts.
    */
   instanceAddressing: InstanceAddressing;
-  region: string;
   /** Inclusive host-port range dedicated instances are allocated from. */
   portRange: { min: number; max: number };
   /** The single shared pool's instance name (PLAN: one shared pool for v1). */
@@ -213,7 +212,6 @@ export interface KeyGen {
 /** Parameters for the in-memory smoke-test of a freshly issued key. */
 export interface SmokeTestParams {
   endpoint: string;
-  region: string;
   bucket: string;
   cred: S3Credential;
 }

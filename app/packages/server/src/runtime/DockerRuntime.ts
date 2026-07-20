@@ -30,6 +30,14 @@ import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
 const LABEL = "p0rt1on=1";
 
+/**
+ * The docker network the manager and every instance join, so a containerized
+ * manager can reach an instance by container name. Created out-of-band
+ * (`docker network create p0rt1on-net`) and shared by both sides — a name only
+ * both halves of this repo need to agree on.
+ */
+export const DOCKER_NETWORK = "p0rt1on-net";
+
 /** `docker run` resource flags for the set fields only (native values). */
 function resourceArgs(r: ContainerRunSpec["resources"]): string[] {
   return [

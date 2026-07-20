@@ -12,7 +12,6 @@ import {
 describe("McSmokeTester", () => {
   const PARAMS: SmokeTestParams = {
     endpoint: "http://127.0.0.1:9100",
-    region: "us-east-1",
     bucket: "alice",
     cred: { accessKeyId: "AK", secretKey: "SK" },
   };

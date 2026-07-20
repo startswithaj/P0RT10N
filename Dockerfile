@@ -33,10 +33,9 @@ COPY drizzle ./drizzle
 RUN deno cache app/packages/server/src/main.ts
 
 # Build the SPA (Panda codegen + Vite) into packages/server/dist; the server
-# serves it from STATIC_DIR at runtime (see server.ts). Dev uses the Vite dev
+# finds it there at runtime and serves it (see main.ts). Dev uses the Vite dev
 # server instead (Dockerfile.dev), so this step is production-only.
 RUN deno task --cwd app/packages/client build
-ENV STATIC_DIR=/app/app/packages/server/dist
 
 EXPOSE 8080
 # Loopback-only admin surface; publish via the compose port mapping.

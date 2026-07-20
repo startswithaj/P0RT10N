@@ -10,7 +10,6 @@ describe("JobService", () => {
   const bundle: FriendBundle = {
     name: "alice",
     s3Endpoint: "https://alice.ts.net",
-    region: "us-east-1",
     bucket: "backup",
     s3AccessKeyId: "AK",
     s3SecretKey: "SK",

@@ -14,9 +14,10 @@ cd "$(dirname "$0")/.."
 
 MODE="${1:-all}"
 MANAGER_IMAGE="${MANAGER_IMAGE:-p0rt1on-manager:it}"
-INSTANCE_IMAGE="${INSTANCE_IMAGE:-p0rt1on-instance:it}"
+INSTANCE_IMAGE="${P0RT1ON_INSTANCE_IMAGE:-p0rt1on-instance:it}"
 CLIENT_IMAGE="${CLIENT_IMAGE:-p0rt1on-backup-client:it}"
-NETWORK="${P0RT1ON_NETWORK:-p0rt1on-net}"
+# Fixed in the runtime (DOCKER_NETWORK) — instances always join this one.
+NETWORK="p0rt1on-net"
 
 # Local convenience only: CI injects these as secrets instead. `set -a` exports
 # everything sourced, which is what the test reads.
@@ -39,8 +40,7 @@ if [ "$MODE" = "all" ]; then
 fi
 
 MANAGER_IMAGE="$MANAGER_IMAGE" \
-  INSTANCE_IMAGE="$INSTANCE_IMAGE" \
+  P0RT1ON_INSTANCE_IMAGE="$INSTANCE_IMAGE" \
   CLIENT_IMAGE="$CLIENT_IMAGE" \
-  P0RT1ON_NETWORK="$NETWORK" \
   deno test --allow-read --allow-write --allow-env --allow-net --allow-run \
   integration-tests/Provisioning.docker.integration.test.ts

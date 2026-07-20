@@ -33,7 +33,7 @@ const defaultSink: LogSink = (level, line) => CONSOLE_FN[level](line);
 /**
  * Leveled structured logger. Format: `<iso> <LEVEL> <message> <json-meta>`.
  * `child` clones with merged bindings so a flow's IDs ride along on every line.
- * The threshold is configured at the edge (main.ts reads LOG_LEVEL) to keep
+ * The threshold is configured at the edge (main.ts reads the log level) to keep
  * this class env-free and unit-testable.
  */
 export class ConsoleLogger implements Logger {

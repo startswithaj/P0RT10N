@@ -20,7 +20,6 @@ die() { echo "[p0rt1on-backup] ERROR: $*" >&2; exit 1; }
 : "${BACKUP_PATH:?BACKUP_PATH is required (path inside the container to back up, e.g. /data)}"
 
 # Optional, with defaults.
-S3_REGION="${S3_REGION:-us-east-1}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 # Defaults to the bucket name so every cron run shares one stable identity — both
 # as the tailnet node name and as the Kopia snapshot source (see overrides below).
@@ -108,7 +107,6 @@ fi
 if kopia repository connect s3 \
   --bucket="$S3_BUCKET" \
   --endpoint="$S3_HOST" \
-  --region="$S3_REGION" \
   --access-key="$S3_ACCESS_KEY_ID" \
   --secret-access-key="$S3_SECRET_ACCESS_KEY" \
   --override-username=p0rt1on \
@@ -121,7 +119,6 @@ else
   kopia repository create s3 \
     --bucket="$S3_BUCKET" \
     --endpoint="$S3_HOST" \
-    --region="$S3_REGION" \
     --access-key="$S3_ACCESS_KEY_ID" \
     --secret-access-key="$S3_SECRET_ACCESS_KEY" \
     --retention-mode=GOVERNANCE \

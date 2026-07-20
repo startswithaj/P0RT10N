@@ -42,7 +42,8 @@ mc CLI           │  McShellClient               │
   `mc retention set`, `mc admin config set audit_webhook`, `mc du`.
 - Manager reaches MinIO over the admin plane — never the tailnet. Endpoint is
   composed in ONE place (`runtime/adminEndpoint.ts`, exposed as
-  `McClientFactory.adminEndpoint`), mode-picked by `INSTANCE_ADDRESSING`:
+  `McClientFactory.adminEndpoint`), mode-picked by
+  `P0RT1ON_INSTANCE_ADDRESSING`:
   - `host` (default) — `http://127.0.0.1:<port>` via the loopback publish.
   - `network` — `http://p0rt1on-instance-<alias>:<port>` over the shared docker
     network (containerized manager; loopback publishes are unreachable
@@ -50,8 +51,9 @@ mc CLI           │  McShellClient               │
 
 ### MinIO events — `src/minio-events/`
 
-- Instances POST audit webhooks to a dedicated listener (`MINIO_EVENT_PORT`
-  :8081, `/internal/minio-events`, token-guarded) — never the admin API.
+- Instances POST audit webhooks to a dedicated listener (fixed :8081,
+  `EVENT_PORT` in `lib/Env.ts`, `/internal/minio-events`, token-guarded) — never
+  the admin API.
 - The sink just `bus.publish(raw)`. `MinioEventBus` fans each RAW payload to N
   independent subscribers via bounded, drop-oldest queues — a slow consumer
   never back-pressures ingestion. A 204 means "enqueued", not "persisted"
@@ -75,21 +77,24 @@ mc CLI           │  McShellClient               │
   - `UsageSampler` — debounces `mc du` off the same stream (a peer, NOT chained
     off the aggregator).
   - `MinioEventForwarder` — ships RAW payloads byte-identical to
-    `MINIO_FORWARD_URL` (optional; `MINIO_FORWARD_AUTHORIZATION` sent verbatim),
-    mirroring MinIO's client (retry 5×1s, best-effort, failures logged).
+    `P0RT1ON_MINIO_FORWARD_URL` (optional; `P0RT1ON_MINIO_FORWARD_AUTHORIZATION`
+    sent verbatim), mirroring MinIO's client (retry 5×1s, best-effort, failures
+    logged).
 
 ### Runtimes — `src/runtime/`
 
 `InstanceRuntime` is the only seam; callers speak domain language (a tripwire
 test bans docker literals outside `runtime/`). Selected by
-`RUNTIME=docker|kubernetes` (default docker) in `app.ts` only.
+`P0RT1ON_RUNTIME=docker|kubernetes` (default docker) in `app.ts` only.
 
 - **docker** (`DockerRuntime.ts`) — one container per instance; volume
-  names/network/env-file secret transport all derived inside the runtime.
-  - Per-portion CPU/memory via `PORTION_DOCKER_CPU_REQUEST` (→ `--cpu-shares`) /
-    `PORTION_DOCKER_CPU_LIMIT` (→ `--cpus`) / `PORTION_DOCKER_MEMORY_REQUEST` (→
-    `--memory-reservation`) / `PORTION_DOCKER_MEMORY_LIMIT` (→ `--memory`); all
-    optional, unset = no cap.
+  names/network/env-file secret transport all derived inside the runtime. The
+  network is the `DOCKER_NETWORK` constant (`p0rt1on-net`), created out-of-band
+  and joined by both sides — not configurable.
+  - Per-portion CPU/memory via `P0RT1ON_PORTION_DOCKER_CPU_REQUEST` (→
+    `--cpu-shares`) / `_CPU_LIMIT` (→ `--cpus`) / `_MEMORY_REQUEST` (→
+    `--memory-reservation`) / `_MEMORY_LIMIT` (→ `--memory`); all optional,
+    unset = no cap.
 - **kubernetes** (`KubernetesRuntime.ts`) — typed `@cloudydeno` client
   (`CoreV1Api`/`AppsV1Api` over a `RestClient`), no kubectl; per instance:
   StatefulSet(1) + Service + Secret + 2 PVCs.
@@ -100,14 +105,13 @@ test bans docker literals outside `runtime/`). Selected by
   - Reads/scale avoid subresources the Role doesn't grant: pod health uses
     `getPod` (not `getPodStatus` → `pods/status`), suspend/resume json-patch
     `/spec/replicas` on the main StatefulSet (not the `/scale` subresource).
-  - Per-portion CPU/memory via `PORTION_K8S_CPU_REQUEST`/`_CPU_LIMIT`/
+  - Per-portion CPU/memory via `P0RT1ON_PORTION_K8S_CPU_REQUEST`/`_CPU_LIMIT`/
     `_MEMORY_REQUEST`/`_MEMORY_LIMIT` (native k8s values → container
     `resources.requests`/`.limits`); all optional, unset = no block.
   - `buildRestClient()` auto-detects the mounted in-cluster SA (token + CA +
-    server) via `forInCluster`, or takes explicit `K8S_API`/`K8S_TOKEN`/
-    `K8S_CA_FILE` for dev — no more `DENO_CERT`. Config:
-    `K8S_NAMESPACE/K8S_API/K8S_TOKEN/K8S_CA_FILE/
-    K8S_DATA_SIZE/K8S_STATE_SIZE/K8S_STORAGE_CLASS`.
+    server) via `forInCluster`, or takes explicit `P0RT1ON_K8S_API`/`_TOKEN`/
+    `_CA_FILE` for dev — no more `DENO_CERT`. Config (all `P0RT1ON_K8S_`
+    prefixed): `NAMESPACE/API/TOKEN/CA_FILE/DATA_SIZE/STATE_SIZE/STORAGE_CLASS`.
   - Verified on k3d by `integration-tests/run-integration.sh` (no secrets needed
     — an in-cluster HEADSCALE is the control plane; REAL images only): runtime
     tier (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection,
@@ -124,29 +128,30 @@ test bans docker literals outside `runtime/`). Selected by
     `tier1` / `tier2` — test iterations reuse the fixed images. Still pending
     the nightly real-Tailscale tier: serve over HTTPS (headscale issues no
     certs).
-  - `serveMode` (`https`|`http`, from `TAILSCALE_SERVE_MODE`) drives THREE
-    things in lockstep: the instance's serve port (443/80), the friend endpoint
-    scheme, and the ACL grant port — all from one env value so they can't drift.
+  - `serveMode` (`https`|`http`, from `P0RT1ON_TAILSCALE_SERVE_MODE`) drives
+    THREE things in lockstep: the instance's serve port (443/80), the friend
+    endpoint scheme, and the ACL grant port — all from one env value so they
+    can't drift.
 
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 
-- REST API v2 only (`TAILSCALE_OAUTH_CLIENT_SECRET`). No LocalAPI, no tsnet in
-  the manager.
+- REST API v2 only (`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`). No LocalAPI, no
+  tsnet in the manager.
 - Ops used: mint pre-tagged single-use auth keys, edit ACLs/tagOwners,
   list/delete nodes.
 
 ### Headscale — `src/tailscale/HeadscaleHttpApi.ts`
 
 - Second `TailscaleApi` impl over headscale's v1 REST API; selected by
-  `TAILSCALE_BACKEND=headscale` (`HEADSCALE_URL/API_KEY/USER` required instead
-  of the OAuth secret). The integration-test control plane.
+  `P0RT1ON_TAILSCALE_BACKEND=headscale` (`P0RT1ON_HEADSCALE_URL/_API_KEY/_USER`
+  required instead of the OAuth secret). The integration-test control plane.
 - API quirks handled: numeric user ids (name resolved per call), expire preauth
   keys by key string, classic `acls` policy as a JSON string (needs headscale
   `policy.mode: database`), first-ever policy GET is a 500 "not found" (=
   empty), tags deduped across forced/valid lists.
 - No HTTPS cert issuance → instances run `tailscale serve` in HTTP mode: set
-  `TAILSCALE_LOGIN_SERVER` + `TAILSCALE_SERVE_MODE=http` (plumbed to instance
-  env via `Env.instanceTailscale()` → both runtimes).
+  `P0RT1ON_TAILSCALE_LOGIN_SERVER` + `P0RT1ON_TAILSCALE_SERVE_MODE=http`
+  (plumbed to instance env via `Env.instanceTailscale()` → both runtimes).
 
 ### Instances — `instance/Dockerfile`, `entrypoint.sh`
 

@@ -470,7 +470,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     });
     await this.smokeTester.run({
       endpoint: adminEndpoint,
-      region: this.config.region,
       bucket: naming.bucket,
       cred,
     });
@@ -951,7 +950,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return {
       name: input.name,
       s3Endpoint: endpoint,
-      region: this.config.region,
       bucket: naming.bucket,
       s3AccessKeyId: cred.accessKeyId,
       s3SecretKey: cred.secretKey,
@@ -978,7 +976,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       warnings: warnings.length > 0 ? warnings : undefined,
       name: ctx.name,
       s3Endpoint: endpoint,
-      region: this.config.region,
       bucket: ctx.bucket,
       s3AccessKeyId: cred.accessKeyId,
       s3SecretKey: cred.secretKey,
@@ -1026,7 +1023,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       `kopia repository ${create ? "create" : "connect"} s3 \\`,
       `  --bucket=${opts.bucket} \\`,
       `  --endpoint=${host} \\`,
-      `  --region=${this.config.region} \\`,
       `  --access-key=${opts.cred.accessKeyId} \\`,
       lastCredFlag,
       ...tail,

@@ -2,7 +2,7 @@
 # launches the combined instance containers against the host's Docker daemon
 # (socket mounted). Because the manager is itself a container, it reaches each
 # instance's MinIO admin plane by CONTAINER NAME over the shared `p0rt1on-net`
-# network (INSTANCE_ADDRESSING=network) — a loopback-published port is
+# network (P0RT1ON_INSTANCE_ADDRESSING=network) — a loopback-published port is
 # unreachable from another container. Instances POST the audit webhook back via
 # the host gateway.
 #
@@ -10,8 +10,8 @@
 # manager launches over the docker socket):
 #   docker network create p0rt1on-net
 #
-# Needs a .env with at least P0RT1ON_MASTER_KEY, TAILSCALE_OAUTH_CLIENT_SECRET,
-# and TAILNET_DOMAIN.
+# Needs a .env with at least P0RT1ON_MASTER_KEY,
+# P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET and P0RT1ON_TAILSCALE_TAILNET_DOMAIN.
 services:
   manager:
     build:
@@ -22,15 +22,14 @@ services:
     user: root
     environment:
       # Container overrides (the app's own defaults suit host-run dev).
-      # The admin API binds loopback unconditionally; only the dedicated MinIO
-      # event webhook listener (MINIO_EVENT_PORT) faces the container network.
-      # Reach instances by container name over p0rt1on-net (see networks below).
-      INSTANCE_ADDRESSING: "network"
-      AUDIT_WEBHOOK_URL: "http://host.docker.internal:8081/internal/minio-events"
-      DB_PATH: "/app/data/p0rt1on.db"
+      # The admin API binds loopback unconditionally; only the dedicated audit
+      # webhook listener (fixed at 8081) faces the container network. Reach
+      # instances by container name over p0rt1on-net (see networks below).
+      P0RT1ON_INSTANCE_ADDRESSING: "network"
+      P0RT1ON_DB_PATH: "/app/data/p0rt1on.db"
       # Forward every MinIO event to your own webhook (optional, byte-identical):
-      # MINIO_FORWARD_URL: "https://example.com/minio-events"
-      # MINIO_FORWARD_AUTHORIZATION: "Bearer your-token"
+      # P0RT1ON_MINIO_FORWARD_URL: "https://example.com/minio-events"
+      # P0RT1ON_MINIO_FORWARD_AUTHORIZATION: "Bearer your-token"
     ports:
       - "127.0.0.1:8080:8080" # admin API — loopback only (Vite proxies here)
       - "8081:8081" # audit webhook — instances POST via the host gateway
@@ -52,7 +51,8 @@ volumes:
   p0rt1on-mc:
 
 networks:
-  # The network instances join (P0RT1ON_NETWORK). Created out-of-band:
+  # The network instances join (DOCKER_NETWORK in DockerRuntime.ts). Created
+  # out-of-band:
   #   docker network create p0rt1on-net
   p0rt1on-net:
     external: true

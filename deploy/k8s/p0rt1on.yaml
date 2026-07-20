@@ -7,8 +7,8 @@
 #   kubectl apply -f deploy/k8s/p0rt1on.yaml
 #
 # Prereqs: build/push the manager + instance images somewhere the cluster can
-# pull; set P0RT1ON_MASTER_KEY + TAILSCALE_OAUTH_CLIENT_SECRET in the
-# `p0rt1on-manager-secrets` Secret below. StorageClass: reclaimPolicy Retain
+# pull; fill in the `p0rt1on-manager-secrets` Secret below (master key, OAuth
+# client secret, tag owner, tailnet domain). StorageClass: reclaimPolicy Retain
 # recommended — offboard deletes the PVC but the PV survives until a human
 # confirms (kinder-than-docker semantics for a backup product).
 apiVersion: v1
@@ -67,7 +67,9 @@ metadata:
   namespace: p0rt1on
 stringData:
   P0RT1ON_MASTER_KEY: "CHANGE-ME"
-  TAILSCALE_OAUTH_CLIENT_SECRET: "CHANGE-ME"
+  P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "CHANGE-ME"
+  P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on"
+  P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "CHANGE-ME"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -103,19 +105,15 @@ spec:
           envFrom:
             - secretRef: { name: p0rt1on-manager-secrets }
           env:
-            - name: RUNTIME
+            - name: P0RT1ON_RUNTIME
               value: kubernetes
-            - name: K8S_NAMESPACE
+            - name: P0RT1ON_K8S_NAMESPACE
               value: p0rt1on
-            - name: DB_PATH
+            - name: P0RT1ON_DB_PATH
               value: /data/p0rt1on.db
             # Trust the cluster CA for API calls (Deno reads this PEM).
             - name: DENO_CERT
               value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-            # Instances POST audit events to the manager Service in-cluster —
-            # no host-gateway anywhere.
-            - name: AUDIT_WEBHOOK_URL
-              value: http://p0rt1on-manager.p0rt1on.svc:8081/internal/minio-events
           ports:
             - containerPort: 8080 # admin UI/API (loopback-only by design;
             # reach it via `kubectl port-forward` — do NOT expose it)

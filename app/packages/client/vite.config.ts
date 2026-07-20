@@ -40,6 +40,6 @@ export default defineConfig({
     },
   },
   // Build the SPA into the server package so the production image serves it
-  // from there (STATIC_DIR); mirrors how the manager locates the assets.
+  // from there; the server finds ../dist next to itself (see main.ts).
   build: { outDir: "../server/dist", emptyOutDir: true },
 });

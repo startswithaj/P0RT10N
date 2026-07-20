@@ -82,13 +82,13 @@ jobs:
       # Only the OAuth client secret is a credential. The MagicDNS name and the
       # tag owner are public policy identifiers, so they are repo VARIABLES —
       # secrets are for things that grant access.
-      TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
-      TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
+      P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+      P0RT1ON_TAILSCALE_TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
       # Who owns each friend tag in the CI tailnet's `tagOwners` — set it to
       # that tailnet's OAuth client tag (e.g. `tag:p0rt1on`). REQUIRED: the
       # client can only mint keys for tags it owns.
-      TAILSCALE_TAG_OWNER: ${{ vars.TAILSCALE_TAG_OWNER }}
-      ADMIN_USERNAME: p0rt1on-it
+      P0RT1ON_TAILSCALE_TAG_OWNER: ${{ vars.TAILSCALE_TAG_OWNER }}
+      P0RT1ON_ADMIN_USERNAME: p0rt1on-it
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -102,7 +102,7 @@ jobs:
           KEY="$(openssl rand -hex 32)"; PW="$(openssl rand -hex 16)"
           echo "::add-mask::$KEY"; echo "::add-mask::$PW"
           echo "P0RT1ON_MASTER_KEY=$KEY" >> "$GITHUB_ENV"
-          echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
+          echo "P0RT1ON_ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
       - name: Portion e2e over the real tailnet (builds all three images)
         # Proves what headscale structurally cannot: `tailscale serve` over
         # HTTPS with a real cert, and a friend backing up across the tailnet.

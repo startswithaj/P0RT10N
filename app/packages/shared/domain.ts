@@ -173,7 +173,6 @@ export type UsageHistoryInput = z.infer<typeof usageHistoryInput>;
 export type FriendBundle = {
   name: string;
   s3Endpoint: string;
-  region: string;
   bucket: string;
   s3AccessKeyId: string;
   s3SecretKey: string; // shown once
