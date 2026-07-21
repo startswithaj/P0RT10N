@@ -285,8 +285,10 @@ export type ServiceStatus = {
   name: string;
   detail: string;
   /** `provisioning` while coming up (not yet healthy); `pending` while being
-   * torn down (instance `reaping`) — transitional, not a fault. */
-  state: "up" | "provisioning" | "pending" | "down";
+   * torn down (instance `reaping`) — transitional, not a fault. `lost` is a
+   * down instance whose DATA is also gone — its backups are unrecoverable, a
+   * far worse state than a transiently `down` instance whose data survives. */
+  state: "up" | "provisioning" | "pending" | "down" | "lost";
   /** Instance hostname for `status.diagnose`; absent for host rows. */
   instance?: string;
 };

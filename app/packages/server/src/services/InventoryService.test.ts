@@ -11,8 +11,9 @@ import { noopLogger } from "../test-helpers/mocks.ts";
 describe("RuntimeInventoryService", () => {
   const runtimeWith = (
     healthFor: (name: string) => InstanceHealth,
+    hasData = true,
   ): InstanceRuntime => ({
-    ...mockInstanceRuntime([], { healthFor }),
+    ...mockInstanceRuntime([], { healthFor, hasDataFor: () => hasData }),
     diagnoseInstance: (name) =>
       Promise.resolve({
         // Diagnostics carry the real (container) resource name.
@@ -34,10 +35,10 @@ describe("RuntimeInventoryService", () => {
     tsTag: "tag:p0rt1on-serve",
   });
 
-  const svcOf = (health: InstanceHealth, status = "active") =>
+  const svcOf = (health: InstanceHealth, status = "active", hasData = true) =>
     new RuntimeInventoryService(
       { instancesForStatus: () => Promise.resolve([instance(status)]) },
-      runtimeWith(() => health),
+      runtimeWith(() => health, hasData),
       "tail1a2b.ts.net",
       noopLogger(),
     );
@@ -69,10 +70,22 @@ describe("RuntimeInventoryService", () => {
     expect(snap.tailscale[0].state).toBe("pending");
   });
 
-  it("unhealthy → down on both rows", async () => {
+  it("unhealthy but data survives → down (recoverable) on both rows", async () => {
     const snap = await svcOf("unhealthy").snapshot();
     expect(snap.minio[0].state).toBe("down");
     expect(snap.tailscale[0].state).toBe("down");
+  });
+
+  it("unhealthy AND data gone → lost (backups unrecoverable)", async () => {
+    const snap = await svcOf("unhealthy", "failed", false).snapshot();
+    expect(snap.minio[0].state).toBe("lost");
+    expect(snap.tailscale[0].state).toBe("lost");
+  });
+
+  it("a provisioning instance with no data yet is provisioning, never lost", async () => {
+    // Empty pantry dir during provisioning must not read as data loss.
+    const snap = await svcOf("unknown", "provisioning", false).snapshot();
+    expect(snap.minio[0].state).toBe("provisioning");
   });
 
   it("diagnose delegates to the runtime by instance name", async () => {

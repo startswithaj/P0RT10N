@@ -21,10 +21,12 @@ export interface StatusInstances {
   instancesForStatus(): Promise<StatusInstanceRow[]>;
 }
 
-/** Container health + DB status → the tri-state shown on the Status page. */
+/** Container health + DB status (+ whether the data survives) → the Status-page
+ * state. `dataGone` only matters once an instance is otherwise "down". */
 function serviceState(
   health: InstanceHealth,
   dbStatus: string,
+  dataGone: boolean,
 ): ServiceStatus["state"] {
   if (health === "healthy") return "up";
   // Reaping is teardown-in-progress: the container is going away on purpose, so
@@ -33,6 +35,9 @@ function serviceState(
   if (health === "starting" || dbStatus === "provisioning") {
     return "provisioning";
   }
+  // Down AND the data is gone ⇒ the backups are unrecoverable — a distinct,
+  // louder state than a down instance whose pantry data survives (recoverable).
+  if (dataGone) return "lost";
   return "down";
 }
 
@@ -77,7 +82,11 @@ export class RuntimeInventoryService implements InventoryService {
     // runtime-agnostic interface.
     const names = containerNames(inst.tsHostname);
     const health = await this.runtime.instanceHealth(inst.tsHostname);
-    const state = serviceState(health, inst.status);
+    // Only a not-healthy instance can be "lost"; healthy ones skip the extra
+    // storage check. Data gone (pantry dir / data PVC) while down = backups lost.
+    const dataGone = health !== "healthy" &&
+      !(await this.runtime.hasData(inst.tsHostname));
+    const state = serviceState(health, inst.status, dataGone);
     return {
       minio: {
         name: names.container,

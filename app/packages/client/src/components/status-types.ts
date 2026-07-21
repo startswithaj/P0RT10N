@@ -2,7 +2,8 @@
 
 // `pending` = teardown-in-progress (reaping): the container is going away on
 // purpose, so a failing health probe is expected — shown as transient, not down.
-export type SvcState = "up" | "provisioning" | "pending" | "down";
+// `lost` = down AND the data is gone: the backups are unrecoverable.
+export type SvcState = "up" | "provisioning" | "pending" | "down" | "lost";
 export type Svc = {
   name: string;
   detail: string;
@@ -14,5 +15,6 @@ export function stateLabel(s: SvcState): string {
   if (s === "up") return "Up";
   if (s === "provisioning") return "Provisioning";
   if (s === "pending") return "Offboarding";
+  if (s === "lost") return "Data lost";
   return "Down";
 }

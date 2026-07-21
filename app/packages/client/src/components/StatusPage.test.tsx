@@ -48,6 +48,7 @@ describe("StatusPage", () => {
             makeService({ name: "alice-minio", state: "up" }),
             makeService({ name: "bob-minio", state: "provisioning" }),
             makeService({ name: "carol-minio", state: "down" }),
+            makeService({ name: "dave-minio", state: "lost" }),
           ],
           tailscale: [],
           host: [],
@@ -59,6 +60,8 @@ describe("StatusPage", () => {
       expect(await screen.findByText("Up")).toBeInTheDocument();
       expect(screen.getByText("Provisioning")).toBeInTheDocument();
       expect(screen.getByText("Down")).toBeInTheDocument();
+      // Data loss reads distinctly from a recoverable "Down".
+      expect(screen.getByText("Data lost")).toBeInTheDocument();
     });
   });
 
