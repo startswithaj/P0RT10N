@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DockerInstanceRuntime, DockerRuntime } from "./DockerRuntime.ts";
+import type { Pantry } from "./pantry.ts";
 import type {
   ContainerHandle,
   ContainerRunSpec,
@@ -316,6 +317,24 @@ describe("DockerInstanceRuntime", () => {
     };
   }
 
+  // Fake pantry: records its calls and hands back a deterministic host path,
+  // so tests can assert both the bind-mount source and the create/delete wiring
+  // without touching the filesystem (HostPantry's real fs is unit-tested in
+  // pantry.test.ts).
+  function recordingPantry(calls: string[], root = "/pantry"): Pantry {
+    return {
+      dataDir: (h) => `${root}/${h}`,
+      ensure: (h) => {
+        calls.push(`pantry.ensure:${h}`);
+        return Promise.resolve();
+      },
+      remove: (h) => {
+        calls.push(`pantry.remove:${h}`);
+        return Promise.resolve();
+      },
+    };
+  }
+
   function build(
     calls: string[],
     written: string[] = [],
@@ -324,6 +343,7 @@ describe("DockerInstanceRuntime", () => {
     return new DockerInstanceRuntime(runtime, fakeTempFiles(written), {
       network: "p0rt1on-net",
       addressing: "host",
+      pantry: recordingPantry(calls),
     });
   }
 
@@ -333,7 +353,11 @@ describe("DockerInstanceRuntime", () => {
     const networked = new DockerInstanceRuntime(
       recordingRuntime([]),
       fakeTempFiles([]),
-      { network: "p0rt1on-net", addressing: "network" },
+      {
+        network: "p0rt1on-net",
+        addressing: "network",
+        pantry: recordingPantry([]),
+      },
     );
     expect(networked.adminEndpoint("alice", 9100))
       .toBe("http://p0rt1on-instance-alice:9100");
@@ -359,11 +383,20 @@ describe("DockerInstanceRuntime", () => {
       tsHostname: "alice",
       tag: "tag:p0rt1on-serve",
       minioPort: 9100,
-      dataVolume: "p0rt1on-data-alice",
-      stateVolume: "p0rt1on-tsstate-alice",
+      // Data mounts the pantry directory; tailscale state stays a named volume.
+      dataSource: "/pantry/alice",
+      stateSource: "p0rt1on-tsstate-alice",
       rootCredSecretRef: "/fake/policy.json",
       network: "p0rt1on-net",
     });
+  });
+
+  it("ensureInstance creates the pantry directory before the run", async () => {
+    const calls: string[] = [];
+    await build(calls).ensureInstance(INSTANCE);
+    // The directory must exist before the container mounts it.
+    expect(calls.indexOf("pantry.ensure:alice"))
+      .toBeLessThan(calls.indexOf("ensureInstance:p0rt1on-instance-alice"));
   });
 
   it("writes root creds + auth key to a temp env-file, removed even on failure", async () => {
@@ -388,7 +421,11 @@ describe("DockerInstanceRuntime", () => {
           return Promise.resolve();
         },
       },
-      { network: "p0rt1on-net", addressing: "host" },
+      {
+        network: "p0rt1on-net",
+        addressing: "host",
+        pantry: recordingPantry([]),
+      },
     );
     await expect(failing.ensureInstance(INSTANCE)).rejects.toThrow(
       "engine down",
@@ -411,6 +448,7 @@ describe("DockerInstanceRuntime", () => {
       {
         network: "p0rt1on-net",
         addressing: "host",
+        pantry: recordingPantry([]),
         tailscale: { loginServer: "http://hs:8080", serveMode: "http" },
       },
     );
@@ -433,11 +471,20 @@ describe("DockerInstanceRuntime", () => {
     expect(calls).toEqual([
       "stop:p0rt1on-instance-alice",
       "remove:p0rt1on-instance-alice:true",
-      // Current single volume + the legacy 4-volume names (pre-SNSD
-      // instances) + state — removeVolumes ignores whichever are absent.
-      "removeVolumes:p0rt1on-data-alice,p0rt1on-data-alice-1," +
-      "p0rt1on-data-alice-2,p0rt1on-data-alice-3,p0rt1on-data-alice-4," +
-      "p0rt1on-tsstate-alice",
+      // State (named volume) + the current & legacy named DATA volumes so a
+      // pre-pantry instance reaps fully — removeVolumes ignores whichever are
+      // absent. The pantry directory is deleted separately, below.
+      "removeVolumes:p0rt1on-tsstate-alice,p0rt1on-data-alice," +
+      "p0rt1on-data-alice-1,p0rt1on-data-alice-2,p0rt1on-data-alice-3," +
+      "p0rt1on-data-alice-4",
+      "pantry.remove:alice",
     ]);
+  });
+
+  it("removeInstance without removeData keeps the container's data", async () => {
+    const calls: string[] = [];
+    await build(calls).removeInstance("alice", { removeData: false });
+    // Container gone, but no volume reap and no pantry delete — the data stays.
+    expect(calls).toEqual(["remove:p0rt1on-instance-alice:false"]);
   });
 });

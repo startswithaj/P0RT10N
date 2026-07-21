@@ -190,6 +190,10 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           namespace,
           dataSize: "50Mi",
           stateSize: "10Mi",
+          // k3d's built-in class stands in for the pantry here; the state PVC
+          // uses the cluster default (also local-path). The point of this tier
+          // is real provisioning, not which disk each class lands on.
+          pantryStorageClass: "local-path",
           // The instance joins the local headscale tailnet; headscale issues
           // no HTTPS certs, so serve falls back to plain HTTP.
           tailscale: { loginServer: headscaleUrl, serveMode: "http" },

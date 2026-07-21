@@ -88,7 +88,7 @@ choice (Kopia recommended; any S3 client works).
 ## Quick start (manager)
 
 ```bash
-cp .env.example .env   # fill in the four required values; everything else has a default
+cp .env.example .env   # fill in the required values; everything else has a default
 docker compose up
 ```
 
@@ -98,9 +98,10 @@ docker compose up
   and two volumes: the metadata DB and `mc` aliases. The provided
   `docker-compose.yml` wires all of this, including the audit-webhook path from
   instances back to the manager.
-- Four settings are required — the master key, the OAuth client secret, the tag
-  owner and your tailnet domain. The manager refuses to start without them (no
-  stubs, no degraded mode); `.env.example` explains each one.
+- A handful of settings are required — the master key, the OAuth client secret,
+  the tag owner, your tailnet domain, and the pantry (where friend data is
+  stored). The manager refuses to start without them (no stubs, no degraded
+  mode); `.env.example` explains each one.
 
 ## Setup — Tailscale OAuth client
 
@@ -193,9 +194,10 @@ a leaked client can only mint friend-tagged keys — never grant them new reach.
 
 ### 4. Environment
 
-Copy `.env.example` to `.env` (gitignored) and fill in the four required values:
-the master key, the OAuth client **secret** from step 2 (not a personal API
-token), the tag owner you attached to it, and your tailnet's MagicDNS name. Set
+Copy `.env.example` to `.env` (gitignored) and fill in the required values: the
+master key, the OAuth client **secret** from step 2 (not a personal API token),
+the tag owner you attached to it, your tailnet's MagicDNS name, and the pantry
+(the disk path where friend data is stored). Set
 `P0RT1ON_TAILSCALE_ACL_MODE=manual` as well if you skipped the Policy File
 permission (step 3). Every setting is explained in `.env.example` itself.
 

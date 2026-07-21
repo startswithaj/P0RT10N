@@ -13,6 +13,7 @@ import {
   DockerInstanceRuntime,
   DockerRuntime,
 } from "./runtime/DockerRuntime.ts";
+import { HostPantry } from "./runtime/pantry.ts";
 import {
   buildRestClient,
   KubernetesRuntime,
@@ -68,7 +69,7 @@ async function buildInstanceRuntime(
       namespace: settings.namespace,
       dataSize: settings.dataSize,
       stateSize: settings.stateSize,
-      storageClass: settings.storageClass,
+      pantryStorageClass: env.pantry,
       tailscale: env.instanceTailscale(),
       resources: settings.resources,
     }, client);
@@ -76,6 +77,7 @@ async function buildInstanceRuntime(
   return new DockerInstanceRuntime(new DockerRuntime(runner), tempFiles, {
     network: DOCKER_NETWORK,
     addressing: env.provisioningConfig().instanceAddressing,
+    pantry: new HostPantry(env.pantry),
     tailscale: env.instanceTailscale(),
     resources: env.dockerPortionResources(),
   });

@@ -12,6 +12,7 @@ import type {
 } from "./runtime.ts";
 import { tailscaleEnv } from "./runtime.ts";
 import { containerNames } from "./names.ts";
+import type { Pantry } from "./pantry.ts";
 import {
   adminEndpointComposer,
   type InstanceAddressing,
@@ -137,9 +138,9 @@ export class DockerRuntime implements ContainerRuntime {
       "-p",
       `127.0.0.1:${spec.minioPort}:${spec.minioPort}`,
       "-v",
-      `${spec.dataVolume}:/data`,
+      `${spec.dataSource}:/data`,
       "-v",
-      `${spec.stateVolume}:/var/lib/tailscale`,
+      `${spec.stateSource}:/var/lib/tailscale`,
       // The env-file also carries TAILSCALE_AUTHKEY — an enrollment credential
       // must never ride the argv (visible to every process via `ps`).
       "--env-file",
@@ -327,6 +328,10 @@ export class DockerRuntime implements ContainerRuntime {
  * Owns every docker-ism the domain `InstanceSpec` no longer carries: derived
  * container/volume names, the docker network, and the secret transport (a
  * temp env-file written before `docker run`, removed in `finally`).
+ *
+ * MinIO data lives in the pantry (a host directory on the admin's chosen disk);
+ * tailscale node state stays in a docker named volume, off the pantry, so the
+ * pantry holds friend backup data only.
  */
 export class DockerInstanceRuntime implements InstanceRuntime {
   constructor(
@@ -335,6 +340,7 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     private readonly config: {
       network: string;
       addressing: InstanceAddressing;
+      pantry: Pantry;
       tailscale?: InstanceTailscaleOptions;
       resources?: DockerResources;
     },
@@ -349,6 +355,8 @@ export class DockerInstanceRuntime implements InstanceRuntime {
 
   async ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
     const names = containerNames(spec.name);
+    // Create the friend's pantry directory before the container mounts it.
+    await this.config.pantry.ensure(spec.name);
     // MinIO root creds + the serve auth key ride a short-lived env-file for
     // `docker run` (baked into the container, file removed after) — an
     // enrollment credential must never ride the argv (host-visible via ps).
@@ -369,8 +377,10 @@ export class DockerInstanceRuntime implements InstanceRuntime {
         tsHostname: spec.name,
         tag: spec.tag,
         minioPort: spec.minioPort,
-        dataVolume: names.dataVolume,
-        stateVolume: names.stateVolume,
+        // Data mounts the pantry directory; tailscale state stays a named
+        // volume, deliberately off the pantry.
+        dataSource: this.config.pantry.dataDir(spec.name),
+        stateSource: names.stateVolume,
         rootCredSecretRef: envFile,
         network: this.config.network,
         resources: this.config.resources,
@@ -434,14 +444,16 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     await this.runtime.remove(names.container, {
       removeVolume: opts.removeData,
     });
-    if (opts.removeData) {
-      // Legacy 4-volume names included so pre-SNSD instances reap fully;
-      // removeVolumes ignores absent names.
-      await this.runtime.removeVolumes([
-        names.dataVolume,
-        ...names.legacyDataVolumes,
-        names.stateVolume,
-      ]);
-    }
+    if (!opts.removeData) return;
+    // Tailscale state is a named volume; MinIO data is the pantry directory,
+    // deleted separately. The current + legacy named DATA volume names are
+    // reaped too so a pre-pantry instance still tears down fully;
+    // removeVolumes ignores absent names.
+    await this.runtime.removeVolumes([
+      names.stateVolume,
+      names.dataVolume,
+      ...names.legacyDataVolumes,
+    ]);
+    await this.config.pantry.remove(instanceName);
   }
 }

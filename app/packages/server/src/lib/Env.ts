@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve } from "@std/path";
 import type { LogLevel } from "../services/types.ts";
 import type { ProvisioningConfig } from "../provisioning/deps.ts";
 
@@ -14,6 +15,7 @@ import type { ProvisioningConfig } from "../provisioning/deps.ts";
  */
 export enum EnvVar {
   MasterKey = "P0RT1ON_MASTER_KEY",
+  Pantry = "P0RT1ON_PANTRY",
   LogLevel = "P0RT1ON_LOG_LEVEL",
   Port = "P0RT1ON_PORT",
   DbPath = "P0RT1ON_DB_PATH",
@@ -43,7 +45,6 @@ export enum EnvVar {
   K8sCaFile = "P0RT1ON_K8S_CA_FILE",
   K8sDataSize = "P0RT1ON_K8S_DATA_SIZE",
   K8sStateSize = "P0RT1ON_K8S_STATE_SIZE",
-  K8sStorageClass = "P0RT1ON_K8S_STORAGE_CLASS",
   PortionDockerCpuRequest = "P0RT1ON_PORTION_DOCKER_CPU_REQUEST",
   PortionDockerCpuLimit = "P0RT1ON_PORTION_DOCKER_CPU_LIMIT",
   PortionDockerMemoryRequest = "P0RT1ON_PORTION_DOCKER_MEMORY_REQUEST",
@@ -93,6 +94,9 @@ const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 const REQUIRED_VARS: readonly EnvVar[] = [
   EnvVar.MasterKey,
   EnvVar.TailscaleTailnetDomain,
+  // The pantry is the one storage location for portion data — a host path on
+  // docker, a StorageClass name on k8s. Required in both (the only mode).
+  EnvVar.Pantry,
 ] as const;
 
 export class Env {
@@ -183,6 +187,40 @@ export class Env {
   get dbPath(): string {
     return this.#str(EnvVar.DbPath, "./data/p0rt1on.db");
   }
+  /**
+   * The pantry: the one storage location for every friend's MinIO data. Its
+   * shape depends on the runtime — an absolute host directory on docker
+   * ($PANTRY/<instance>), a StorageClass name on k8s (every portion's data PVC
+   * is provisioned from it). Required in both.
+   */
+  get pantry(): string {
+    const value = this.#required(EnvVar.Pantry);
+    if (this.runtimeKind === "kubernetes") {
+      // On k8s the pantry is a StorageClass name, not a path.
+      if (value.startsWith("/")) {
+        throw new Error(
+          `${EnvVar.Pantry} on kubernetes is a StorageClass name, not a ` +
+            `path (got "${value}")`,
+        );
+      }
+      return value;
+    }
+    // Docker: an absolute host path, and the manager's own DB must not live
+    // inside it — its lifecycle differs, and offboard `rm -rf`s a subtree.
+    if (!isAbsolute(value)) {
+      throw new Error(
+        `${EnvVar.Pantry} must be an absolute path, got "${value}"`,
+      );
+    }
+    const rel = relative(value, resolve(this.dbPath));
+    if (!rel.startsWith("..") && !isAbsolute(rel)) {
+      throw new Error(
+        `${EnvVar.DbPath} (${this.dbPath}) must not live inside ` +
+          `${EnvVar.Pantry} (${value})`,
+      );
+    }
+    return value;
+  }
 
   // ---- runtime selection ----
   /** Which InstanceRuntime realizes instances. Docker stays the default. */
@@ -203,7 +241,6 @@ export class Env {
     caFile?: string;
     dataSize: string;
     stateSize: string;
-    storageClass?: string;
     resources: {
       cpuRequest?: string;
       cpuLimit?: string;
@@ -218,7 +255,6 @@ export class Env {
       caFile: this.#opt(EnvVar.K8sCaFile),
       dataSize: this.#str(EnvVar.K8sDataSize, "50Gi"),
       stateSize: this.#str(EnvVar.K8sStateSize, "1Gi"),
-      storageClass: this.#opt(EnvVar.K8sStorageClass),
       // Per-portion container CPU/memory (native k8s values, all optional).
       resources: {
         cpuRequest: this.#opt(EnvVar.PortionK8sCpuRequest),

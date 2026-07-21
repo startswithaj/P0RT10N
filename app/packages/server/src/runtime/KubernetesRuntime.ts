@@ -35,7 +35,12 @@ export interface KubeConfig {
   /** PVC sizes. Per-friend quota stays bucket-level (MinIO), not storage. */
   dataSize: string;
   stateSize: string;
-  storageClass?: string;
+  /**
+   * The pantry StorageClass every portion's DATA PVC is provisioned from — the
+   * k8s spelling of "one configured storage location". Tailscale state stays
+   * OFF it (its PVC uses the cluster default), mirroring the docker split.
+   */
+  pantryStorageClass: string;
   /** Instance enrollment extras (headscale test tier); absent = SaaS defaults. */
   tailscale?: InstanceTailscaleOptions;
   /** Per-portion container CPU/memory (native k8s values); fields optional. */
@@ -120,8 +125,15 @@ export class KubernetesRuntime implements InstanceRuntime {
     const labels = this.labels(spec.name);
     // Server-side apply = create-or-adopt in one idempotent call. PVCs are
     // applied directly (not volumeClaimTemplates) so teardown gates their
-    // deletion exactly like docker volume deletion.
-    await this.applyPvc(names.dataPvc, labels, this.config.dataSize);
+    // deletion exactly like docker volume deletion. Data comes from the pantry
+    // class; tailscale state uses the cluster default so it stays off the
+    // pantry, mirroring the docker split.
+    await this.applyPvc(
+      names.dataPvc,
+      labels,
+      this.config.dataSize,
+      this.config.pantryStorageClass,
+    );
     await this.applyPvc(names.statePvc, labels, this.config.stateSize);
     // The Secret carries the root cred + enrollment key — a failed apply must
     // never echo it, so map the error to a redacted one.
@@ -213,8 +225,10 @@ export class KubernetesRuntime implements InstanceRuntime {
     await this.deleteTolerant(() => this.core.deleteService(names.service));
     await this.deleteTolerant(() => this.core.deleteSecret(names.secret));
     if (opts.removeData) {
-      // Gated exactly like docker volume deletion; a Retain StorageClass keeps
-      // the PV until a human confirms.
+      // Gated exactly like docker volume deletion. With the shipped pantry class
+      // (reclaimPolicy Delete) this reclaims the PV and the data, matching
+      // docker's `rm -rf`; a Retain class would orphan the PV for manual
+      // recovery instead.
       await this.deleteTolerant(() =>
         this.core.deletePersistentVolumeClaim(names.dataPvc)
       );
@@ -296,15 +310,15 @@ export class KubernetesRuntime implements InstanceRuntime {
     name: string,
     labels: Record<string, string>,
     size: string,
+    storageClass?: string,
   ): Promise<unknown> {
     return this.core.patchPersistentVolumeClaim(name, "apply-patch", {
       metadata: { name, labels },
       spec: {
         accessModes: ["ReadWriteOnce"],
         resources: { requests: { storage: toQuantity(size) } },
-        ...(this.config.storageClass
-          ? { storageClassName: this.config.storageClass }
-          : {}),
+        // Unset = the cluster default class (the tailscale-state PVC).
+        ...(storageClass ? { storageClassName: storageClass } : {}),
       },
     }, this.applyOpts);
   }
@@ -319,6 +333,13 @@ export class KubernetesRuntime implements InstanceRuntime {
       spec: {
         replicas: 1,
         serviceName: names.service,
+        // Suspend = scale to 0; deleting the StatefulSet must NOT delete a
+        // friend's data. Only an explicit offboard deletes the PVCs (gated).
+        // Set explicitly so a default flip can never silently drop backups.
+        persistentVolumeClaimRetentionPolicy: {
+          whenScaled: "Retain",
+          whenDeleted: "Retain",
+        },
         selector: { matchLabels: { "p0rt1on/instance": spec.name } },
         template: {
           metadata: { labels },

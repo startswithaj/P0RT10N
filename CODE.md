@@ -111,7 +111,10 @@ test bans docker literals outside `runtime/`). Selected by
   - `buildRestClient()` auto-detects the mounted in-cluster SA (token + CA +
     server) via `forInCluster`, or takes explicit `P0RT1ON_K8S_API`/`_TOKEN`/
     `_CA_FILE` for dev — no more `DENO_CERT`. Config (all `P0RT1ON_K8S_`
-    prefixed): `NAMESPACE/API/TOKEN/CA_FILE/DATA_SIZE/STATE_SIZE/STORAGE_CLASS`.
+    prefixed): `NAMESPACE/API/TOKEN/CA_FILE/DATA_SIZE/STATE_SIZE`.
+  - PVC retention is pinned `whenScaled: Retain` / `whenDeleted: Retain` so
+    suspend (scale-to-0) or a StatefulSet delete never drops a friend's data —
+    only a gated offboard deletes the PVCs.
   - Verified on k3d by `integration-tests/run-integration.sh` (no secrets needed
     — an in-cluster HEADSCALE is the control plane; REAL images only): runtime
     tier (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection,
@@ -132,6 +135,30 @@ test bans docker literals outside `runtime/`). Selected by
     THREE things in lockstep: the instance's serve port (443/80), the friend
     endpoint scheme, and the ACL grant port — all from one env value so they
     can't drift.
+
+### The pantry — `src/runtime/pantry.ts`
+
+The one configured storage location for all portion **data**. `P0RT1ON_PANTRY`
+is required; its shape depends on the runtime.
+
+- **What it holds:** MinIO data only, one entry per instance. `du -sh` over it
+  is true per-friend usage — no plumbing mixed in.
+- **Tailscale state is NOT in it.** Docker keeps node state in a named volume;
+  k8s puts its PVC on the cluster default class. So the pantry is friend backup
+  data, nothing else (also why the manager's DB is barred from living inside it,
+  checked at boot).
+- **Docker** (`HostPantry`): `P0RT1ON_PANTRY` is an absolute host path.
+  `$PANTRY/<instance>/` bind-mounts at `/data`. `dataDir()` asserts the instance
+  name resolves exactly one level inside the root before any mount or delete
+  (belt-and-braces over `friendNameSchema`). Offboard-with-data `rm -rf`s that
+  subtree; offboard-without-data leaves it.
+- **k8s**: `P0RT1ON_PANTRY` is the StorageClass name every portion's data PVC is
+  provisioned from (`deploy/k8s/pantry.yaml` — local-path provisioner rooted at
+  the chosen directory, `reclaimPolicy: Delete` to match docker's `rm -rf`).
+- **Per-instance isolation** is inherent, not a policy: each container/pod
+  mounts only its own directory/PVC, so one instance has no filesystem path to
+  another's data. (Shared-pool friends co-locate in one instance's folder,
+  separated by MinIO IAM — the "shared" trade.)
 
 ### Tailscale — `src/tailscale/TailscaleHttpApi.ts`
 

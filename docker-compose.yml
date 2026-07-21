@@ -39,6 +39,11 @@ services:
       - .:/app # live source (repo root = build context) — restart picks up code changes
       - p0rt1on-db:/app/data # metadata DB
       - p0rt1on-mc:/root/.mc # mc aliases (per-instance admin creds)
+      # The pantry, bind-mounted at the SAME path inside the manager as on the
+      # host: the manager creates each friend's directory here, and the instance
+      # containers (launched on the host daemon) bind-mount the same host path —
+      # they must resolve to identical bytes. Set P0RT1ON_PANTRY in .env.
+      - ${P0RT1ON_PANTRY:-/srv/p0rt1on}:${P0RT1ON_PANTRY:-/srv/p0rt1on}
     extra_hosts:
       - "host.docker.internal:host-gateway" # reach the host on Linux
     networks:

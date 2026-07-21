@@ -79,6 +79,8 @@ export function testEnv(overrides: Record<string, string> = {}): Env {
     P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
     // Required on the default (tailscale) backend — see Env.tagOwner.
     P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
+    // Required on the default (docker) runtime — the pantry host path.
+    P0RT1ON_PANTRY: "/srv/p0rt1on",
     ...overrides,
   };
   return new Env({ get: (k) => base[k] });
@@ -145,8 +147,8 @@ export const CONTAINER_RUN_SPEC: ContainerRunSpec = {
   tsHostname: "alice",
   tag: "tag:p0rt1on-serve",
   minioPort: 9100,
-  dataVolume: "p0rt1on-data-alice",
-  stateVolume: "p0rt1on-tsstate-alice",
+  dataSource: "p0rt1on-data-alice",
+  stateSource: "p0rt1on-tsstate-alice",
   rootCredSecretRef: "/run/secrets/minio-alice.env",
   network: "p0rt1on-net",
 };

@@ -103,9 +103,12 @@ export interface ContainerRunSpec {
   tsHostname: string;
   tag: string;
   minioPort: number;
-  /** Single data volume mounted at /data (MinIO SNSD — lock-capable). */
-  dataVolume: string;
-  stateVolume: string;
+  /**
+   * `-v` sources for /data and /var/lib/tailscale: a docker named volume, or a
+   * host path under the pantry. Single data mount (MinIO SNSD — lock-capable).
+   */
+  dataSource: string;
+  stateSource: string;
   rootCredSecretRef: string;
   network: string;
   resources?: DockerResources;

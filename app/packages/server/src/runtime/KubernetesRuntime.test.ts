@@ -71,6 +71,7 @@ describe("KubernetesRuntime", () => {
         namespace: "p0rt1on",
         dataSize: "50Gi",
         stateSize: "1Gi",
+        pantryStorageClass: "p0rt1on-pantry",
         tailscale,
       },
       fakeClient(recorded, handler),
@@ -140,6 +141,28 @@ describe("KubernetesRuntime", () => {
       expect(manifest.metadata.labels["app.kubernetes.io/managed-by"])
         .toBe("p0rt1on");
     });
+  });
+
+  it("data PVC uses the pantry class; state PVC uses the cluster default", async () => {
+    const reqs: Recorded[] = [];
+    await build(reqs).ensureInstance(INSTANCE_SPEC);
+    const data = reqs.find((r) => last(r.path) === "alice-data")
+      ?.body as { spec: { storageClassName?: string } };
+    const state = reqs.find((r) => last(r.path) === "alice-state")
+      ?.body as { spec: { storageClassName?: string } };
+    // Data comes from the pantry; tailscale state stays off it (default class).
+    expect(data.spec.storageClassName).toBe("p0rt1on-pantry");
+    expect(state.spec.storageClassName).toBeUndefined();
+  });
+
+  it("pins the PVC retention policy so suspend never deletes data", async () => {
+    const reqs: Recorded[] = [];
+    await build(reqs).ensureInstance(INSTANCE_SPEC);
+    // Scale-to-0 (suspend) and StatefulSet delete must both keep the PVCs.
+    expect(
+      bodyOf(reqs, "statefulsets").spec.persistentVolumeClaimRetentionPolicy,
+    )
+      .toEqual({ whenScaled: "Retain", whenDeleted: "Retain" });
   });
 
   it("the pod spec is restricted-profile clean and API-credential free", async () => {
@@ -216,6 +239,7 @@ describe("KubernetesRuntime", () => {
         namespace: "p0rt1on",
         dataSize: "50Gi",
         stateSize: "1Gi",
+        pantryStorageClass: "p0rt1on-pantry",
         resources: {
           cpuRequest: "250m",
           cpuLimit: "1",

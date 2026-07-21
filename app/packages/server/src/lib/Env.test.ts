@@ -8,6 +8,8 @@ describe("Env", () => {
     P0RT1ON_MASTER_KEY: "k",
     P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
     P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
+    // Required on the default (docker) runtime — the pantry host path.
+    P0RT1ON_PANTRY: "/srv/p0rt1on",
   };
 
   const env = (map: Record<string, string>) =>
@@ -92,13 +94,13 @@ describe("Env", () => {
   it("construction fails naming every missing required var", () => {
     expect(() => new Env({ get: () => undefined })).toThrow(
       "P0RT1ON_MASTER_KEY, P0RT1ON_TAILSCALE_TAILNET_DOMAIN, " +
-        "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set",
+        "P0RT1ON_PANTRY, P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set",
     );
     expect(() =>
       new Env({
         get: (k) => ({ P0RT1ON_MASTER_KEY: "k" } as Record<string, string>)[k],
       })
-    ).toThrow("P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set");
+    ).toThrow("P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET");
     // Empty string counts as unset.
     expect(() =>
       new Env({
@@ -112,6 +114,62 @@ describe("Env", () => {
     expect(env({}).tailscaleOauthClientSecret).toBe("tok");
   });
 
+  it("reads the pantry path", () => {
+    expect(env({ P0RT1ON_PANTRY: "/mnt/disk/p0rt1on" }).pantry)
+      .toBe("/mnt/disk/p0rt1on");
+  });
+
+  it("rejects a non-absolute pantry path", () => {
+    expect(() => env({ P0RT1ON_PANTRY: "relative/dir" }).pantry)
+      .toThrow("must be an absolute path");
+  });
+
+  it("refuses a DB_PATH inside the pantry (different lifecycle)", () => {
+    expect(() =>
+      env({ P0RT1ON_PANTRY: "/srv/p", P0RT1ON_DB_PATH: "/srv/p/p0rt1on.db" })
+        .pantry
+    ).toThrow("must not live inside");
+    // A DB outside the pantry is fine.
+    expect(
+      env({ P0RT1ON_PANTRY: "/srv/p", P0RT1ON_DB_PATH: "/var/p0rt1on.db" })
+        .pantry,
+    ).toBe("/srv/p");
+  });
+
+  it("on kubernetes the pantry is a StorageClass name, not a path", () => {
+    const k8s = (pantry: string) =>
+      new Env({
+        get: (k) =>
+          ({
+            P0RT1ON_MASTER_KEY: "k",
+            P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
+            P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
+            P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
+            P0RT1ON_RUNTIME: "kubernetes",
+            P0RT1ON_PANTRY: pantry,
+          } as Record<string, string>)[k],
+      });
+
+    expect(k8s("p0rt1on-pantry").pantry).toBe("p0rt1on-pantry");
+    // A path (leading slash) is the docker shape — rejected on k8s.
+    expect(() => k8s("/srv/p0rt1on").pantry).toThrow("StorageClass name");
+  });
+
+  it("requires the pantry on kubernetes too", () => {
+    expect(() =>
+      new Env({
+        get: (k) =>
+          ({
+            P0RT1ON_MASTER_KEY: "k",
+            P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
+            P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
+            P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
+            P0RT1ON_RUNTIME: "kubernetes",
+          } as Record<string, string>)[k],
+      })
+    ).toThrow("P0RT1ON_PANTRY is not set");
+  });
+
   it("headscale backend requires its own vars, not the OAuth secret", () => {
     const headscale = new Env({
       get: (k) =>
@@ -121,6 +179,7 @@ describe("Env", () => {
           P0RT1ON_TAILSCALE_BACKEND: "headscale",
           P0RT1ON_HEADSCALE_URL: "http://hs:8080",
           P0RT1ON_HEADSCALE_API_KEY: "hs-key",
+          P0RT1ON_PANTRY: "/srv/p0rt1on",
         } as Record<string, string>)[k],
     });
     expect(headscale.tailscaleBackend).toBe("headscale");
@@ -137,6 +196,7 @@ describe("Env", () => {
             P0RT1ON_MASTER_KEY: "k",
             P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
             P0RT1ON_TAILSCALE_BACKEND: "headscale",
+            P0RT1ON_PANTRY: "/srv/p0rt1on",
           } as Record<string, string>)[k],
       })
     ).toThrow("P0RT1ON_HEADSCALE_URL, P0RT1ON_HEADSCALE_API_KEY is not set");

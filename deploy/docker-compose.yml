@@ -29,6 +29,10 @@ services:
     environment:
       P0RT1ON_DB_PATH: /data/p0rt1on.db
       P0RT1ON_PORT: "8080"
+      # The pantry: friend data on the host. Must be the SAME path inside the
+      # manager and on the host (see the bind mount below) so the manager's
+      # mkdir and the instances' host-daemon bind mounts agree.
+      P0RT1ON_PANTRY: ${P0RT1ON_PANTRY:-/srv/p0rt1on}
       # Containerized manager: reach instances by container name over the
       # shared docker network — their loopback-published ports are unreachable
       # cross-container on Linux (host.docker.internal included).
@@ -37,6 +41,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - manager-data:/data
+      - ${P0RT1ON_PANTRY:-/srv/p0rt1on}:${P0RT1ON_PANTRY:-/srv/p0rt1on}
     networks:
       - default
       - p0rt1on-net

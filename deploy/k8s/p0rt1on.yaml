@@ -4,13 +4,15 @@
 # tailscaled (TS_USERSPACE=true), so nothing needs capabilities or devices —
 # the cluster itself refuses privileged pods, even from a compromised manager.
 #
+#   kubectl apply -f deploy/k8s/pantry.yaml    # the portion-data StorageClass
 #   kubectl apply -f deploy/k8s/p0rt1on.yaml
 #
 # Prereqs: build/push the manager + instance images somewhere the cluster can
 # pull; fill in the `p0rt1on-manager-secrets` Secret below (master key, OAuth
-# client secret, tag owner, tailnet domain). StorageClass: reclaimPolicy Retain
-# recommended — offboard deletes the PVC but the PV survives until a human
-# confirms (kinder-than-docker semantics for a backup product).
+# client secret, tag owner, tailnet domain); apply deploy/k8s/pantry.yaml for
+# the `p0rt1on-pantry` StorageClass that portion DATA is provisioned from
+# (P0RT1ON_PANTRY below). The manager's own PVC deliberately does NOT use that
+# class — the pantry holds friend data only.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -77,6 +79,8 @@ metadata:
   name: p0rt1on-manager-data
   namespace: p0rt1on
 spec:
+  # No storageClassName: the manager's DB uses the cluster default, never the
+  # pantry — the pantry is friend data only, with a different lifecycle.
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
@@ -109,6 +113,11 @@ spec:
               value: kubernetes
             - name: P0RT1ON_K8S_NAMESPACE
               value: p0rt1on
+            # The pantry: the StorageClass every portion's DATA PVC is
+            # provisioned from (deploy/k8s/pantry.yaml). Tailscale state uses the
+            # cluster default, so it stays off the pantry.
+            - name: P0RT1ON_PANTRY
+              value: p0rt1on-pantry
             - name: P0RT1ON_DB_PATH
               value: /data/p0rt1on.db
             # Trust the cluster CA for API calls (Deno reads this PEM).
