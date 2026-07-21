@@ -321,7 +321,11 @@ describe("DockerInstanceRuntime", () => {
   // so tests can assert both the bind-mount source and the create/delete wiring
   // without touching the filesystem (HostPantry's real fs is unit-tested in
   // pantry.test.ts).
-  function recordingPantry(calls: string[], root = "/pantry"): Pantry {
+  function recordingPantry(
+    calls: string[],
+    root = "/pantry",
+    hasData = true,
+  ): Pantry {
     return {
       dataDir: (h) => `${root}/${h}`,
       ensure: (h) => {
@@ -332,6 +336,7 @@ describe("DockerInstanceRuntime", () => {
         calls.push(`pantry.remove:${h}`);
         return Promise.resolve();
       },
+      exists: () => Promise.resolve(hasData),
     };
   }
 
@@ -486,5 +491,29 @@ describe("DockerInstanceRuntime", () => {
     await build(calls).removeInstance("alice", { removeData: false });
     // Container gone, but no volume reap and no pantry delete — the data stays.
     expect(calls).toEqual(["remove:p0rt1on-instance-alice:false"]);
+  });
+
+  it("hasData reflects the pantry directory's presence", async () => {
+    const present = new DockerInstanceRuntime(
+      recordingRuntime([]),
+      fakeTempFiles([]),
+      {
+        network: "p0rt1on-net",
+        addressing: "host",
+        pantry: recordingPantry([]),
+      },
+    );
+    expect(await present.hasData("alice")).toBe(true);
+
+    const gone = new DockerInstanceRuntime(
+      recordingRuntime([]),
+      fakeTempFiles([]),
+      {
+        network: "p0rt1on-net",
+        addressing: "host",
+        pantry: recordingPantry([], "/pantry", false),
+      },
+    );
+    expect(await gone.hasData("alice")).toBe(false);
   });
 });

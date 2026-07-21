@@ -150,6 +150,12 @@ export interface ProvisioningRepo {
   /** Count of non-`failed` friends still on an instance (offboard reaping). */
   friendsOnInstance(instanceId: number): Promise<number>;
 
+  /**
+   * Node tags of the non-`failed` friends on an instance — boot recovery
+   * re-applies each one's ACL grant after recreating the instance.
+   */
+  liveFriendTagsOnInstance(instanceId: number): Promise<string[]>;
+
   /** Friend IDs left in `failed` state — tombstones for the cleanup sweep. */
   failedFriendIds(): Promise<number[]>;
 

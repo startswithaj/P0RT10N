@@ -162,6 +162,15 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     return defer(() => this.liveFriendsOn(instanceId));
   }
 
+  liveFriendTagsOnInstance(instanceId: number): Promise<string[]> {
+    return defer(() =>
+      this.db.select({ tag: friends.tsNodeTag }).from(friends)
+        .where(
+          and(eq(friends.instanceId, instanceId), ne(friends.status, "failed")),
+        ).all().map((r) => r.tag)
+    );
+  }
+
   markInstanceReaping(
     instanceId: number,
     opts: { requireEmpty: boolean },

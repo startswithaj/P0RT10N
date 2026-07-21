@@ -193,6 +193,15 @@ export class KubernetesRuntime implements InstanceRuntime {
     return this.healthOf(pod);
   }
 
+  async hasData(instanceName: string): Promise<boolean> {
+    // The data PVC outlives the StatefulSet (retention Retain), so its presence
+    // is what says "the data survives" after a pod/STS is gone.
+    const pvc = await this.getOrNull(() =>
+      this.core.getPersistentVolumeClaim(resourceNames(instanceName).dataPvc)
+    );
+    return pvc !== null;
+  }
+
   async listInstances(): Promise<{ name: string; state: ContainerState }[]> {
     const list = await this.apps.getStatefulSetList({
       labelSelector: LABEL_SELECTOR,

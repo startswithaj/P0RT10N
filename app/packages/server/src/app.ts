@@ -186,11 +186,7 @@ export async function buildApp(
     bootReconciler: new BootReconciler(
       repo,
       instanceRuntime,
-      mcFactory,
-      {
-        auditWebhookUrl: config.auditWebhookUrl,
-        auditWebhookToken: config.auditWebhookToken,
-      },
+      provisioningService,
       logger,
     ),
   };

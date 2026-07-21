@@ -165,6 +165,23 @@ describe("KubernetesRuntime", () => {
       .toEqual({ whenScaled: "Retain", whenDeleted: "Retain" });
   });
 
+  it("hasData is true when the data PVC exists, false on 404", async () => {
+    const present = build(
+      [],
+      (r) =>
+        r.path.includes("persistentvolumeclaims")
+          ? { json: { metadata: { name: "alice-data" } } }
+          : {},
+    );
+    expect(await present.hasData("alice")).toBe(true);
+
+    const gone = build(
+      [],
+      (r) => r.path.includes("persistentvolumeclaims") ? { status: 404 } : {},
+    );
+    expect(await gone.hasData("alice")).toBe(false);
+  });
+
   it("the pod spec is restricted-profile clean and API-credential free", async () => {
     const reqs: Recorded[] = [];
     await build(reqs).ensureInstance(INSTANCE_SPEC);

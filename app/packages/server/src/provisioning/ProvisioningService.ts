@@ -30,6 +30,13 @@ import type {
   SmokeTester,
 } from "./deps.ts";
 
+/** The instance fields boot recovery/realign need — a `liveInstances` row. */
+type InstanceRef = {
+  instanceId: number;
+  tsHostname: string;
+  minioPort: number;
+};
+
 /** Kopia quickstart: the tailnet-join preamble (add flow only). */
 function kopiaJoinLines(tailscaleUpCommand: string): string[] {
   return [
@@ -227,6 +234,128 @@ export class ProvisioningService implements ProvisioningServiceContract {
       tsAuthKey: minted.key,
       tailscaleUpCommand: `tailscale up --authkey=${minted.key}`,
     };
+  }
+
+  /**
+   * Re-issue the config a running instance must carry but that lives OUTSIDE
+   * its data: the audit webhook (derived token) and every live friend's ACL
+   * grant. Run on each boot reconcile of a present/recovered instance so the
+   * webhook + tailnet policy converge on intent. Every step is idempotent, so
+   * re-running on a steady-state instance is a cheap no-op.
+   */
+  realignInstance(instance: InstanceRef): Promise<void> {
+    return this.mutex.run(() => this.realignInstanceLocked(instance));
+  }
+
+  private async realignInstanceLocked(instance: InstanceRef): Promise<void> {
+    // The audit token is derived from the master key, so re-issuing it is what
+    // lets a manager rebuild (new token) reconnect the instance with no manual
+    // step. Idempotent.
+    await this.mc.forInstance({
+      alias: instance.tsHostname,
+      minioPort: instance.minioPort,
+    }).setAuditWebhook(
+      this.config.auditWebhookUrl,
+      this.config.auditWebhookToken,
+    );
+    await this.reapplyFriendAcls(instance);
+  }
+
+  /**
+   * Recreate an instance the DB knows about but whose container/pod is gone,
+   * over its EXISTING pantry data (the caller gates on data presence). The
+   * friend's buckets, IAM users and creds live in that data and are untouched;
+   * only the tailnet node identity is re-established. Idempotent: a partial
+   * failure re-runs next boot — once the container is present again its ACLs +
+   * webhook converge via the normal realign path.
+   */
+  recoverInstance(instance: InstanceRef): Promise<void> {
+    return this.mutex.run(() => this.recoverInstanceLocked(instance));
+  }
+
+  private async recoverInstanceLocked(instance: InstanceRef): Promise<void> {
+    const log = this.logger.child({
+      op: "recoverInstance",
+      instance: instance.tsHostname,
+    });
+    log.info("container gone but data present — recreating over it");
+    // Free the hostname first: a stale serve node still holding it would force
+    // the re-enrolled instance onto a renamed hostname and break MagicDNS.
+    await this.deleteServeNodes(instance.tsHostname, log);
+    const serveKey = await this.tailscale.mintAuthKey({
+      tag: this.config.serveNodeTag,
+    });
+    await this.runtime.ensureInstance(
+      this.specForInstance(
+        instance.tsHostname,
+        instance.minioPort,
+        serveKey.key,
+      ),
+    );
+    await this.runtime.waitUntilHealthy(instance.tsHostname);
+    // Record the freshly-enrolled serve node's stable ID (offboard deletes by it).
+    const serveNode =
+      (await this.tailscale.nodesByTag(this.config.serveNodeTag))
+        .find((n) => n.hostname === instance.tsHostname);
+    if (serveNode) {
+      await this.repo.recordServeNodeId(instance.instanceId, serveNode.nodeId);
+    }
+    // Webhook + ACLs — the same path a healthy instance realigns through.
+    await this.realignInstanceLocked(instance);
+    if (this.config.aclMode === "manual") {
+      log.warn(
+        "manual ACL mode: instance re-enrolled — verify its grants still " +
+          "point at the current endpoint",
+      );
+    }
+    log.info("instance recreated over existing data");
+  }
+
+  /** Delete every serve node currently holding this hostname (best-effort). */
+  private async deleteServeNodes(
+    tsHostname: string,
+    log: Logger,
+  ): Promise<void> {
+    const stale = (await this.tailscale.nodesByTag(this.config.serveNodeTag))
+      .filter((n) => n.hostname === tsHostname);
+    await Promise.all(
+      stale.map((n) =>
+        this.tailscale.deleteNode(n.nodeId).catch((err) =>
+          log.warn("stale serve node delete failed (continuing)", {
+            nodeId: n.nodeId,
+            error: String(err),
+          })
+        )
+      ),
+    );
+  }
+
+  /**
+   * Re-apply the ACL grant for every non-failed friend on the instance. In auto
+   * mode `ensureFriendAcl` is a no-op when the grant is already present, so this
+   * is cheap on a steady-state reconcile. Manual mode is admin-owned — skip it
+   * silently here (recover logs a one-off reminder). Sequential: each call
+   * edits the whole tailnet policy, so concurrent applies would clobber it.
+   */
+  private async reapplyFriendAcls(instance: InstanceRef): Promise<void> {
+    if (this.config.aclMode === "manual") return;
+    const tags = await this.repo.liveFriendTagsOnInstance(instance.instanceId);
+    if (tags.length === 0) return;
+    const ip = await this.tailscale.nodeIpv4(instance.tsHostname);
+    if (!ip) {
+      throw new ServiceError(
+        "INTERNAL_SERVER_ERROR",
+        `instance ${instance.tsHostname} has no tailnet IP for ACL re-apply`,
+      );
+    }
+    const endpointHostPort = `${ip}:${
+      this.config.serveMode === "http" ? 80 : 443
+    }`;
+    await tags.reduce(
+      (p, tag) =>
+        p.then(() => this.tailscale.ensureFriendAcl(tag, endpointHostPort)),
+      Promise.resolve(),
+    );
   }
 
   /** Non-streaming offboard: drains the teardown stream to completion. */
@@ -928,12 +1057,26 @@ export class ProvisioningService implements ProvisioningServiceContract {
     reservation: InstanceReservation,
     tsAuthKey: string,
   ): InstanceSpec {
+    return this.specForInstance(
+      reservation.tsHostname,
+      reservation.hostPort,
+      tsAuthKey,
+    );
+  }
+
+  /** The runtime spec from an instance's identity alone — image/tag from config,
+   * root cred derived from the hostname. Used by add (via specFor) and recover. */
+  private specForInstance(
+    tsHostname: string,
+    minioPort: number,
+    tsAuthKey: string,
+  ): InstanceSpec {
     return {
-      name: reservation.tsHostname,
+      name: tsHostname,
       image: this.config.instanceImage,
       tag: this.config.serveNodeTag,
-      minioPort: reservation.hostPort,
-      rootCred: this.keyGen.rootCredentialFor(reservation.tsHostname),
+      minioPort,
+      rootCred: this.keyGen.rootCredentialFor(tsHostname),
       tsAuthKey,
     };
   }

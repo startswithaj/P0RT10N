@@ -200,6 +200,15 @@ export interface InstanceRuntime {
   instanceHealth(instanceName: string): Promise<InstanceHealth>;
 
   /**
+   * Does this instance's persistent DATA still exist, independent of whether
+   * its container/pod does? Drives boot recovery: an instance in the DB whose
+   * container is gone but whose data survives is recreated over that data;
+   * one whose data is also gone is surfaced, never fabricated empty. Docker
+   * checks the pantry directory; k8s checks the data PVC.
+   */
+  hasData(instanceName: string): Promise<boolean>;
+
+  /**
    * Every runtime-managed instance (name = tailnet hostname) with its state.
    * Lets the boot reconcile compare the DB against reality without knowing
    * how instances are labelled or named by the engine.

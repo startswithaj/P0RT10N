@@ -360,6 +360,8 @@ export function mockInstanceRuntime(
     /** listInstances result (instance names + states). */
     instances?: { name: string; state: ContainerState }[];
     healthFor?: (name: string) => InstanceHealth;
+    /** hasData result per instance; default true (data present). */
+    hasDataFor?: (name: string) => boolean;
     listError?: Error;
   } = {},
 ): InstanceRuntime {
@@ -371,6 +373,7 @@ export function mockInstanceRuntime(
     adminEndpoint: (_name, minioPort) => `http://127.0.0.1:${minioPort}`,
     instanceHealth: (name) =>
       Promise.resolve(opts.healthFor?.(name) ?? "healthy"),
+    hasData: (name) => Promise.resolve(opts.hasDataFor?.(name) ?? true),
     listInstances: () =>
       opts.listError
         ? Promise.reject(opts.listError)
@@ -441,6 +444,7 @@ export function mockProvisioningRepo(
     },
     context: () => Promise.reject(new Error("context not stubbed")),
     friendsOnInstance: () => Promise.resolve(0),
+    liveFriendTagsOnInstance: () => Promise.resolve([]),
     markInstanceReaping: (_instanceId, opts) => {
       calls.push(`repo:markInstanceReaping:requireEmpty=${opts.requireEmpty}`);
       return Promise.resolve(true);

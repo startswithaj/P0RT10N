@@ -49,5 +49,14 @@ describe("HostPantry", () => {
       const p = new HostPantry(root);
       await p.remove("never-created"); // NotFound is success, not a throw
     });
+
+    it("exists is false when absent, false when empty, true with data", async () => {
+      const p = new HostPantry(root);
+      expect(await p.exists("alice")).toBe(false); // never created
+      await p.ensure("alice");
+      expect(await p.exists("alice")).toBe(false); // dir exists but empty
+      await Deno.writeTextFile(join(root, "alice", ".minio.sys"), "x");
+      expect(await p.exists("alice")).toBe(true); // has data
+    });
   });
 });

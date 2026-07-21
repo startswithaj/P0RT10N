@@ -117,6 +117,23 @@ describe("DrizzleProvisioningRepo", () => {
     expect(second.hostPort).toBe(first.hostPort);
   });
 
+  it("liveFriendTagsOnInstance returns each non-failed friend's node tag", async () => {
+    const bob = await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared"),
+    );
+    await repo.reserveFriend(
+      makeAddInput("carol", "shared"),
+      namingFor("carol", "shared"),
+    );
+    // Both pooled onto one instance — recovery re-applies both grants.
+    const tags = await repo.liveFriendTagsOnInstance(bob.instanceId);
+    expect(tags.toSorted()).toEqual([
+      "tag:p0rt1on-friend-bob",
+      "tag:p0rt1on-friend-carol",
+    ]);
+  });
+
   it("shared: never adopts a reaping instance — a new pool is created instead", async () => {
     // The reap-vs-add race: once the sweep marks the pool `reaping`, a
     // concurrent add must NOT reserve onto it (it's about to be removed —

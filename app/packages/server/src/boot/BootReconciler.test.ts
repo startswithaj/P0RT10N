@@ -6,12 +6,10 @@ import {
   type Calls,
   DEDICATED_RES,
   mockInstanceRuntime,
-  mockMcClient,
-  mockMcFactory,
   mockProvisioningRepo,
   noopLogger,
 } from "../test-helpers/mocks.ts";
-import { BootReconciler } from "./BootReconciler.ts";
+import { BootReconciler, type InstanceReconcileOps } from "./BootReconciler.ts";
 
 describe("BootReconciler", () => {
   const ROW = {
@@ -29,60 +27,84 @@ describe("BootReconciler", () => {
       rows?: typeof ROW[];
       instances?: { name: string; state: ContainerState }[];
       healthFor?: (name: string) => "healthy" | "unhealthy";
+      hasDataFor?: (name: string) => boolean;
       listError?: Error;
       repo?: Partial<ProvisioningRepo>;
     } = {},
   ) {
+    // ProvisioningService supplies these in production; here they just record.
+    const ops: InstanceReconcileOps = {
+      realignInstance: (i) => {
+        calls.push(`ops:realign:${i.tsHostname}`);
+        return Promise.resolve();
+      },
+      recoverInstance: (i) => {
+        calls.push(`ops:recover:${i.tsHostname}`);
+        return Promise.resolve();
+      },
+    };
     return new BootReconciler(
       mockProvisioningRepo(calls, DEDICATED_RES, {
         liveInstances: () => Promise.resolve(opts.rows ?? [ROW]),
         ...opts.repo,
       }),
       mockInstanceRuntime(calls, opts),
-      mockMcFactory(mockMcClient(calls)),
-      {
-        auditWebhookUrl: "http://m/audit",
-        auditWebhookToken: "tok",
-      },
+      ops,
       noopLogger(),
       { attempts: 2, delayMs: 0 }, // bounded wait, no real sleeping in tests
     );
   }
 
-  it("running + healthy: re-issues the audit webhook, touches nothing else", async () => {
+  it("running + healthy: realigns (webhook + ACLs), touches nothing else", async () => {
     const calls: Calls = [];
     const summary = await build(calls, { instances: [running] }).run();
 
     expect(summary).toEqual({
       started: 0,
       healthy: 1,
+      recovered: 0,
       failed: 0,
       orphaned: 0,
       degraded: 0,
     });
-    expect(calls).toContain("mc:setAuditWebhook");
+    expect(calls).toContain("ops:realign:alice");
     // Adopt runs even when healthy — it converges config drift (restart
     // policy); the actual no-start behaviour is DockerRuntime's, tested there.
     expect(calls).toContain(`runtime:ensureRunning:alice`);
   });
 
-  it("stopped: starts it, verifies health, then re-issues config", async () => {
+  it("stopped: starts it, verifies health, then realigns", async () => {
     const calls: Calls = [];
     const summary = await build(calls, { instances: [stopped] }).run();
 
     expect(summary.started).toBe(1);
     expect(calls.indexOf(`runtime:ensureRunning:alice`)).toBeLessThan(
-      calls.indexOf("mc:setAuditWebhook"),
+      calls.indexOf("ops:realign:alice"),
     );
   });
 
-  it("absent container: fails the instance + friends, never realigns", async () => {
+  it("absent container but data survives: recreates over it, never fails", async () => {
     const calls: Calls = [];
     const summary = await build(calls, { instances: [] }).run();
 
+    expect(summary.recovered).toBe(1);
+    expect(calls).toContain("ops:recover:alice");
+    // Data survives ⇒ never marked failed, never realigned separately.
+    expect(calls.some((c) => c.startsWith("repo:failInstanceMissing")))
+      .toBe(false);
+  });
+
+  it("absent container AND data gone: marks failed, never recreates", async () => {
+    const calls: Calls = [];
+    const summary = await build(calls, {
+      instances: [],
+      hasDataFor: () => false,
+    }).run();
+
     expect(summary.failed).toBe(1);
     expect(calls).toContain("repo:failInstanceMissing:10");
-    expect(calls).not.toContain("mc:setAuditWebhook");
+    // No empty instance fabricated over the lost backups.
+    expect(calls).not.toContain("ops:recover:alice");
   });
 
   it("unhealthy after the bounded wait: logged as degraded, NOTHING deleted or marked", async () => {
@@ -98,7 +120,7 @@ describe("BootReconciler", () => {
     expect(calls).not.toContain("runtime:removeInstance");
     expect(calls.some((c) => c.startsWith("repo:failInstanceMissing")))
       .toBe(false);
-    expect(calls).not.toContain("mc:setAuditWebhook");
+    expect(calls).not.toContain("ops:realign:alice");
   });
 
   it("orphan instance with no DB row: counted + left untouched", async () => {
@@ -112,7 +134,7 @@ describe("BootReconciler", () => {
     expect(calls).not.toContain("runtime:removeInstance");
   });
 
-  it("docker unreachable: reconcile skipped, boot survives", async () => {
+  it("runtime unreachable: reconcile skipped, boot survives", async () => {
     const calls: Calls = [];
     const summary = await build(calls, { listError: new Error("no daemon") })
       .run();
@@ -120,6 +142,7 @@ describe("BootReconciler", () => {
     expect(summary).toEqual({
       started: 0,
       healthy: 0,
+      recovered: 0,
       failed: 0,
       orphaned: 0,
       degraded: 0,
@@ -131,9 +154,10 @@ describe("BootReconciler", () => {
     const bobRow = { ...ROW, instanceId: 11, tsHostname: "bob" };
     const summary = await build(calls, {
       rows: [ROW, bobRow],
-      // alice's instance exists and is healthy; bob's is absent AND the DB
-      // flip for it blows up — bob must not take alice down with him.
+      // alice's instance exists and is healthy; bob's is absent, its data is
+      // gone, and the DB fail-flip blows up — bob must not take alice down.
       instances: [running],
+      hasDataFor: (name) => name !== "bob",
       repo: {
         failInstanceMissing: () => Promise.reject(new Error("db locked")),
       },
@@ -141,6 +165,6 @@ describe("BootReconciler", () => {
 
     expect(summary.healthy).toBe(1);
     expect(summary.degraded).toBe(1);
-    expect(calls).toContain("mc:setAuditWebhook");
+    expect(calls).toContain("ops:realign:alice");
   });
 });

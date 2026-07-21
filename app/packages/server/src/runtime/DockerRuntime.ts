@@ -420,6 +420,10 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     return this.runtime.health(containerNames(instanceName).container);
   }
 
+  hasData(instanceName: string): Promise<boolean> {
+    return this.config.pantry.exists(instanceName);
+  }
+
   async listInstances(): Promise<
     { name: string; state: ContainerState }[]
   > {

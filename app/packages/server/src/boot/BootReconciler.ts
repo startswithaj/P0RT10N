@@ -1,25 +1,34 @@
 import type { ContainerState, InstanceRuntime } from "../runtime/runtime.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
-import type { McClientFactory } from "../minio/mc.ts";
 import type { Logger } from "../services/types.ts";
 
 // ============================================================================
 // Boot-time container reconcile: the DB records which instances SHOULD exist;
-// Docker is reality; this compares them once per boot (after the stale-
+// the runtime is reality; this compares them once per boot (after the stale-
 // provisioning flip, before the listeners) so "restart the box" is a
-// non-event. Strictly non-destructive: it starts, verifies, re-issues config
-// and marks rows — it never removes containers, volumes, or DB rows.
+// non-event. It never DELETES containers, volumes, or data. It DOES recreate a
+// missing instance over its surviving data (delegated to the provisioning
+// layer) — an instance whose data is ALSO gone is marked failed, never
+// fabricated empty.
 // ============================================================================
 
 /** What happened to one instance during the reconcile. */
-type Outcome = "healthy" | "started" | "failed" | "unhealthy" | "error";
+type Outcome =
+  | "healthy"
+  | "started"
+  | "recovered"
+  | "failed"
+  | "unhealthy"
+  | "error";
 
 export interface ReconcileSummary {
   /** Stopped containers brought back up (and verified healthy). */
   started: number;
   /** Already running and healthy. */
   healthy: number;
-  /** Container gone → instance + friends marked failed for the sweep. */
+  /** Container gone but data survived → recreated over it. */
+  recovered: number;
+  /** Container AND data both gone → instance + friends marked failed. */
   failed: number;
   /** Labelled containers with no DB row — logged, left alone. */
   orphaned: number;
@@ -27,10 +36,14 @@ export interface ReconcileSummary {
   degraded: number;
 }
 
-/** Config subset the reconcile needs to re-align an instance. */
-export interface ReconcileConfig {
-  auditWebhookUrl: string;
-  auditWebhookToken: string;
+/**
+ * The provisioning-layer ops the reconcile delegates to (ProvisioningService
+ * satisfies this). `realignInstance` re-issues the webhook + ACLs for a present
+ * instance; `recoverInstance` recreates a missing one over its surviving data.
+ */
+export interface InstanceReconcileOps {
+  realignInstance(instance: InstanceRow): Promise<void>;
+  recoverInstance(instance: InstanceRow): Promise<void>;
 }
 
 /** Bounded health wait — injectable so tests don't sleep. */
@@ -50,8 +63,7 @@ export class BootReconciler {
   constructor(
     private readonly repo: ProvisioningRepo,
     private readonly runtime: InstanceRuntime,
-    private readonly mc: McClientFactory,
-    private readonly config: ReconcileConfig,
+    private readonly ops: InstanceReconcileOps,
     private readonly logger: Logger,
     // Containers may still be starting right after a host boot (tailscaled +
     // MinIO both need to come up) — cap the wait so boot never stalls;
@@ -73,7 +85,14 @@ export class BootReconciler {
       },
     );
     if (instances === null) {
-      return { started: 0, healthy: 0, failed: 0, orphaned: 0, degraded: 0 };
+      return {
+        started: 0,
+        healthy: 0,
+        recovered: 0,
+        failed: 0,
+        orphaned: 0,
+        degraded: 0,
+      };
     }
 
     const byName = new Map(instances.map((c) => [c.name, c]));
@@ -103,6 +122,7 @@ export class BootReconciler {
     const summary: ReconcileSummary = {
       started: count("started"),
       healthy: count("healthy"),
+      recovered: count("recovered"),
       failed: count("failed"),
       orphaned: orphans.length,
       degraded: count("unhealthy") + count("error"),
@@ -117,10 +137,19 @@ export class BootReconciler {
     log: Logger,
   ): Promise<Outcome> {
     if (!instance) {
-      const friendsFailed = await this.repo.failInstanceMissing(
-        row.instanceId,
-      );
-      log.warn("instance missing — it and its friends marked failed", {
+      // Container gone. If the DATA survived (pantry dir / data PVC), recreate
+      // the instance over it — same identity, no friend action. If the data is
+      // ALSO gone, do NOT fabricate an empty instance over destroyed backups:
+      // mark failed so it's surfaced.
+      if (await this.runtime.hasData(row.tsHostname)) {
+        log.warn("instance container gone but data survives — recreating", {
+          instance: row.tsHostname,
+        });
+        await this.ops.recoverInstance(row);
+        return "recovered";
+      }
+      const friendsFailed = await this.repo.failInstanceMissing(row.instanceId);
+      log.error("instance AND its data are gone — marked failed", {
         instance: row.tsHostname,
         friendsFailed,
       });
@@ -139,24 +168,10 @@ export class BootReconciler {
       });
       return "unhealthy";
     }
-    await this.realign(row);
+    // Re-issue the webhook (derived token) + re-apply ACLs — converges the
+    // config that lives outside the instance's data. Idempotent.
+    await this.ops.realignInstance(row);
     return instance.state === "stopped" ? "started" : "healthy";
-  }
-
-  /**
-   * Healthy instances get their audit-webhook config re-issued from derived
-   * material (the mc factory derives root creds per call) — this is what
-   * makes a manager rebuild (rotated master-key-derived token) recover with
-   * no manual steps. Idempotent.
-   */
-  private async realign(row: InstanceRow): Promise<void> {
-    await this.mc.forInstance({
-      alias: row.tsHostname,
-      minioPort: row.minioPort,
-    }).setAuditWebhook(
-      this.config.auditWebhookUrl,
-      this.config.auditWebhookToken,
-    );
   }
 
   /** Recursive bounded poll of the instance's health probe. */

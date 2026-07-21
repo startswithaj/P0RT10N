@@ -16,6 +16,12 @@ export interface Pantry {
   ensure(instanceHost: string): Promise<void>;
   /** `rm -rf` the instance's directory; "already absent" is success. */
   remove(instanceHost: string): Promise<void>;
+  /**
+   * Does the instance's directory exist AND hold data? Drives boot recovery:
+   * present ⇒ recreate the instance over it; absent/empty ⇒ the data is gone,
+   * so surface it rather than fabricate an empty instance over lost backups.
+   */
+  exists(instanceHost: string): Promise<boolean>;
 }
 
 /** True if `<root>/<name>` is not exactly one level directly inside `root`. */
@@ -61,5 +67,19 @@ export class HostPantry implements Pantry {
       .catch((err) => {
         if (!(err instanceof Deno.errors.NotFound)) throw err;
       });
+  }
+
+  async exists(instanceHost: string): Promise<boolean> {
+    try {
+      // Non-empty, not just present: a MinIO data dir always holds `.minio.sys`,
+      // so an empty dir means no data survived (contents wiped) — treat as gone.
+      const entries = await Array.fromAsync(
+        Deno.readDir(this.dataDir(instanceHost)),
+      );
+      return entries.length > 0;
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) return false;
+      throw err;
+    }
   }
 }
