@@ -7,7 +7,8 @@ import type {
 } from "@p0rt1on/shared/domain";
 import type { Db } from "./Database.ts";
 import { activity, friends, instances, usage } from "./Schema.ts";
-import { sumLast24h } from "../minio-events/requestBuckets.ts";
+import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
+import { hourlySeries, sumLast24h } from "../minio-events/requestBuckets.ts";
 import { defer } from "../lib/defer.ts";
 
 /**
@@ -225,6 +226,32 @@ export class FriendQueries {
         tsTag: instances.tsTag,
       }).from(instances).all()
     );
+  }
+
+  /** tsHostname → last-24h hourly request series (summed across the instance's
+   * friends). Instances with no activity are absent from the map. */
+  requestSeriesByInstance(): Promise<Map<string, number[]>> {
+    return defer(() => {
+      const now = this.now();
+      const rows = this.db.select({
+        tsHostname: instances.tsHostname,
+        requestBuckets: activity.requestBuckets,
+      }).from(instances)
+        .innerJoin(friends, eq(friends.instanceId, instances.id))
+        .innerJoin(activity, eq(activity.friendId, friends.id)).all();
+      // Fold each instance's friends' hourly buckets into one summed map, then
+      // materialize the fixed-length window series.
+      const summed = rows.reduce((acc, r) => {
+        const merged = Object.entries(r.requestBuckets).reduce(
+          (m, [hour, count]) => ({ ...m, [hour]: (m[hour] ?? 0) + count }),
+          acc.get(r.tsHostname) ?? {} as RequestBuckets,
+        );
+        return acc.set(r.tsHostname, merged);
+      }, new Map<string, RequestBuckets>());
+      return new Map(
+        [...summed].map(([host, b]) => [host, hourlySeries(b, now)]),
+      );
+    });
   }
 
   /** Map of friendId → newest usage sample, computed in SQL (O(friends), not

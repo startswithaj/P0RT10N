@@ -78,6 +78,25 @@ describe("FriendQueries", () => {
     expect(list[0].usage.checkedAt).toBeNull();
   });
 
+  it("requestSeriesByInstance: 24h hourly series keyed by tsHostname; idle instances absent", async () => {
+    const res = await addFriend("alice");
+    seedActivity(database.db, res.friendId, {
+      requestBuckets: {
+        [hourKey("2026-06-29T09:00:00Z")]: 4, // newest hour in the window
+        [hourKey("2026-06-29T08:00:00Z")]: 1,
+      },
+    });
+    await addFriend("bob"); // no activity → absent from the map
+
+    const series = await queries.requestSeriesByInstance();
+    const alice = series.get("alice");
+    expect(alice?.length).toBe(24);
+    expect(alice?.at(-1)).toBe(4); // NOW's hour, newest slot
+    expect(alice?.at(-2)).toBe(1);
+    expect(alice?.reduce((a, b) => a + b, 0)).toBe(5);
+    expect(series.has("bob")).toBe(false);
+  });
+
   it("usageHistory: newest first, respecting the limit", async () => {
     const res = await addFriend("carol");
     seedUsage(database.db, res.friendId, 10, 1, "2026-06-29T07:00:00Z");

@@ -291,6 +291,9 @@ export type ServiceStatus = {
   state: "up" | "provisioning" | "pending" | "down" | "lost";
   /** Instance hostname for `status.diagnose`; absent for host rows. */
   instance?: string;
+  /** Last-24h hourly request counts (oldest→newest) for a faint sparkline;
+   * absent for rows with no activity (tailscale/host). */
+  spark?: number[];
 };
 
 /** System inventory for the Status page — grouped service health. */

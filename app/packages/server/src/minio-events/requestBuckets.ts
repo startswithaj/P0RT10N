@@ -66,6 +66,20 @@ export function prune(buckets: RequestBuckets, now: string): RequestBuckets {
   );
 }
 
+/**
+ * Hourly counts across the window ending at `now`, oldest→newest (fixed length
+ * WINDOW_HOURS). Missing hours are 0; empty when `now` is unparseable. Feeds the
+ * Status-page sparkline — same window as `sumLast24h`.
+ */
+export function hourlySeries(buckets: RequestBuckets, now: string): number[] {
+  const oldest = cutoff(now);
+  if (oldest === null) return [];
+  return Array.from(
+    { length: WINDOW_HOURS },
+    (_, i) => buckets[String(oldest + i)] ?? 0,
+  );
+}
+
 /** Sum of requests within the window ending at `now`. */
 export function sumLast24h(buckets: RequestBuckets, now: string): number {
   const oldest = cutoff(now);

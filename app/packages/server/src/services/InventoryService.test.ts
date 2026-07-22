@@ -35,9 +35,17 @@ describe("RuntimeInventoryService", () => {
     tsTag: "tag:p0rt1on-serve",
   });
 
-  const svcOf = (health: InstanceHealth, status = "active", hasData = true) =>
+  const svcOf = (
+    health: InstanceHealth,
+    status = "active",
+    hasData = true,
+    series = new Map<string, number[]>(),
+  ) =>
     new RuntimeInventoryService(
-      { instancesForStatus: () => Promise.resolve([instance(status)]) },
+      {
+        instancesForStatus: () => Promise.resolve([instance(status)]),
+        requestSeriesByInstance: () => Promise.resolve(series),
+      },
       runtimeWith(() => health, hasData),
       "tail1a2b.ts.net",
       noopLogger(),
@@ -47,11 +55,21 @@ describe("RuntimeInventoryService", () => {
     const snap = await svcOf("healthy").snapshot();
     expect(snap.minio[0].name).toBe("p0rt1on-instance-alice");
     expect(snap.minio[0].state).toBe("up");
+    // Every MinIO row carries a series (empty here ⇒ flat baseline); tailscale
+    // rows never do — that's what distinguishes an activity row.
+    expect(snap.minio[0].spark).toEqual([]);
+    expect(snap.tailscale[0].spark).toBeUndefined();
     expect(snap.tailscale[0].state).toBe("up"); // same container
     expect(snap.tailscale[0].detail).toBe(
       "tag:p0rt1on-serve · https://alice.tail1a2b.ts.net",
     );
     expect(snap.host[0].state).toBe("up");
+  });
+
+  it("attaches the per-instance request series to its MinIO row", async () => {
+    const series = new Map([["alice", [0, 2, 0, 5]]]);
+    const snap = await svcOf("healthy", "active", true, series).snapshot();
+    expect(snap.minio[0].spark).toEqual([0, 2, 0, 5]);
   });
 
   it("starting container → provisioning", async () => {
@@ -90,7 +108,10 @@ describe("RuntimeInventoryService", () => {
 
   it("diagnose delegates to the runtime by instance name", async () => {
     const svc = new RuntimeInventoryService(
-      { instancesForStatus: () => Promise.resolve([]) },
+      {
+        instancesForStatus: () => Promise.resolve([]),
+        requestSeriesByInstance: () => Promise.resolve(new Map()),
+      },
       runtimeWith(() => "unhealthy"),
       "tail1a2b.ts.net",
       noopLogger(),
@@ -102,7 +123,10 @@ describe("RuntimeInventoryService", () => {
 
   it("returns only the host when there are no instances", async () => {
     const svc = new RuntimeInventoryService(
-      { instancesForStatus: () => Promise.resolve([]) },
+      {
+        instancesForStatus: () => Promise.resolve([]),
+        requestSeriesByInstance: () => Promise.resolve(new Map()),
+      },
       runtimeWith(() => "unknown"),
       "tail1a2b.ts.net",
       noopLogger(),

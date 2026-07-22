@@ -9,6 +9,9 @@ export type Svc = {
   detail: string;
   state: SvcState;
   instance?: string;
+  /** Last-24h hourly request counts (oldest→newest) driving the row sparkline;
+   * present on MinIO rows only (empty ⇒ flat baseline). */
+  spark?: number[];
 };
 
 export function stateLabel(s: SvcState): string {

@@ -3,6 +3,8 @@ import { css } from "styled-system/css";
 import { ChevronDown, ChevronRight } from "lucide-solid";
 import { stateLabel, type Svc, type SvcState } from "./status-types.ts";
 import { DiagnosticsPanel } from "./DiagnosticsPanel.tsx";
+import { Sparkline } from "./Sparkline.tsx";
+import { Tooltip } from "./ui/tooltip.tsx";
 
 // One status list item. Rows with an `instance` expand into a DiagnosticsPanel.
 
@@ -31,7 +33,14 @@ const rowLeft = css({
   gap: "3",
   minW: "0",
 });
-const rowRight = css({ display: "flex", alignItems: "center", gap: "3" });
+const rowRight = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "3",
+  // The sparkline's tooltip trigger is a <button>; its reset cursor overrides
+  // the row's clickable hand. Re-inherit so the whole row keeps one cursor.
+  "& button": { cursor: "inherit" },
+});
 const rowIcon = css({
   display: "grid",
   placeItems: "center",
@@ -82,6 +91,14 @@ function stateDot(s: SvcState): string {
   return dotDown;
 }
 
+/** Hover label for the activity sparkline — spells out what the line means so a
+ * dashed (idle) baseline reads as "no activity" rather than flatlined data. */
+function sparkLabel(data: number[]): string {
+  const total = data.reduce((sum, n) => sum + n, 0);
+  if (total === 0) return "No activity · last 24h";
+  return `${total} request${total === 1 ? "" : "s"} · last 24h`;
+}
+
 export function ServiceRow(
   props: {
     svc: Svc;
@@ -108,6 +125,18 @@ export function ServiceRow(
           </div>
         </div>
         <div class={rowRight}>
+          <Show when={props.svc.spark}>
+            {(spark) => (
+              <Tooltip
+                content={sparkLabel(spark())}
+                openDelay={300}
+                closeDelay={100}
+                positioning={{ placement: "top" }}
+              >
+                <Sparkline data={spark()} />
+              </Tooltip>
+            )}
+          </Show>
           <span class={`${statusPill} ${stateColor(props.svc.state)}`}>
             <span class={stateDot(props.svc.state)} />
             {stateLabel(props.svc.state)}

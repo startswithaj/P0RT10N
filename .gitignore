@@ -16,6 +16,9 @@ coverage/
 **/dist/
 **/styled-system/
 node_modules/
+# Vite writes these transient esbuild-compiled config files next to vite.config.ts
+# while loading it; they contain `var` output that trips the lint.
+**/vite.config.ts.timestamp-*.mjs
 
 # os
 .DS_Store

@@ -16,9 +16,10 @@ export interface StatusInstanceRow {
   tsTag: string;
 }
 
-/** The read-side dependency: just the instance list. */
+/** The read-side dependency: the instance list plus per-instance request series. */
 export interface StatusInstances {
   instancesForStatus(): Promise<StatusInstanceRow[]>;
+  requestSeriesByInstance(): Promise<Map<string, number[]>>;
 }
 
 /** Container health + DB status (+ whether the data survives) → the Status-page
@@ -57,13 +58,21 @@ export class RuntimeInventoryService implements InventoryService {
 
   async snapshot(): Promise<StatusView> {
     const log = this.logger.child({ op: "status" });
-    const instances = await this.queries.instancesForStatus();
+    const [instances, series] = await Promise.all([
+      this.queries.instancesForStatus(),
+      this.queries.requestSeriesByInstance(),
+    ]);
     log.debug("inventory snapshot", { instances: instances.length });
     const probed = await Promise.all(
       instances.map((inst) => this.probe(inst)),
     );
     return {
-      minio: probed.map((p) => p.minio),
+      // Every MinIO row carries a series (empty ⇒ flat baseline sparkline); the
+      // `spark` field is what distinguishes an activity row from tailscale/host.
+      minio: probed.map((p) => ({
+        ...p.minio,
+        spark: series.get(p.minio.instance ?? "") ?? [],
+      })),
       tailscale: probed.map((p) => p.tailscale),
       host: [{ name: "p0rt1on-api", detail: "control-plane API", state: "up" }],
     };

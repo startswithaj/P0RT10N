@@ -1,6 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bump, hourKey, prune, sumLast24h } from "./requestBuckets.ts";
+import {
+  bump,
+  hourKey,
+  hourlySeries,
+  prune,
+  sumLast24h,
+} from "./requestBuckets.ts";
 
 describe("requestBuckets", () => {
   it("bump records a request in its own hour bucket", () => {
@@ -56,5 +62,26 @@ describe("requestBuckets", () => {
     const buckets = { [hourKey("2026-06-30T10:00:00Z")]: 2 };
     expect(prune(buckets, "not-a-date")).toEqual(buckets);
     expect(sumLast24h(buckets, "not-a-date")).toBe(2);
+  });
+
+  it("hourlySeries returns a fixed 24-length window, oldest→newest", () => {
+    const buckets = {
+      [hourKey("2026-06-30T10:00:00Z")]: 4, // newest (index 23)
+      [hourKey("2026-06-30T09:00:00Z")]: 1, // index 22
+      [hourKey("2026-06-29T11:00:00Z")]: 9, // oldest in window (index 0)
+      [hourKey("2026-06-29T08:00:00Z")]: 7, // out of window → excluded
+    };
+    const s = hourlySeries(buckets, "2026-06-30T10:30:00Z");
+    expect(s.length).toBe(24);
+    expect(s[0]).toBe(9);
+    expect(s[22]).toBe(1);
+    expect(s[23]).toBe(4);
+    // Every other slot is a zero-filled gap, and the stale bucket is absent.
+    expect(s.reduce((a, b) => a + b, 0)).toBe(14);
+  });
+
+  it("hourlySeries is empty when the clock is unparseable", () => {
+    expect(hourlySeries({ [hourKey("2026-06-30T10:00:00Z")]: 2 }, "nope"))
+      .toEqual([]);
   });
 });
