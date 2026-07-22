@@ -47,6 +47,8 @@ describe("ProvisioningService boot recovery", () => {
     expect(calls).toContain("repo:recordServeNodeId:old");
     expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("ts:ensureFriendAcl");
+    // Recorded in the audit trail so the recovery is visible after the fact.
+    expect(calls).toContain("repo:audit:instance_recovered");
   });
 
   it("recover re-applies an ACL grant for EACH live friend (shared pool)", async () => {

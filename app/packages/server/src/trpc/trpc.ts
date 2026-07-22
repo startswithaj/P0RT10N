@@ -3,6 +3,7 @@ import { ServiceError } from "../lib/ServiceError.ts";
 import type { AdminAuth } from "../auth/AdminAuth.ts";
 import type {
   ActivityService,
+  AuditService,
   FriendService,
   InventoryService,
   Logger,
@@ -17,6 +18,7 @@ export interface TrpcContext {
   provisioningService: ProvisioningService;
   usageService: UsageService;
   activityService: ActivityService;
+  auditService: AuditService;
   inventoryService: InventoryService;
   jobService: JobService;
   logger: Logger;

@@ -5,6 +5,7 @@ import { Database, Network, Server } from "lucide-solid";
 import { trpc } from "../trpc.ts";
 import type { Svc } from "./status-types.ts";
 import { ServiceRow } from "./ServiceRow.tsx";
+import { RecentEvents } from "./RecentEvents.tsx";
 
 // System status, polled live from `status.get`. Instance rows expand into live
 // diagnostics (`status.diagnose`): state, health reason, exit, recent logs.
@@ -169,6 +170,7 @@ export function StatusPage() {
         expanded={expanded}
         setExpanded={setExpanded}
       />
+      <RecentEvents />
     </Show>
   );
 }

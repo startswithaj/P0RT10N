@@ -1,0 +1,1 @@
+ALTER TABLE `audit` ADD `friend_name` text;

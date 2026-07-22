@@ -1,12 +1,13 @@
 import { and, desc, eq, lt, max } from "drizzle-orm";
 import type {
   ActivityView,
+  AuditEntryView,
   FriendDetail,
   FriendListItem,
   UsageView,
 } from "@p0rt1on/shared/domain";
 import type { Db } from "./Database.ts";
-import { activity, friends, instances, usage } from "./Schema.ts";
+import { activity, audit, friends, instances, usage } from "./Schema.ts";
 import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
 import { hourlySeries, sumLast24h } from "../minio-events/requestBuckets.ts";
 import { defer } from "../lib/defer.ts";
@@ -103,6 +104,28 @@ export class FriendQueries {
   /** Point-in-time usage samples for one friend, newest first. */
   usageHistory(friendId: number, limit: number): Promise<UsageView[]> {
     return defer(() => this.usageHistorySync(friendId, limit));
+  }
+
+  /** Audit log newest-first, page back via `before` (id cursor). `friend` is the
+   * write-time snapshot name (survives offboard); null → a system event. */
+  recentAuditEntries(
+    limit: number,
+    before?: number,
+  ): Promise<AuditEntryView[]> {
+    return defer(() =>
+      this.db.select({
+        id: audit.id,
+        when: audit.createdAt,
+        action: audit.action,
+        friend: audit.friendName,
+        detail: audit.detail,
+      })
+        .from(audit)
+        .where(before ? lt(audit.id, before) : undefined)
+        .orderBy(desc(audit.id))
+        .limit(limit)
+        .all()
+    );
   }
 
   private usageHistorySync(friendId: number, limit: number): UsageView[] {

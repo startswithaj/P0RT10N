@@ -34,6 +34,24 @@ export const FRIEND_STATUS_VALUES = [
 ] as const;
 export type FriendStatus = (typeof FRIEND_STATUS_VALUES)[number];
 
+/**
+ * Audit-log action codes — every lifecycle event the manager records. The
+ * single source of truth: the DB column, `repo.audit`, and the Status-page
+ * label map are all typed off this, so a writer can't emit an unlabelled action.
+ */
+export const AUDIT_ACTION_VALUES = [
+  "add_friend",
+  "resize",
+  "rotate_key",
+  "reissue_ts_key",
+  "suspend",
+  "resume",
+  "offboard",
+  "instance_recovered",
+  "instance_data_lost",
+] as const;
+export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
+
 /** Instance (container-pair) lifecycle, owned by the runtime layer. */
 export const INSTANCE_STATUS_VALUES = [
   "provisioning",
@@ -157,6 +175,17 @@ export const usageHistoryInput: z.ZodObject<{
 });
 export type UsageHistoryInput = z.infer<typeof usageHistoryInput>;
 
+/** Audit log, newest first. `before` pages back by the id cursor of the last
+ * row already shown (the "load older" button). */
+export const auditListInput: z.ZodObject<{
+  limit: z.ZodDefault<z.ZodNumber>;
+  before: z.ZodOptional<z.ZodNumber>;
+}> = z.object({
+  limit: z.number().int().min(1).max(100).default(20),
+  before: z.number().int().positive().optional(),
+});
+export type AuditListInput = z.infer<typeof auditListInput>;
+
 // ============================================================================
 // API output shapes that are NOT 1:1 with a table
 // ============================================================================
@@ -235,6 +264,17 @@ export type ActivityView = {
   bytesOutTotal: number;
   deniedCount: number;
   updatedAt: string;
+};
+
+/** One row in the Status-page "Recent events" log. `friend` is null for
+ * system/instance events, and for events whose friend was later offboarded
+ * (the audit row survives the friend). `id` is the "load older" cursor. */
+export type AuditEntryView = {
+  id: number;
+  when: string;
+  action: AuditAction;
+  friend: string | null;
+  detail: string | null;
 };
 
 /** Latest `mc du` sample paired with the quota for a usage bar. */

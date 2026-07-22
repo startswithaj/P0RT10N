@@ -14,6 +14,9 @@ vi.mock("../trpc.ts", async () => {
         get: { query: vi.fn() },
         diagnose: { query: vi.fn() },
       },
+      audit: {
+        list: { query: vi.fn() },
+      },
     },
     queryClient: new QueryClient(),
   };
@@ -36,6 +39,8 @@ describe("StatusPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    // Recent-events panel: default to empty; individual tests override.
+    asMock(trpc.audit.list.query).mockResolvedValue([]);
   });
 
   describe("instance health states", () => {
@@ -62,6 +67,48 @@ describe("StatusPage", () => {
       expect(screen.getByText("Down")).toBeInTheDocument();
       // Data loss reads distinctly from a recoverable "Down".
       expect(screen.getByText("Data lost")).toBeInTheDocument();
+    });
+  });
+
+  describe("recent events", () => {
+    it("renders the audit trail: humanized actions, friend or system", async () => {
+      asMock(trpc.status.get.query).mockResolvedValue(
+        makeStatusView({ minio: [], tailscale: [], host: [] }),
+      );
+      asMock(trpc.audit.list.query).mockResolvedValue([
+        {
+          id: 3,
+          when: "2026-07-22 10:00:00",
+          action: "instance_data_lost",
+          friend: null,
+          detail: "p0rt1on-alice — 1 portion(s), backups unrecoverable",
+        },
+        {
+          id: 2,
+          when: "2026-07-22 09:00:00",
+          action: "offboard",
+          friend: "carol",
+          detail: null,
+        },
+      ]);
+
+      renderPage();
+
+      // Await the async audit content before the synchronous assertions.
+      expect(await screen.findByText("Data lost")).toBeInTheDocument();
+      expect(screen.getByText("Recent events")).toBeInTheDocument();
+      expect(screen.getByText("Offboarded")).toBeInTheDocument(); // humanized
+      expect(screen.getByText("carol")).toBeInTheDocument();
+      expect(screen.getByText("system")).toBeInTheDocument(); // null friend
+    });
+
+    it("shows an empty note when the log has no entries", async () => {
+      asMock(trpc.status.get.query).mockResolvedValue(
+        makeStatusView({ minio: [], tailscale: [], host: [] }),
+      );
+      // audit.list defaults to [] in beforeEach.
+      renderPage();
+      expect(await screen.findByText("No events yet.")).toBeInTheDocument();
     });
   });
 

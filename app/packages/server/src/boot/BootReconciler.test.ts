@@ -103,6 +103,8 @@ describe("BootReconciler", () => {
 
     expect(summary.failed).toBe(1);
     expect(calls).toContain("repo:failInstanceMissing:10");
+    // The loss is recorded in the audit trail (survives the sweep).
+    expect(calls).toContain("repo:audit:instance_data_lost");
     // No empty instance fabricated over the lost backups.
     expect(calls).not.toContain("ops:recover:alice");
   });

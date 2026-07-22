@@ -1,5 +1,6 @@
 import type {
   ActivityView,
+  AuditEntryView,
   FriendDetail,
   FriendListItem,
   UsageView,
@@ -15,6 +16,7 @@ import {
 } from "../lib/ServiceError.ts";
 import type {
   ActivityService,
+  AuditService,
   FriendService,
   Logger,
   UsageService,
@@ -166,6 +168,14 @@ export class UsageServiceImpl implements UsageService {
 
   history(friendId: number, limit: number): Promise<UsageView[]> {
     return this.queries.usageHistory(friendId, limit);
+  }
+}
+
+export class AuditServiceImpl implements AuditService {
+  constructor(private readonly queries: FriendQueries) {}
+
+  list(limit: number, before?: number): Promise<AuditEntryView[]> {
+    return this.queries.recentAuditEntries(limit, before);
   }
 }
 

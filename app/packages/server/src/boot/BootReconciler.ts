@@ -149,6 +149,14 @@ export class BootReconciler {
         return "recovered";
       }
       const friendsFailed = await this.repo.failInstanceMissing(row.instanceId);
+      // Audit the loss (system row) so it survives in the log even after the
+      // failed friend rows are swept — the status page shows "Data lost" live,
+      // the audit trail records that it happened and when.
+      await this.repo.audit(
+        null,
+        "instance_data_lost",
+        `${row.tsHostname} — ${friendsFailed} portion(s), backups unrecoverable`,
+      );
       log.error("instance AND its data are gone — marked failed", {
         instance: row.tsHostname,
         friendsFailed,

@@ -32,7 +32,7 @@
     "check": "deno check app/packages/server/src/main.ts app/packages/server/src/trpc/root.ts",
     "db:generate": "deno -A npm:drizzle-kit generate --config drizzle.config.ts",
     "seed": "deno run --allow-read --allow-write --allow-env --allow-ffi --unstable-ffi devtools/seed.ts",
-    "dev:api": "deno run --env-file=.env --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi app/packages/server/src/main.ts",
+    "dev:api": "deno run --watch --env-file=.env --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi app/packages/server/src/main.ts",
     "dev:web": "deno task --cwd app/packages/client dev",
     "test": "deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi --ignore=**/*.integration.test.ts,app/packages/client/",
     "test:coverage": "deno test --coverage=coverage --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi --ignore=**/*.integration.test.ts,app/packages/client/",

@@ -24,6 +24,7 @@ import { denoPortProbe } from "./lib/net.ts";
 import type { Env } from "./lib/Env.ts";
 import {
   ActivityServiceImpl,
+  AuditServiceImpl,
   FriendServiceImpl,
   UsageServiceImpl,
 } from "./services/DbServices.ts";
@@ -170,6 +171,7 @@ export async function buildApp(
     provisioningService,
     usageService: new UsageServiceImpl(queries),
     activityService: new ActivityServiceImpl(queries),
+    auditService: new AuditServiceImpl(queries),
     inventoryService: new RuntimeInventoryService(
       queries,
       instanceRuntime,

@@ -8,7 +8,10 @@ set -e
 # Frontend dev server (Vite on 0.0.0.0:5173, published via the compose mapping).
 deno task dev:web &
 
-# Backend manager API — the main process; keep the same flags as the plain image.
-exec deno run \
+# Backend manager API — the main process. `--watch` restarts it on any source
+# change under the live-mounted repo (dev only), so the backend hot-reloads like
+# Vite does for the frontend. It watches the import graph, not the SQLite file,
+# so DB writes don't trigger restarts.
+exec deno run --watch \
   --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run \
   --unstable-ffi app/packages/server/src/main.ts

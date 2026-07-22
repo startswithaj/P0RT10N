@@ -280,7 +280,7 @@ describe("DrizzleProvisioningRepo", () => {
       namingFor("alice", "dedicated"),
     );
     await repo.audit(res.friendId, "add_friend", "mode=dedicated");
-    await repo.audit(null, "boot", undefined);
+    await repo.audit(null, "instance_data_lost", undefined);
 
     const row = database.driver.prepare("SELECT COUNT(*) c FROM audit").get();
     expect(row?.c).toBe(2);

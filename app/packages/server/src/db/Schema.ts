@@ -7,6 +7,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import {
+  AUDIT_ACTION_VALUES,
   FRIEND_STATUS_VALUES,
   INSTANCE_KIND_VALUES,
   INSTANCE_STATUS_VALUES,
@@ -136,12 +137,15 @@ export const usage = sqliteTable("usage", {
 ]);
 
 // ---- Audit ----
-// Admin actions taken in the UI (add/resize/rotate/suspend/offboard). friendId
-// is nullable for non-friend-scoped actions. `detail` is optional JSON context.
+// Lifecycle events (add/resize/rotate/suspend/offboard + boot recover/data-loss).
+// friendId is nullable for non-friend-scoped (system) actions. `friendName` is
+// SNAPSHOT at write time so history survives the friend being offboarded/renamed
+// — never resolve the name by a live join. `detail` is optional context.
 export const audit = sqliteTable("audit", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   friendId: integer("friend_id").references(() => friends.id),
-  action: text("action").notNull(),
+  friendName: text("friend_name"),
+  action: text("action", { enum: AUDIT_ACTION_VALUES }).notNull(),
   detail: text("detail"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => [

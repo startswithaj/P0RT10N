@@ -1,6 +1,7 @@
 import type {
   ActivityView,
   AddFriendInput,
+  AuditEntryView,
   FriendBundle,
   FriendDetail,
   FriendListItem,
@@ -58,6 +59,11 @@ export interface ProvisioningService {
 /** Point-in-time usage history (`mc du` samples). */
 export interface UsageService {
   history(friendId: number, limit: number): Promise<UsageView[]>;
+}
+
+/** The audit log — every lifecycle event, newest first, paged by id cursor. */
+export interface AuditService {
+  list(limit: number, before?: number): Promise<AuditEntryView[]>;
 }
 
 /** System inventory for the ops/Status page (instances + nodes + host health). */

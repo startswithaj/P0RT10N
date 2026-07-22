@@ -468,8 +468,8 @@ export function mockProvisioningRepo(
       calls.push("repo:deleteInstance");
       return Promise.resolve();
     },
-    audit: () => {
-      calls.push("repo:audit");
+    audit: (_friendId, action) => {
+      calls.push(`repo:audit:${action}`);
       return Promise.resolve();
     },
     ...overrides,

@@ -4,7 +4,11 @@
 import { openDatabase } from "../app/packages/server/src/db/Database.ts";
 import { runMigrations } from "../app/packages/server/src/db/MigrationRunner.ts";
 import { DrizzleProvisioningRepo } from "../app/packages/server/src/db/ProvisioningRepo.ts";
-import { activity, usage } from "../app/packages/server/src/db/Schema.ts";
+import {
+  activity,
+  audit,
+  usage,
+} from "../app/packages/server/src/db/Schema.ts";
 import type { IsolationMode } from "../app/packages/shared/domain.ts";
 
 const path = Deno.env.get("P0RT1ON_DB_PATH") ?? "./.p0rt1on-dev.db";
@@ -28,7 +32,7 @@ async function seed(
   reqMin: number,
   lastReq: string,
   retention: number,
-) {
+): Promise<number> {
   const res = await repo.reserveFriend(
     {
       name,
@@ -59,9 +63,10 @@ async function seed(
     objectCount: objects,
     checkedAt: "2026-06-30T09:00:00Z",
   }).run();
+  return res.friendId;
 }
 
-await seed(
+const alice = await seed(
   "alice",
   "dedicated",
   30,
@@ -71,8 +76,74 @@ await seed(
   "2026-06-30T09:00:00Z",
   30,
 );
-await seed("bob", "shared", 50, 47, 9880, 0, "2026-06-24T09:00:00Z", 14);
-await seed("carol", "shared", 10, 0.8, 40, 4, "2026-06-30T08:59:00Z", 14);
+const bob = await seed(
+  "bob",
+  "shared",
+  50,
+  47,
+  9880,
+  0,
+  "2026-06-24T09:00:00Z",
+  14,
+);
+const carol = await seed(
+  "carol",
+  "shared",
+  10,
+  0.8,
+  40,
+  4,
+  "2026-06-30T08:59:00Z",
+  14,
+);
+
+// Lifecycle events so the Status-page "Recent events" panel isn't empty in dev
+// (the seed bypasses the provision flow that writes these for real). Timestamps
+// use SQLite's `datetime` format (space-separated, UTC).
+db.insert(audit).values([
+  {
+    friendId: alice,
+    friendName: "alice",
+    action: "add_friend",
+    detail: "mode=dedicated",
+    createdAt: "2026-06-28 09:00:00",
+  },
+  {
+    friendId: bob,
+    friendName: "bob",
+    action: "add_friend",
+    detail: "mode=shared",
+    createdAt: "2026-06-24 09:05:00",
+  },
+  {
+    friendId: carol,
+    friendName: "carol",
+    action: "add_friend",
+    detail: "mode=shared",
+    createdAt: "2026-06-24 09:06:00",
+  },
+  {
+    friendId: alice,
+    friendName: "alice",
+    action: "resize",
+    detail: "quotaBytes=32212254720",
+    createdAt: "2026-06-29 14:30:00",
+  },
+  {
+    friendId: carol,
+    friendName: "carol",
+    action: "suspend",
+    detail: null,
+    createdAt: "2026-06-30 08:00:00",
+  },
+  {
+    friendId: null,
+    friendName: null,
+    action: "instance_recovered",
+    detail: "p0rt1on-alice recreated over surviving data",
+    createdAt: "2026-07-01 06:15:00",
+  },
+]).run();
 
 driver.close();
-console.log(`Seeded 3 friends into ${path}`);
+console.log(`Seeded 3 friends (+ audit events) into ${path}`);

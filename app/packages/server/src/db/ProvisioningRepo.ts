@@ -1,5 +1,9 @@
 import { and, count, eq, ne } from "drizzle-orm";
-import type { AddFriendInput, FriendStatus } from "@p0rt1on/shared/domain";
+import type {
+  AddFriendInput,
+  AuditAction,
+  FriendStatus,
+} from "@p0rt1on/shared/domain";
 import type { Db } from "./Database.ts";
 import {
   activity,
@@ -280,11 +284,22 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
 
   audit(
     friendId: number | null,
-    action: string,
+    action: AuditAction,
     detail?: string,
   ): Promise<void> {
     return defer(() => {
-      this.db.insert(auditTable).values({ friendId, action, detail }).run();
+      // Snapshot the name now — offboard deletes the friend row (and nulls
+      // friendId on surviving audit rows), so a live join would later lose it.
+      const friendName = friendId === null ? null : (this.db
+        .select({ name: friends.name }).from(friends)
+        .where(eq(friends.id, friendId)).get()?.name ?? null);
+      this.db.insert(auditTable).values({
+        friendId,
+        friendName,
+        action,
+        detail,
+      })
+        .run();
     });
   }
 

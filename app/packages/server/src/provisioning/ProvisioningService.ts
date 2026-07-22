@@ -302,6 +302,13 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
     // Webhook + ACLs — the same path a healthy instance realigns through.
     await this.realignInstanceLocked(instance);
+    // System audit row (friendId null): the event is instance-level and may
+    // span several pooled friends; the detail names the instance.
+    await this.repo.audit(
+      null,
+      "instance_recovered",
+      `${instance.tsHostname} recreated over surviving data`,
+    );
     if (this.config.aclMode === "manual") {
       log.warn(
         "manual ACL mode: instance re-enrolled — verify its grants still " +
@@ -389,13 +396,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "record" };
     // Record the offboard BEFORE deleting the friend row: the audit FK points at
     // friends.id, so inserting after the delete trips a FOREIGN KEY constraint.
-    // deleteFriend nulls the friendId on surviving audit rows, so keep the name
-    // in `detail` for the trail.
-    await this.repo.audit(
-      friendId,
-      "offboard",
-      `name=${ctx.name} mode=${ctx.isolationMode}`,
-    );
+    // The name is snapshot into the audit row (friendName), so it survives the
+    // delete without stuffing it into `detail`.
+    await this.repo.audit(friendId, "offboard", `mode=${ctx.isolationMode}`);
     await this.repo.deleteFriend(friendId);
     yield { type: "step", step: "reap" };
     await this.reapInstanceIfEmpty(ctx, log);

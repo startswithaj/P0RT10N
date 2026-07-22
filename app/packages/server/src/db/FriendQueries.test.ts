@@ -113,6 +113,26 @@ describe("FriendQueries", () => {
     expect(await queries.usageHistory(999, 10)).toEqual([]);
   });
 
+  it("recentAuditEntries: newest first, joins friend name, pages by cursor", async () => {
+    const alice = await addFriend("alice");
+    await repo.audit(alice.friendId, "add_friend");
+    await repo.audit(alice.friendId, "rotate_key");
+    await repo.audit(null, "instance_data_lost", "p0rt1on-bob");
+
+    const page1 = await queries.recentAuditEntries(2);
+    expect(page1.map((e) => e.action)).toEqual([
+      "instance_data_lost",
+      "rotate_key",
+    ]);
+    expect(page1[0].friend).toBeNull(); // system/instance row (no friendId)
+    expect(page1[0].detail).toBe("p0rt1on-bob");
+    expect(page1[1].friend).toBe("alice"); // name from the LEFT JOIN
+
+    // "Load older": page back from the id cursor of the last shown row.
+    const page2 = await queries.recentAuditEntries(2, page1[1].id);
+    expect(page2.map((e) => e.action)).toEqual(["add_friend"]);
+  });
+
   it("detail: joins friend + instance + newest usage + activity", async () => {
     const res = await addFriend("alice");
     await repo.recordAccessKey(res.friendId, "AKIA1");

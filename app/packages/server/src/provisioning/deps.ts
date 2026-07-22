@@ -1,5 +1,6 @@
 import type {
   AddFriendInput,
+  AuditAction,
   FriendStatus,
   IsolationMode,
   LockMode,
@@ -194,10 +195,11 @@ export interface ProvisioningRepo {
   /** Remove the instance row (offboard, last friend only). */
   deleteInstance(instanceId: number): Promise<void>;
 
-  /** Append an `audit` row for an admin action. */
+  /** Append an `audit` row for a lifecycle event. `action` is a typed code
+   * (AuditAction) so writers can't emit one the UI won't label. */
   audit(
     friendId: number | null,
-    action: string,
+    action: AuditAction,
     detail?: string,
   ): Promise<void>;
 }

@@ -428,8 +428,8 @@ describe("ProvisioningService.offboard", () => {
       repo: { context: () => Promise.resolve(CTX) },
     }).offboard(1);
 
-    expect(calls).toContain("repo:audit");
-    expect(calls.indexOf("repo:audit")).toBeLessThan(
+    expect(calls).toContain("repo:audit:offboard");
+    expect(calls.indexOf("repo:audit:offboard")).toBeLessThan(
       calls.indexOf("repo:deleteFriend"),
     );
   });
