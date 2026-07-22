@@ -69,10 +69,15 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   offboard: "Offboarded",
   instance_recovered: "Recovered",
   instance_data_lost: "Data lost",
+  login: "Signed in",
+  logout: "Signed out",
+  action_failed: "Failed",
 };
 
 function eventDot(action: AuditAction): string {
-  if (action === "instance_data_lost") return eventDotRed;
+  if (action === "instance_data_lost" || action === "action_failed") {
+    return eventDotRed;
+  }
   if (action === "instance_recovered" || action === "suspend") {
     return eventDotAmber;
   }

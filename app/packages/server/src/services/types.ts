@@ -1,6 +1,7 @@
 import type {
   ActivityView,
   AddFriendInput,
+  AuditAction,
   AuditEntryView,
   FriendBundle,
   FriendDetail,
@@ -61,9 +62,12 @@ export interface UsageService {
   history(friendId: number, limit: number): Promise<UsageView[]>;
 }
 
-/** The audit log — every lifecycle event, newest first, paged by id cursor. */
+/** The audit log — read the trail, and record system-level events (auth, failed
+ * mutations) that don't belong to a single service's success path. */
 export interface AuditService {
   list(limit: number, before?: number): Promise<AuditEntryView[]>;
+  /** Append a system row (no friend) — login/logout and failed actions. */
+  record(action: AuditAction, detail?: string): Promise<void>;
 }
 
 /** System inventory for the ops/Status page (instances + nodes + host health). */

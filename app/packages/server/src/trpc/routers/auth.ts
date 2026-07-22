@@ -37,15 +37,17 @@ export const authRouter = router({
         "Set-Cookie",
         sessionCookie(token, MAX_AGE_SECONDS, ctx.secureCookie ?? false),
       );
+      await ctx.auditService.record("login");
       return { ok: true };
     }),
 
-  logout: publicProcedure.mutation(({ ctx }) => {
+  logout: publicProcedure.mutation(async ({ ctx }) => {
     if (ctx.sessionToken) ctx.auth.destroy(ctx.sessionToken);
     ctx.responseHeaders?.append(
       "Set-Cookie",
       sessionCookie("", 0, ctx.secureCookie ?? false),
     );
+    await ctx.auditService.record("logout");
     return { ok: true };
   }),
 });

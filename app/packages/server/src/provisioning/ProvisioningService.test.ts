@@ -156,6 +156,8 @@ describe("ProvisioningService.addFriend", () => {
 
     await expect(svc.addFriend(ADD_INPUT)).rejects.toThrow("smoke failed");
     expect(calls).toContain("repo:markFailed");
+    // The failed add is audited (it runs detached, so no tRPC middleware sees it).
+    expect(calls).toContain("repo:audit:action_failed");
     // Retention must NOT be armed after a failed smoke-test.
     expect(calls).not.toContain("mc:setDefaultRetention");
   });

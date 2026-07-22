@@ -171,7 +171,7 @@ export async function buildApp(
     provisioningService,
     usageService: new UsageServiceImpl(queries),
     activityService: new ActivityServiceImpl(queries),
-    auditService: new AuditServiceImpl(queries),
+    auditService: new AuditServiceImpl(queries, repo),
     inventoryService: new RuntimeInventoryService(
       queries,
       instanceRuntime,

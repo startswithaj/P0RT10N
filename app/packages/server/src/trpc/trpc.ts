@@ -77,6 +77,17 @@ const loggingMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
       code: result.error.code,
       error: result.error.message,
     });
+    // The failed half of the audit trail: every errored admin mutation (auth
+    // included). Queries aren't actions, so they're skipped. Best-effort — a
+    // failed audit write must never turn one failure into two.
+    if (type === "mutation") {
+      await ctx.auditService.record(
+        "action_failed",
+        `${path}: ${result.error.message}`,
+      ).catch((err) =>
+        ctx.logger.error("audit record failed", { error: String(err) })
+      );
+    }
   }
   return result;
 });

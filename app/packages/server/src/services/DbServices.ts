@@ -1,5 +1,6 @@
 import type {
   ActivityView,
+  AuditAction,
   AuditEntryView,
   FriendDetail,
   FriendListItem,
@@ -172,10 +173,18 @@ export class UsageServiceImpl implements UsageService {
 }
 
 export class AuditServiceImpl implements AuditService {
-  constructor(private readonly queries: FriendQueries) {}
+  constructor(
+    private readonly queries: FriendQueries,
+    // The write side lives on the repo; only `audit` is needed here.
+    private readonly writer: Pick<ProvisioningRepo, "audit">,
+  ) {}
 
   list(limit: number, before?: number): Promise<AuditEntryView[]> {
     return this.queries.recentAuditEntries(limit, before);
+  }
+
+  record(action: AuditAction, detail?: string): Promise<void> {
+    return this.writer.audit(null, action, detail);
   }
 }
 

@@ -19,6 +19,8 @@ describe("auth router", () => {
       auth,
       logger: noopLogger(),
       responseHeaders: new Headers(),
+      // login/logout audit themselves — a no-op recorder is enough here.
+      auditService: { record: () => Promise.resolve() },
       ...over,
     }) as unknown as TrpcContext;
 
@@ -63,6 +65,26 @@ describe("auth router", () => {
     await call(ctxFor(auth, { sessionToken: token })).auth.logout();
     expect(await call(ctxFor(auth, { sessionToken: token })).auth.status())
       .toEqual({ enabled: true, authenticated: false });
+  });
+
+  it("records login + logout in the audit trail", async () => {
+    const auth = await AdminAuth.create(creds);
+    const actions: string[] = [];
+    const ctx = {
+      auth,
+      logger: noopLogger(),
+      responseHeaders: new Headers(),
+      auditService: {
+        record: (a: string) => {
+          actions.push(a);
+          return Promise.resolve();
+        },
+      },
+    } as unknown as TrpcContext;
+
+    await call(ctx).auth.login(creds);
+    await call(ctx).auth.logout();
+    expect(actions).toEqual(["login", "logout"]);
   });
 
   it("login sets the Secure flag when the proxy signals https", async () => {

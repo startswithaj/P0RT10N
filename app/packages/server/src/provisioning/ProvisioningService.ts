@@ -127,6 +127,13 @@ export class ProvisioningService implements ProvisioningServiceContract {
     } catch (err) {
       // Mark recoverable-failed for the cleanup sweep, then rethrow unchanged.
       await this.repo.markFailed(reservation.friendId);
+      // Audit the failure BEFORE the reap below deletes the friend row — the
+      // add runs in a detached job, so the tRPC middleware never sees this.
+      await this.repo.audit(
+        reservation.friendId,
+        "action_failed",
+        `add ${input.name}: ${String(err)}`,
+      ).catch(() => {/* best-effort; never mask the original error */});
       // Best-effort container diagnostics so the failure log says WHY.
       const diag = await this.runtime
         .diagnoseInstance(reservation.tsHostname)

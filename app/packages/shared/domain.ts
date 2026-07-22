@@ -49,6 +49,11 @@ export const AUDIT_ACTION_VALUES = [
   "offboard",
   "instance_recovered",
   "instance_data_lost",
+  "login",
+  "logout",
+  // Any admin mutation that errored — the failed half of the trail. The failing
+  // path + reason ride in `detail`.
+  "action_failed",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
 
