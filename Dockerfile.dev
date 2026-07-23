@@ -7,22 +7,27 @@
 # backend and Vite pick up code changes without a rebuild.
 FROM denoland/deno:2.8.2
 
-# Bundle the two external binaries the app shells out to: `mc` (MinIO admin) and
-# the docker CLI (launch/inspect instance containers). TARGETARCH is provided by
-# buildkit (amd64 / arm64) so this builds on either.
+# Bundle the docker CLI the app shells out to (launch/inspect instance
+# containers). TARGETARCH is provided by buildkit (amd64 / arm64) so this builds
+# on either. docker has no published checksum, so DOCKER_SHA is self-computed
+# from the pinned tgz. `mc` is copied from Chainguard's hardened image below.
 ARG TARGETARCH
 ARG DOCKER_VERSION=27.5.1
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-  && curl -fsSL "https://dl.min.io/client/mc/release/linux-${TARGETARCH}/mc" -o /usr/local/bin/mc \
-  && chmod +x /usr/local/bin/mc \
   && case "${TARGETARCH}" in \
-       amd64) DOCKER_ARCH=x86_64 ;; \
-       arm64) DOCKER_ARCH=aarch64 ;; \
+       amd64) DOCKER_ARCH=x86_64;  DOCKER_SHA=4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640 ;; \
+       arm64) DOCKER_ARCH=aarch64; DOCKER_SHA=e6b53725a73763ab3f988c73f8772eaed429754c1a579db5ff11f21990fd1817 ;; \
        *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
      esac \
-  && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz" \
-     | tar -xz -C /usr/local/bin --strip-components=1 docker/docker \
+  && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz" -o /tmp/docker.tgz \
+  && echo "${DOCKER_SHA}  /tmp/docker.tgz" | sha256sum -c - \
+  && tar -xz -C /usr/local/bin --strip-components=1 -f /tmp/docker.tgz docker/docker \
+  && rm -f /tmp/docker.tgz \
   && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# mc (MinIO admin): Chainguard's hardened minio-client — matches the production
+# Dockerfile. Installed as `mc` so the app's argv is unchanged.
+COPY --from=cgr.dev/chainguard/minio-client:latest /usr/bin/mc /usr/local/bin/mc
 
 WORKDIR /app
 COPY deno.json deno.lock ./
