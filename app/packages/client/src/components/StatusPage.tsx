@@ -19,6 +19,7 @@ const statGrid = css({
   mt: "8",
   mb: "10",
 });
+
 const card = css({
   bg: "bg.default",
   borderWidth: "1px",
@@ -27,6 +28,7 @@ const card = css({
   p: "5",
   boxShadow: "lg",
 });
+
 const statTop = css({
   display: "flex",
   alignItems: "center",
@@ -37,22 +39,26 @@ const statTop = css({
   textTransform: "uppercase",
   mb: "3",
 });
+
 const statValue = css({
   fontSize: "2xl",
   fontWeight: "bold",
   lineHeight: "1.1",
 });
+
 // Deliberate weight drop: the muted suffix renders Space Mono Regular at 2xl
 // (reads much lighter/rounder than the bold value — that contrast is the look).
 const statValueMuted = css({ color: "fg.muted", fontWeight: "normal" });
 
 const section = css({ mb: "8" });
+
 const sectionTitle = css({
   fontFamily: "display",
   fontSize: "lg",
   color: "fg.default",
   mb: "4",
 });
+
 const list = css({ display: "flex", flexDirection: "column", gap: "2" });
 const empty = css({ color: "fg.muted", fontSize: "sm" });
 const errorBox = css({ color: "fg.muted", fontSize: "sm", mt: "8" });

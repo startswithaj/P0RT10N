@@ -14,6 +14,7 @@ const page = css({
   placeItems: "center",
   p: "6",
 });
+
 const card = css({ width: "100%", maxWidth: "sm", boxShadow: "lg" });
 const brand = css({ display: "flex", alignItems: "center", gap: "3", mb: "2" });
 const form = css({ display: "flex", flexDirection: "column", gap: "4" });

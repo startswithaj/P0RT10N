@@ -23,16 +23,19 @@ const row = css({
   // they don't compete with the stat cards above.
   boxShadow: "sm",
 });
+
 const rowClickable = css({
   cursor: "pointer",
   _hover: { borderColor: "border.outline" },
 });
+
 const rowLeft = css({
   display: "flex",
   alignItems: "center",
   gap: "3",
   minW: "0",
 });
+
 const rowRight = css({
   display: "flex",
   alignItems: "center",
@@ -41,6 +44,7 @@ const rowRight = css({
   // the row's clickable hand. Re-inherit so the whole row keeps one cursor.
   "& button": { cursor: "inherit" },
 });
+
 const rowIcon = css({
   display: "grid",
   placeItems: "center",
@@ -52,9 +56,11 @@ const rowIcon = css({
   color: "cyan.9",
   flexShrink: "0",
 });
+
 const rowName = css({ fontWeight: "bold", fontSize: "sm" });
 const rowSub = css({ color: "fg.muted", fontSize: "xs" });
 const chevron = css({ color: "fg.muted", display: "inline-flex" });
+
 const statusPill = css({
   display: "inline-flex",
   alignItems: "center",
@@ -65,8 +71,10 @@ const statusPill = css({
   textTransform: "uppercase",
   flexShrink: "0",
 });
+
 const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "cyan.9" });
 const dotDown = css({ w: "2", h: "2", rounded: "full", bg: "fg.error" });
+
 const dotProv = css({
   w: "2",
   h: "2",
@@ -74,6 +82,7 @@ const dotProv = css({
   bg: "warning",
   animation: "pulse 1.4s ease-in-out infinite",
 });
+
 const upText = css({ color: "cyan.11" });
 const downText = css({ color: "fg.error" });
 const provText = css({ color: "warning" });

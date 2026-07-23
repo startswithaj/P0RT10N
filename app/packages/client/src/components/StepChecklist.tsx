@@ -9,6 +9,7 @@ import { CircleCheck, LoaderCircle, XCircle } from "lucide-solid";
 export type StepStatus = "done" | "active" | "failed" | "pending";
 
 const list = css({ display: "flex", flexDirection: "column" });
+
 const row = css({
   display: "flex",
   alignItems: "center",
@@ -18,9 +19,11 @@ const row = css({
   rounded: "l2",
   fontSize: "sm",
 });
+
 // Light mode's bg.muted highlight is fine; in dark, slate reads muddy/green on
 // the indigo surface, so use a faint spark (magenta) tint — the brand highlight.
 const rowActive = css({ bg: "bg.muted", _dark: { bg: "spark/12" } });
+
 const iconWrap = css({
   display: "grid",
   placeItems: "center",
@@ -28,10 +31,12 @@ const iconWrap = css({
   h: "5",
   flexShrink: "0",
 });
+
 const spin = css({
   animation: "spin 0.8s linear infinite",
   color: "cyan.9",
 });
+
 const pendingDot = css({
   w: "4",
   h: "4",
@@ -39,6 +44,7 @@ const pendingDot = css({
   borderWidth: "2px",
   borderColor: "border.default",
 });
+
 const doneIcon = css({ color: "cyan.9" });
 const errorMark = css({ color: "fg.error" });
 const labelDone = css({ color: "fg.default" });

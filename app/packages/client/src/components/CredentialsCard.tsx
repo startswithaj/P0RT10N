@@ -16,6 +16,7 @@ const credCard = css({
   px: "4",
   boxShadow: "lg",
 });
+
 const fieldRow = css({
   display: "flex",
   alignItems: "center",
@@ -26,7 +27,9 @@ const fieldRow = css({
   borderColor: "border.default",
   _last: { borderBottomWidth: "0" },
 });
+
 const fieldMeta = css({ minW: "0" });
+
 const fieldLabel = css({
   fontSize: "xs",
   color: "fg.muted",
@@ -34,12 +37,14 @@ const fieldLabel = css({
   letterSpacing: "0.08em",
   mb: "1",
 });
+
 const fieldValue = css({
   fontFamily: "body",
   fontSize: "sm",
   color: "fg.default",
   wordBreak: "break-all",
 });
+
 const valueRow = css({ display: "flex", alignItems: "center", gap: "2" });
 
 const DOTS = "••••••••••••••••••••••••";

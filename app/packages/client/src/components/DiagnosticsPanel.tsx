@@ -18,19 +18,23 @@ const panel = css({
   flexDirection: "column",
   gap: "2",
 });
+
 const panelMeta = css({
   display: "flex",
   flexWrap: "wrap",
   gap: "4",
   fontSize: "xs",
 });
+
 const panelKey = css({
   color: "fg.muted",
   textTransform: "uppercase",
   letterSpacing: "0.08em",
   mr: "1.5",
 });
+
 const panelReason = css({ fontSize: "xs", color: "fg.default" });
+
 const panelLogs = css({
   fontFamily: "body",
   fontSize: "xs",
@@ -46,6 +50,7 @@ const panelLogs = css({
   maxH: "60",
   overflowY: "auto",
 });
+
 const panelMutedText = css({ color: "fg.muted", fontSize: "xs" });
 
 export function DiagnosticsPanel(props: { instance: string }) {

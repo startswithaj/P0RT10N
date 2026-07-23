@@ -20,6 +20,7 @@ const LABEL: Record<InviteStatus, string> = {
 // Auth-key friends render nothing.
 export function InviteStatusBadge(props: { friend: FriendRow }) {
   const isInvite = () => props.friend.enrollmentMode === "invite";
+
   const outstanding = () =>
     props.friend.inviteStatus === "pending" ||
     props.friend.inviteStatus === "manual";

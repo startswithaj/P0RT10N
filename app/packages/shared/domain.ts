@@ -142,6 +142,7 @@ export const addFriendInput: z.ZodObject<{
   // omit it; invite mode carries the friend's email.
   enrollment: enrollmentSchema.default({ mode: "authKey" }),
 });
+
 export type AddFriendInput = z.infer<typeof addFriendInput>;
 
 const friendIdSchema: z.ZodNumber = z.number().int().positive();
@@ -191,9 +192,11 @@ export type GetFriendInput = z.infer<typeof getFriendInput>;
 /** Job observer inputs: `jobs.progress` (SSE replay+live) and the single-claim
  * bundle handover `jobs.claimBundle`. Job ids are opaque UUIDs. */
 export const jobIdSchema: z.ZodString = z.string().uuid();
+
 export const jobInput: z.ZodObject<{ jobId: typeof jobIdSchema }> = z.object({
   jobId: jobIdSchema,
 });
+
 export type JobInput = z.infer<typeof jobInput>;
 
 /** Usage history (point-in-time `mc du` samples), newest first. */
@@ -204,6 +207,7 @@ export const usageHistoryInput: z.ZodObject<{
   friendId: friendIdSchema,
   limit: z.number().int().min(1).max(500).default(100),
 });
+
 export type UsageHistoryInput = z.infer<typeof usageHistoryInput>;
 
 /** Audit log, newest first. `before` pages back by the id cursor of the last
@@ -215,6 +219,7 @@ export const auditListInput: z.ZodObject<{
   limit: z.number().int().min(1).max(100).default(20),
   before: z.number().int().positive().optional(),
 });
+
 export type AuditListInput = z.infer<typeof auditListInput>;
 
 // ============================================================================

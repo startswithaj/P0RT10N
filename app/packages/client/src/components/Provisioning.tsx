@@ -47,10 +47,12 @@ const page = css({
   color: "fg.default",
   fontFamily: "body",
 });
+
 const shell = css({ maxW: "640px", mx: "auto", px: "6", py: "8" });
 const head = css({ display: "flex", alignItems: "center", gap: "3", mb: "1" });
 const title = css({ fontFamily: "display", fontSize: "xl", lineHeight: "1.2" });
 const subtitle = css({ color: "fg.muted", fontSize: "sm", mb: "6" });
+
 const card = css({
   bg: "bg.default",
   borderWidth: "1px",
@@ -59,6 +61,7 @@ const card = css({
   p: "3",
   boxShadow: "lg",
 });
+
 const success = css({
   display: "flex",
   flexDirection: "column",
@@ -67,22 +70,27 @@ const success = css({
   gap: "2",
   mt: "8",
 });
+
 const successMark = css({ color: "cyan.9" });
 const errorMark = css({ color: "fg.error" });
+
 const errorText = css({
   color: "fg.error",
   fontSize: "sm",
   maxW: "sm",
   wordBreak: "break-word",
 });
+
 const successTitle = css({ fontFamily: "display", fontSize: "lg" });
 const successSub = css({ color: "fg.muted", fontSize: "sm", maxW: "sm" });
+
 const actions = css({
   display: "flex",
   justifyContent: "center",
   gap: "3",
   mt: "6",
 });
+
 // Primary CTA keeps the brand magenta spark + rounded-full pill + hover lift;
 // the Button recipe supplies sizing, gap and typography. _hover pins bg:spark so
 // the recipe's cyan solid hover fill can't show.
@@ -93,6 +101,7 @@ const sparkBtn = css({
   transition: "transform 0.12s ease",
   _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
+
 // Secondary action: Park's outline variant, kept as a rounded-full pill to match.
 const pillOutline = css({ rounded: "full" });
 

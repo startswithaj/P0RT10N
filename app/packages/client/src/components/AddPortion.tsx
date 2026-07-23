@@ -43,13 +43,16 @@ const page = css({
   color: "fg.default",
   fontFamily: "body",
 });
+
 const shell = css({ maxW: "640px", mx: "auto", px: "6", py: "8" });
+
 const topRow = css({
   display: "flex",
   alignItems: "center",
   gap: "3",
   mb: "2",
 });
+
 const title = css({ fontFamily: "display", fontSize: "xl", lineHeight: "1.2" });
 const subtitle = css({ color: "fg.muted", fontSize: "sm", mb: "6", ml: "12" });
 
@@ -64,6 +67,7 @@ const card = css({
   gap: "6",
   boxShadow: "lg",
 });
+
 const actions = css({
   display: "flex",
   justifyContent: "flex-end",
@@ -71,8 +75,10 @@ const actions = css({
   gap: "3",
   mt: "2",
 });
+
 // Why the CTA is disabled (CODE.md: no disabled buttons without a reason).
 const blockHint = css({ fontSize: "sm", color: "fg.muted", mr: "auto" });
+
 // Soft-isolation trade-off note, shown at the decision point (PLAN wireframe).
 const sharedBanner = css({
   fontSize: "sm",
@@ -85,6 +91,7 @@ const sharedBanner = css({
   p: "3",
   mt: "3",
 });
+
 // Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
 // Button recipe still supplies sizing, radius and typography.
 const sparkBtn = css({

@@ -16,6 +16,7 @@ import { card } from "./card";
 import { button } from "./button";
 import { badge } from "./badge";
 import { absoluteCenter } from "./absolute-center";
+
 export const recipes = {
   absoluteCenter,
   badge,
@@ -36,4 +37,5 @@ export const recipes = {
   skeleton,
   tooltip,
 };
+
 export const slotRecipes = {};

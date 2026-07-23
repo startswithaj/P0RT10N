@@ -30,6 +30,7 @@ const page = css({
   color: "fg.default",
   fontFamily: "body",
 });
+
 const shell = css({ maxW: "640px", mx: "auto", px: "6", py: "8" });
 const head = css({ mb: "1" });
 const title = css({ fontFamily: "display", fontSize: "xl", lineHeight: "1.2" });
@@ -47,6 +48,7 @@ const warn = css({
   boxShadow: "lg",
   mb: "6",
 });
+
 const warnIcon = css({ color: "spark", flexShrink: "0", mt: "0.5" });
 const warnText = css({ fontSize: "sm", lineHeight: "1.5" });
 
@@ -58,6 +60,7 @@ const actions = css({
   gap: "3",
   mt: "8",
 });
+
 // Primary CTA keeps the brand magenta spark + rounded-full pill + hover lift;
 // the Button recipe supplies sizing, gap and typography. _hover pins bg:spark so
 // the recipe's cyan solid hover fill can't show.
@@ -68,6 +71,7 @@ const sparkBtn = css({
   transition: "transform 0.12s ease",
   _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
+
 // Secondary action: Park's outline variant, kept as a rounded-full pill to match.
 const pillOutline = css({ rounded: "full" });
 

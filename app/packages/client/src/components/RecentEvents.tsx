@@ -12,12 +12,14 @@ import { relativeTime } from "./helpers.ts";
 // newest first. Live health lives in the sections above; this is what HAPPENED.
 
 const section = css({ mb: "8" });
+
 const sectionTitle = css({
   fontFamily: "display",
   fontSize: "lg",
   color: "fg.default",
   mb: "4",
 });
+
 const list = css({ display: "flex", flexDirection: "column", gap: "2" });
 const empty = css({ color: "fg.muted", fontSize: "sm" });
 
@@ -33,22 +35,27 @@ const eventRow = css({
   py: "3",
   boxShadow: "sm",
 });
+
 const eventDotBase = { w: "2", h: "2", rounded: "full", flexShrink: "0" };
 const eventDotRed = css({ ...eventDotBase, bg: "fg.error" });
 const eventDotAmber = css({ ...eventDotBase, bg: "warning" });
 const eventDotNeutral = css({ ...eventDotBase, bg: "cyan.9" });
+
 // The portion name leads as the subject (bold); the action follows, muted.
 const eventFriend = css({
   fontWeight: "bold",
   fontSize: "sm",
   flexShrink: "0",
 });
+
 const eventAction = css({
   color: "fg.muted",
   fontSize: "sm",
   flexShrink: "0",
 });
+
 const eventWhen = css({ color: "fg.muted", fontSize: "xs", flexShrink: "0" });
+
 const eventDetail = css({
   color: "fg.muted",
   fontSize: "xs",
@@ -56,6 +63,7 @@ const eventDetail = css({
   textAlign: "right",
   minW: "0",
 });
+
 const loadOlder = css({ mt: "3" });
 
 // Human label per audit action. Exhaustive: adding an AuditAction without a

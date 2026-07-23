@@ -28,6 +28,7 @@ const CONSOLE_FN: Record<LogLevel, (line: string) => void> = {
   warn: (line) => console.warn(line),
   error: (line) => console.error(line),
 };
+
 const defaultSink: LogSink = (level, line) => CONSOLE_FN[level](line);
 
 /**

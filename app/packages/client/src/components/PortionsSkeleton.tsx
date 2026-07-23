@@ -12,6 +12,7 @@ const statGrid = css({
   mt: "8",
   mb: "12",
 });
+
 const cardGrid = css({
   display: "grid",
   gridTemplateColumns: {
@@ -21,24 +22,28 @@ const cardGrid = css({
   },
   gap: "4",
 });
+
 const cardShell = css({
   boxShadow: "lg",
   borderWidth: "1px",
   borderColor: "border.default",
   bg: "bg.default",
 });
+
 const sectionTitle = css({
   fontFamily: "display",
   fontSize: "xl",
   color: "fg.default",
   mb: "5",
 });
+
 const statBody = css({
   p: "5",
   display: "flex",
   flexDirection: "column",
   gap: "4",
 });
+
 const cardBody = css({ p: "6" });
 
 /** Loading placeholder for the portions dashboard. */
