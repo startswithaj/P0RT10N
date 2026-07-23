@@ -153,6 +153,10 @@ export const CONTAINER_RUN_SPEC: ContainerRunSpec = {
   stateSource: "p0rt1on-tsstate-alice",
   rootCredSecretRef: "/run/secrets/minio-alice.env",
   network: "p0rt1on-net",
+  // Network addressing (how it actually ships): the manager reaches MinIO by
+  // container name, so no host port is published. Host mode is the explicit
+  // opt-in — see the host-publish test.
+  publishHostPort: false,
 };
 
 /** One recorded HTTP request. */

@@ -112,11 +112,12 @@ export class DockerRuntime implements ContainerRuntime {
 
   /**
    * Run the instance container: the combined image brings tailscaled up, serves
-   * MinIO over the tailnet, and runs MinIO — all inside one container. MinIO is
-   * published to the host loopback (`127.0.0.1:<port>`) so the manager reaches it
-   * for admin without joining the container's network; friends reach it only over
-   * Tailscale. Root creds come from a mounted env-file (path only — no secret in
-   * args).
+   * MinIO over the tailnet, and runs MinIO — all inside one container. When
+   * `publishHostPort` is set (host-run manager), MinIO is published to the host
+   * loopback (`127.0.0.1:<port>`) so the manager reaches it for admin without
+   * joining the container's network; a networked manager skips the publish and
+   * reaches it by container name. Friends reach it only over Tailscale. Root
+   * creds come from a mounted env-file (path only — no secret in args).
    */
   ensureInstance(spec: ContainerRunSpec): Promise<ContainerHandle> {
     return this.ensure(spec.name, () => [
@@ -135,8 +136,12 @@ export class DockerRuntime implements ContainerRuntime {
       // So MinIO's audit webhook can reach the manager on the host (Linux too).
       "--add-host",
       "host.docker.internal:host-gateway",
-      "-p",
-      `127.0.0.1:${spec.minioPort}:${spec.minioPort}`,
+      // Loopback publish only for a host-run manager; a networked manager
+      // reaches MinIO by container name, so binding host ports there just
+      // invites collisions across managers/leftovers (see publishHostPort).
+      ...(spec.publishHostPort
+        ? ["-p", `127.0.0.1:${spec.minioPort}:${spec.minioPort}`]
+        : []),
       "-v",
       `${spec.dataSource}:/data`,
       "-v",
@@ -383,6 +388,10 @@ export class DockerInstanceRuntime implements InstanceRuntime {
         stateSource: names.stateVolume,
         rootCredSecretRef: envFile,
         network: this.config.network,
+        // Host-run manager reaches MinIO via the loopback publish; a networked
+        // one reaches it by container name, so skip the publish (and its
+        // collisions). Same signal as app.ts's probePort gate.
+        publishHostPort: this.config.addressing === "host",
         resources: this.config.resources,
       });
     } finally {
