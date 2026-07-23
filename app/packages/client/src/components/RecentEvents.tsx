@@ -5,7 +5,7 @@ import type { AuditAction, AuditEntryView } from "@p0rt1on/shared/domain";
 import { trpc } from "../trpc.ts";
 import { Button } from "./ui/button.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
-import { relativeTime } from "./helpers.ts";
+import { pollMs, relativeTime } from "./helpers.ts";
 
 // The audit trail on the Status page: every lifecycle event (add, suspend,
 // rotate, offboard, plus the boot-time instance_recovered / instance_data_lost),
@@ -116,7 +116,7 @@ export function RecentEvents() {
   const events = createQuery(() => ({
     queryKey: ["audit", limit()],
     queryFn: () => trpc.audit.list.query({ limit: limit() }),
-    refetchInterval: 10000,
+    refetchInterval: pollMs(10000),
     retry: false,
   }));
   const entries = (): AuditEntryView[] => events.data ?? [];

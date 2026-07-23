@@ -50,6 +50,9 @@ export default defineConfig({
         "src/theme/**",
         "styled-system/**",
         "src/main.tsx",
+        // The tRPC link/observable glue is awkward to unit-test; the demo
+        // handlers/state/seed/dispatch it wires ARE covered.
+        "src/demo/index.ts",
         "src/**/*.{test,spec}.{ts,tsx}",
       ],
     },

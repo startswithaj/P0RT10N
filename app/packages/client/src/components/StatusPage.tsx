@@ -3,6 +3,7 @@ import { createSignal, For, type JSX, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { Database, Network, Server } from "lucide-solid";
 import { trpc } from "../trpc.ts";
+import { pollMs } from "./helpers.ts";
 import type { Svc } from "./status-types.ts";
 import { ServiceRow } from "./ServiceRow.tsx";
 import { RecentEvents } from "./RecentEvents.tsx";
@@ -118,7 +119,7 @@ export function StatusPage() {
   const status = createQuery(() => ({
     queryKey: ["status"],
     queryFn: () => trpc.status.get.query(),
-    refetchInterval: 5000,
+    refetchInterval: pollMs(5000),
     retry: false,
   }));
 

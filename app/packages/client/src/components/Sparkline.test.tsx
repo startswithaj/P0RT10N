@@ -12,22 +12,22 @@ describe("Sparkline", () => {
     };
   };
 
-  it("draws a dashed flat baseline when the series is all zeros", () => {
-    // Idle instance: no shape to plot, so it sits flat at y = H-1 (17), dashed so
-    // it reads as "no data" rather than a real flatline.
+  it("draws a dashed flat line on the mid baseline when the series is all zeros", () => {
+    // Idle instance: no shape to plot, so it sits flat on the mid baseline
+    // y = H/2 (9) — level with the row's status dot — dashed to read as "no data".
     const { points, dashed } = lineOf([0, 0, 0, 0]);
-    expect(points).toBe("0,17 40,17");
+    expect(points).toBe("0,9 40,9");
     expect(dashed).toBe(true);
   });
 
-  it("draws a dashed baseline for a single-point (or empty) series", () => {
-    expect(lineOf([5])).toEqual({ points: "0,17 40,17", dashed: true });
-    expect(lineOf([])).toEqual({ points: "0,17 40,17", dashed: true });
+  it("draws a dashed mid baseline for a single-point (or empty) series", () => {
+    expect(lineOf([5])).toEqual({ points: "0,9 40,9", dashed: true });
+    expect(lineOf([])).toEqual({ points: "0,9 40,9", dashed: true });
   });
 
-  it("scales the peak to the top inset and zeros to the baseline, solid line", () => {
-    // Two points: the peak maps to y=1 (1px top inset), zero to y=17 (baseline);
-    // x spans the full 40px width, and a real series is solid (not dashed).
+  it("centres the waveform on the mid baseline, solid line", () => {
+    // Two points [0, 8]: mean 4 sits on MID (9); the low deviates down to y=17
+    // and the high up to y=1 (1px inset), centring the line on the status dot.
     const { points, dashed } = lineOf([0, 8]);
     expect(points).toBe("0.0,17.0 40.0,1.0");
     expect(dashed).toBe(false);

@@ -1,0 +1,377 @@
+import type { MutationHandlers } from "./types.ts";
+import type { DemoFriend, DemoState } from "../state.ts";
+import {
+  getDemoState,
+  requireFriend,
+  toDetail,
+  updateDemoState,
+} from "../state.ts";
+import type { MutationInput } from "../paths.ts";
+import type {
+  AuditAction,
+  FriendBundle,
+  FriendDetail,
+} from "@p0rt1on/shared/domain";
+
+type AddInput = MutationInput<"friends.addStart">;
+
+const GB = 1_000_000_000;
+const gb = (bytes: number): number => Math.round(bytes / GB);
+
+const uid = (n: number): string =>
+  crypto.randomUUID().replace(/-/g, "").slice(0, n);
+
+const nowIso = (): string => new Date().toISOString();
+
+// ---- pure state helpers (each returns a fresh state) ----
+
+const patchFriend = (
+  s: DemoState,
+  id: number,
+  fn: (f: DemoFriend) => DemoFriend,
+): DemoState => ({
+  ...s,
+  friends: s.friends.map((f) => (f.id === id ? fn(f) : f)),
+});
+
+/** Prepend an audit row, consuming one seq id. */
+const appendAudit = (
+  s: DemoState,
+  action: AuditAction,
+  friend: string | null,
+  detail: string | null,
+): DemoState => {
+  const id = s.seq + 1;
+  return {
+    ...s,
+    seq: id,
+    audit: [{ id, when: nowIso(), action, friend, detail }, ...s.audit],
+  };
+};
+
+const nameOf = (s: DemoState, id: number): string | null =>
+  s.friends.find((f) => f.id === id)?.name ?? null;
+
+const detailAfter = (
+  id: number,
+  reducer: (s: DemoState) => DemoState,
+): FriendDetail => toDetail(requireFriend(updateDemoState(reducer), id));
+
+/** offboard returns `{ ok: true } & OffboardResult`; teardown removes the friend. */
+const okAfter = (reducer: (s: DemoState) => DemoState): { ok: true } => {
+  updateDemoState(reducer);
+  return { ok: true as const };
+};
+
+// ---- bundle / friend factories ----
+
+// The kopia quickstart mirrors the server's: a join preamble, a client-side
+// password warning, then a `repository create`/`connect` block (create adds the
+// GOVERNANCE retention + a snapshot line). Kept byte-for-byte with the real one
+// so the demo bundle reads exactly like production.
+
+const kopiaCreateTail = (retentionDays: number): string[] => [
+  `  --retention-mode=GOVERNANCE --retention-period=${retentionDays}d`,
+  "",
+  "# Then back up a directory (immutable for the retention window):",
+  "kopia snapshot create /path/to/your/data",
+];
+
+const authKeyJoinLines = (upCommand: string): string[] => [
+  "# Join the tailnet (redeems your single-use key):",
+  upCommand,
+  "",
+];
+
+const inviteJoinLines = (): string[] => [
+  "# After accepting the invite, generate an auth key in your Tailscale admin",
+  "# console (https://login.tailscale.com/admin/settings/keys), then join:",
+  "tailscale up --authkey=<your-tailscale-auth-key>",
+  "",
+];
+
+const kopiaQuickstart = (opts: {
+  endpoint: string;
+  bucket: string;
+  accessKeyId: string;
+  secretKey: string;
+  retentionDays: number;
+  create: boolean;
+  joinLines: string[];
+}): string => {
+  const host = opts.endpoint.replace(/^https?:\/\//, "");
+  const password = opts.create
+    ? "# Choose YOUR OWN password — client-side only, NEVER sent to us, and"
+    : "# Use the SAME KOPIA_PASSWORD you set when the repo was created —";
+  const lastCredFlag = opts.create
+    ? `  --secret-access-key=${opts.secretKey} \\`
+    : `  --secret-access-key=${opts.secretKey}`;
+  const tail = opts.create ? kopiaCreateTail(opts.retentionDays) : [];
+  return [
+    ...opts.joinLines,
+    password,
+    "# UNRECOVERABLE if lost:",
+    "export KOPIA_PASSWORD='change-me-to-a-strong-passphrase'",
+    "",
+    `kopia repository ${opts.create ? "create" : "connect"} s3 \\`,
+    `  --bucket=${opts.bucket} \\`,
+    `  --endpoint=${host} \\`,
+    `  --access-key=${opts.accessKeyId} \\`,
+    lastCredFlag,
+    ...tail,
+  ].join("\n");
+};
+
+const joinLinesFor = (
+  includeEnrollment: boolean,
+  isInvite: boolean,
+  upCommand: string,
+): string[] => {
+  if (!includeEnrollment) return []; // rotate: node already enrolled
+  if (isInvite) return inviteJoinLines();
+  return authKeyJoinLines(upCommand);
+};
+
+const bundleFor = (f: DemoFriend, includeEnrollment: boolean): FriendBundle => {
+  const s3AccessKeyId = f.s3AccessKeyId ?? `AKIA${uid(8).toUpperCase()}`;
+  const s3SecretKey = `demo-secret-${uid(16)}`; // obviously fake
+  const tsKey = `tskey-auth-demo-${uid(10)}`;
+  const upCommand = `tailscale up --authkey=${tsKey}`;
+  const isInvite = f.enrollmentMode === "invite";
+  const base: FriendBundle = {
+    name: f.name,
+    s3Endpoint: f.s3Endpoint,
+    bucket: f.bucket,
+    s3AccessKeyId,
+    s3SecretKey,
+    kopiaQuickstart: kopiaQuickstart({
+      endpoint: f.s3Endpoint,
+      bucket: f.bucket,
+      accessKeyId: s3AccessKeyId,
+      secretKey: s3SecretKey,
+      retentionDays: f.lockRetentionDays,
+      create: includeEnrollment, // add = create; rotate = connect
+      joinLines: joinLinesFor(includeEnrollment, isInvite, upCommand),
+    }),
+  };
+  if (!includeEnrollment) return base; // rotateKey: fresh S3 secret only
+  if (isInvite) {
+    return {
+      ...base,
+      enrollmentMode: "invite",
+      inviteEmail: f.inviteEmail,
+      inviteUrl: `https://login.tailscale.com/invite/demo-${f.name}`,
+    };
+  }
+  return {
+    ...base,
+    enrollmentMode: "authKey",
+    tsAuthKey: tsKey,
+    tailscaleUpCommand: upCommand,
+  };
+};
+
+const friendFromInput = (id: number, input: AddInput): DemoFriend => {
+  const enroll = input.enrollment ?? { mode: "authKey" as const };
+  return {
+    id,
+    name: input.name,
+    isolationMode: input.isolationMode,
+    status: "active",
+    lockMode: input.lockMode ?? "GOVERNANCE",
+    lockRetentionDays: input.retentionDays,
+    usage: {
+      bytesUsed: 0,
+      objectCount: 0,
+      quotaBytes: input.quotaBytes,
+      fraction: 0,
+      checkedAt: null,
+    },
+    activity: {
+      requestsTotal: 0,
+      requestsByOp: {},
+      requests24h: 0,
+      lastRequestAt: null,
+      lastOp: null,
+      bytesInTotal: 0,
+      bytesOutTotal: 0,
+      deniedCount: 0,
+      updatedAt: nowIso(),
+    },
+    enrollmentMode: enroll.mode === "invite" ? "invite" : "authKey",
+    inviteStatus: enroll.mode === "invite" ? "pending" : null,
+    bucket: `${input.name}-backups`,
+    s3AccessKeyId: `AKIA${uid(8).toUpperCase()}`,
+    tsNodeTag: `tag:p0rt1on-friend-${input.name}`,
+    s3Endpoint: `https://${input.name}.taildemo.ts.net`,
+    instanceKind: input.isolationMode,
+    instanceStatus: "active",
+    nodeOnline: true,
+    inviteEmail: enroll.mode === "invite" ? enroll.email : undefined,
+  };
+};
+
+// ---- the total mutation map ----
+
+export const mutationHandlers: MutationHandlers = {
+  "auth.login": () => ({ ok: true }),
+  "auth.logout": () => ({ ok: true }),
+
+  "friends.add": (input) => {
+    const fid = getDemoState().seq + 1;
+    const f = friendFromInput(fid, input);
+    updateDemoState((s) =>
+      appendAudit(
+        { ...s, seq: fid, friends: [...s.friends, f] },
+        "add_friend",
+        f.name,
+        null,
+      )
+    );
+    return bundleFor(f, true);
+  },
+
+  "friends.addStart": (input) => {
+    const jobId = crypto.randomUUID();
+    const fid = getDemoState().seq + 1;
+    const f: DemoFriend = {
+      ...friendFromInput(fid, input),
+      status: "provisioning",
+      instanceStatus: "provisioning",
+      nodeOnline: false,
+    };
+    const bundle = bundleFor(f, true);
+    const failStep = input.name === "fail-smoke" ? "smoke" : null;
+    updateDemoState((s) => ({
+      ...s,
+      seq: fid,
+      jobs: {
+        ...s.jobs,
+        [jobId]: {
+          id: jobId,
+          kind: "add",
+          friend: f,
+          bundle,
+          failStep,
+          committed: false,
+        },
+      },
+    }));
+    return { jobId };
+  },
+
+  "friends.offboardStart": (input) => {
+    const jobId = crypto.randomUUID();
+    const target = requireFriend(getDemoState(), input.friendId);
+    updateDemoState((s) => ({
+      ...s,
+      jobs: {
+        ...s.jobs,
+        [jobId]: {
+          id: jobId,
+          kind: "offboard",
+          friend: target,
+          bundle: null,
+          failStep: null,
+          committed: false,
+        },
+      },
+    }));
+    return { jobId };
+  },
+
+  "friends.offboard": (input) =>
+    okAfter((s) =>
+      appendAudit(
+        { ...s, friends: s.friends.filter((f) => f.id !== input.friendId) },
+        "offboard",
+        nameOf(s, input.friendId),
+        null,
+      )
+    ),
+
+  "friends.resize": (input) =>
+    detailAfter(input.friendId, (s) =>
+      appendAudit(
+        patchFriend(s, input.friendId, (f) => ({
+          ...f,
+          usage: {
+            ...f.usage,
+            quotaBytes: input.quotaBytes,
+            fraction: input.quotaBytes > 0
+              ? Math.min(1, f.usage.bytesUsed / input.quotaBytes)
+              : 0,
+          },
+        })),
+        "resize",
+        nameOf(s, input.friendId),
+        `${gb(input.quotaBytes)} GB`,
+      )),
+
+  "friends.suspend": (input) =>
+    detailAfter(input.friendId, (s) =>
+      appendAudit(
+        patchFriend(s, input.friendId, (f) => ({
+          ...f,
+          status: "suspended",
+          instanceStatus: "stopped",
+          nodeOnline: false,
+        })),
+        "suspend",
+        nameOf(s, input.friendId),
+        null,
+      )),
+
+  "friends.resume": (input) =>
+    detailAfter(input.friendId, (s) =>
+      appendAudit(
+        patchFriend(s, input.friendId, (f) => ({
+          ...f,
+          status: "active",
+          instanceStatus: "active",
+        })),
+        "resume",
+        nameOf(s, input.friendId),
+        null,
+      )),
+
+  "friends.rotateKey": (input) => {
+    const f = requireFriend(getDemoState(), input.friendId);
+    updateDemoState((s) => appendAudit(s, "rotate_key", f.name, null));
+    return bundleFor(f, false); // rotate omits the Tailscale fields
+  },
+
+  "friends.reissueTsKey": (input) => {
+    const f = requireFriend(getDemoState(), input.friendId);
+    updateDemoState((s) => appendAudit(s, "reissue_ts_key", f.name, null));
+    const key = `tskey-auth-demo-${uid(10)}`;
+    return {
+      name: f.name,
+      tsAuthKey: key,
+      tailscaleUpCommand: `tailscale up --authkey=${key}`,
+    };
+  },
+
+  "friends.resendInvite": (input) => {
+    updateDemoState((s) =>
+      patchFriend(s, input.friendId, (f) => ({
+        ...f,
+        inviteEmailedAt: nowIso(),
+      }))
+    );
+    // returns void
+  },
+
+  "jobs.claimBundle": (input) => {
+    const job = getDemoState().jobs[input.jobId];
+    if (!job || !job.bundle) {
+      throw new Error("bundle already claimed or none produced");
+    }
+    const bundle = job.bundle;
+    updateDemoState((s) => ({
+      ...s,
+      jobs: { ...s.jobs, [input.jobId]: { ...job, bundle: null } },
+    }));
+    return bundle;
+  },
+};

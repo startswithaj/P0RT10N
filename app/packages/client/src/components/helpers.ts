@@ -43,6 +43,14 @@ export const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
 
 /**
+ * Refetch interval that respects demo mode. The demo mocks a static backend, so
+ * polling only churns the UI; live builds keep the given interval. Inline
+ * literal so it folds to `ms` in the real bundle.
+ */
+export const pollMs = (ms: number): number | false =>
+  import.meta.env.VITE_DEMO_MODE === "1" ? false : ms;
+
+/**
  * Aggregate system health for the footer, from the same `status.get` snapshot
  * the Status page renders: backend unreachable or any service `down` ⇒
  * unhealthy. `provisioning` is transitional, not unhealthy.

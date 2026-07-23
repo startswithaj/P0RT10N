@@ -3,7 +3,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { AuthGate, createAuthGate } from "./components/AuthGate.tsx";
 import { Dashboard } from "./components/Dashboard.tsx";
 import type { FriendRow } from "./components/types.ts";
-import { invalidate, pct, systemHealth } from "./components/helpers.ts";
+import { invalidate, pct, pollMs, systemHealth } from "./components/helpers.ts";
 import { trpc } from "./trpc.ts";
 import type { ProvisionStepKey } from "@p0rt1on/shared/steps";
 import { AddPortion, type NewPortion } from "./components/AddPortion.tsx";
@@ -145,7 +145,7 @@ function createStatusQuery(active: () => boolean) {
   return createQuery(() => ({
     queryKey: ["status"],
     queryFn: () => trpc.status.get.query(),
-    refetchInterval: 5000,
+    refetchInterval: pollMs(5000),
     retry: false,
     enabled: active(), // don't poll while gated to the login screen
   }));

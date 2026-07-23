@@ -2,6 +2,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { Show } from "solid-js";
 import { css } from "styled-system/css";
 import { trpc } from "../trpc.ts";
+import { pollMs } from "./helpers.ts";
 
 // Live per-instance diagnostics (`status.diagnose`): state, health reason, exit,
 // recent logs. Rendered inside an expanded ServiceRow.
@@ -57,7 +58,7 @@ export function DiagnosticsPanel(props: { instance: string }) {
   const diag = createQuery(() => ({
     queryKey: ["diagnose", props.instance],
     queryFn: () => trpc.status.diagnose.query({ instanceName: props.instance }),
-    refetchInterval: 5000,
+    refetchInterval: pollMs(5000),
     retry: false,
   }));
   return (
