@@ -8,17 +8,15 @@ const wrap = css({
   color: "fg.muted",
   opacity: "0.6",
   flexShrink: "0",
-  display: "inline-flex",
-  // Sit level with the row's status dot: middle-align the inline box, then nudge
-  // it down 3px to offset the residual baseline lift (found by inspection).
-  verticalAlign: "middle",
-  mb: "3px",
+  // Block-level flex, not inline-flex: an inline box rests on the text baseline
+  // and rides a few px above the row's status dot. A block flex item is centred
+  // by the row's own `align-items: center`, level with the dot, no magic offset.
+  display: "flex",
+  alignItems: "center",
 });
 
 const W = 40;
 const H = 18;
-// The line is centred on the mid-height so it sits level with the row's status
-// dot: an idle row is flat on that line, activity deviates above and below it.
 const MID = H / 2;
 
 export function Sparkline(props: { data: number[] }) {
@@ -28,17 +26,17 @@ export function Sparkline(props: { data: number[] }) {
   const isEmpty = () => props.data.length < 2 || peak() === 0;
 
   const points = () => {
+    // Idle: a dashed line on the mid baseline so it sits level with the status
+    // dot. Active: volume anchored to the bottom — taller reads as busier.
     if (isEmpty()) return `0,${MID} ${W},${MID}`;
     const d = props.data;
     const n = d.length;
-    const mean = d.reduce((sum, v) => sum + v, 0) / n;
-    // Deviation from the mean, scaled so the largest swing reaches 1px from the
-    // edge; centres the waveform on MID so it lines up with the status dot.
-    const amp = Math.max(1, ...d.map((v) => Math.abs(v - mean)));
+    const max = peak();
+    // 1px inset top/bottom so the peak and baseline strokes aren't clipped.
     return d
       .map((v, i) => {
         const x = (i / (n - 1)) * W;
-        const y = MID - ((v - mean) / amp) * (MID - 1);
+        const y = H - 1 - (v / max) * (H - 2);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(" ");

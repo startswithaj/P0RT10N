@@ -52,6 +52,9 @@ export type MutationInput<P extends MutationPath> = inferProcedureInput<
 export type MutationOutput<P extends MutationPath> = inferProcedureOutput<
   ProcedureAt<Rec, P>
 >;
+export type QueryInput<P extends QueryPath> = inferProcedureInput<
+  ProcedureAt<Rec, P>
+>;
 export type QueryOutput<P extends QueryPath> = inferProcedureOutput<
   ProcedureAt<Rec, P>
 >;

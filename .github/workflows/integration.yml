@@ -1,0 +1,80 @@
+name: integration
+
+# The three integration tiers, unchanged in substance from the old monolithic
+# ci.yml. Called by ci.yml only on main / manual. Each FAILS (never skips) when
+# its infra/config is absent, so a green job is a real run — and every tier is
+# a `needs` gate on the image build.
+on:
+  workflow_call:
+
+jobs:
+  mc-integration:
+    name: integration — mc ↔ MinIO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=p0rtadmin -e MINIO_ROOT_PASSWORD=p0rtadmin123 \
+            minio/minio:RELEASE.2025-04-08T15-41-24Z server /data
+      - name: Build manager image + run the suite inside it (pinned mc)
+        run: |
+          docker build --target integration -t p0rt1on-manager:ci .
+          docker run --rm --network host \
+            -e MINIO_ENDPOINT=http://127.0.0.1:9000 \
+            -e MINIO_ROOT_USER=p0rtadmin -e MINIO_ROOT_PASSWORD=p0rtadmin123 \
+            --entrypoint deno p0rt1on-manager:ci \
+            test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
+            --allow-run --unstable-ffi \
+            integration-tests/McShellClient.integration.test.ts
+
+  k8s:
+    name: k8s e2e (secretless — k3d + in-cluster headscale)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.8.2" # tier1 runs `deno test` on the host as the SA
+      - name: Install k3d + kubectl
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          curl -fsSLO "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -m 0755 kubectl /usr/local/bin/kubectl
+      - name: Build images + tier1 + tier2
+        run: ./integration-tests/run-integration.sh
+
+  docker-tailnet:
+    name: docker portion — real tailnet
+    runs-on: ubuntu-latest
+    env:
+      # The DEDICATED CI TAILNET — never a personal one. This job mints keys
+      # and creates nodes, so its OAuth client must belong to a throwaway
+      # tailnet. Missing config FAILS the suite (never skips) → blocks build.
+      #
+      # Only the OAuth client secret is a credential. The MagicDNS name and the
+      # tag owner are public policy identifiers, so they are repo VARIABLES —
+      # secrets are for things that grant access.
+      P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+      P0RT1ON_TAILSCALE_TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
+      # Who owns each friend tag in the CI tailnet's `tagOwners` — set it to
+      # that tailnet's OAuth client tag (e.g. `tag:p0rt1on`). REQUIRED: the
+      # client can only mint keys for tags it owns.
+      P0RT1ON_TAILSCALE_TAG_OWNER: ${{ vars.TAILSCALE_TAG_OWNER }}
+      P0RT1ON_ADMIN_USERNAME: p0rt1on-it
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.8.2"
+      - name: Generate the throwaway manager's secrets
+        # NOT repo secrets: this manager exists for one job on a loopback
+        # port, and its master key only has to stay stable within the run.
+        run: |
+          KEY="$(openssl rand -hex 32)"; PW="$(openssl rand -hex 16)"
+          echo "::add-mask::$KEY"; echo "::add-mask::$PW"
+          echo "P0RT1ON_MASTER_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "P0RT1ON_ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
+      - name: Portion e2e over the real tailnet (builds all three images)
+        run: ./integration-tests/run-docker-tailnet.sh

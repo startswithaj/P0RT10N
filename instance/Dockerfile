@@ -8,24 +8,18 @@
 # over Tailscale (data plane).
 #
 # Base is the stock Tailscale image (Alpine; ships tailscaled + tailscale). We add
-# the `minio` server + `mc` client binaries + `tini` (PID 1: reaps + forwards
-# signals), the same bundling pattern as backup-client.
+# `tini` (PID 1: reaps + forwards signals) via apk, and copy in the `minio` server
+# + `mc` client binaries from Chainguard's hardened images (below).
 FROM tailscale/tailscale:v1.84.3
 
-ARG TARGETARCH
-# TODO: pin MINIO to a release tag for reproducible builds. To pin, swap the URL
-# below for the archive form, e.g.
-#   https://dl.min.io/server/minio/release/linux-${MARCH}/archive/minio.RELEASE.2025-04-22T22-12-26Z
-RUN apk add --no-cache curl ca-certificates tini \
-  && case "${TARGETARCH}" in \
-       amd64) MARCH=amd64 ;; \
-       arm64) MARCH=arm64 ;; \
-       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
-     esac \
-  && curl -fsSL "https://dl.min.io/server/minio/release/linux-${MARCH}/minio" -o /usr/local/bin/minio \
-  && curl -fsSL "https://dl.min.io/client/mc/release/linux-${MARCH}/mc" -o /usr/local/bin/mc \
-  && chmod +x /usr/local/bin/minio /usr/local/bin/mc \
-  && apk del curl
+# tini = PID 1; ca-certificates for TLS to the tailnet/control plane.
+RUN apk add --no-cache ca-certificates tini
+
+# minio + mc: Chainguard's hardened images — upstream minio/mc was archived
+# 2026-02. Both are static Go binaries, so they run on this Alpine (musl) base
+# regardless of libc. `:latest` is unpinned by design (free tier is latest-only).
+COPY --from=cgr.dev/chainguard/minio:latest /usr/bin/minio /usr/local/bin/minio
+COPY --from=cgr.dev/chainguard/minio-client:latest /usr/bin/mc /usr/local/bin/mc
 
 COPY entrypoint.sh /entrypoint.sh
 COPY healthcheck.sh /healthcheck.sh

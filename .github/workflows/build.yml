@@ -1,0 +1,115 @@
+name: build
+
+on:
+  workflow_call:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: build & push ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: manager, context: . }
+          - { name: instance, context: instance }
+          - { name: backup-client, context: backup-client }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/p0rt1on-${{ matrix.name }}
+          tags: |
+            # non-main branches (e.g. manual dispatch) → branch-<name>
+            type=ref,event=branch,prefix=branch-,enable=${{ github.ref != 'refs/heads/main' }}
+            # PRs → pr-<n>
+            type=ref,event=pr,prefix=pr-
+            # main → both `main` and `latest`
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            # every build → sha-<short>
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Per-image scope so the 3 matrix legs don't clobber each other's cache.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }},ignore-error=true
+
+  # One comment listing all 3 pr-<n> images, after the matrix completes. Only
+  # reached for same-repo PRs (fork PRs never get here — build is skipped).
+  comment:
+    name: comment PR image tags
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-image-comment -->';
+            const base =
+              `ghcr.io/${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+            const n = context.issue.number;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const sha = context.payload.pull_request.head.sha.slice(0, 7);
+            const images = ['manager', 'instance', 'backup-client'].map(
+              (i) => `${base}/p0rt1on-${i}:pr-${n}`,
+            );
+            const body = [
+              marker,
+              `📦 PR images published:`,
+              '',
+              '```bash',
+              ...images.map((img) => `docker pull ${img}`),
+              '```',
+              `_Built from \`${sha}\` — [view run](${runUrl})_`,
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: n,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: n,
+                body,
+              });
+            }

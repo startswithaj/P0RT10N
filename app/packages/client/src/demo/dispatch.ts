@@ -1,12 +1,20 @@
 import { DemoUnhandledError } from "./errors.ts";
+import type { DemoState } from "./state.ts";
 import { getDemoState } from "./state.ts";
 import type { DemoEmitter } from "./handlers/types.ts";
 import { queryHandlers } from "./handlers/queries.ts";
 import { mutationHandlers } from "./handlers/mutations.ts";
 import { subscriptionHandlers } from "./handlers/subscriptions.ts";
 
+// The wire delivers an untyped string path; per-path typing lives in the total
+// handler maps. Widen to one uniform signature at this dynamic boundary.
+const queryFns = queryHandlers as unknown as Record<
+  string,
+  (input: unknown, state: DemoState) => unknown
+>;
+
 export const resolveDemoQuery = (path: string, input: unknown): unknown => {
-  const handler = queryHandlers[path];
+  const handler = queryFns[path];
   if (!handler) throw new DemoUnhandledError("query", path);
   return handler(input, getDemoState());
 };

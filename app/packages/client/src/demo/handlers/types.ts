@@ -3,11 +3,21 @@ import type {
   MutationInput,
   MutationOutput,
   MutationPath,
+  QueryInput,
+  QueryOutput,
+  QueryPath,
   SubscriptionPath,
 } from "../paths.ts";
 
-/** A demo query handler — a pure read from demo state. */
-export type QueryHandler = (input: unknown, state: DemoState) => unknown;
+/** A demo query handler, typed to its path's real input + (awaited) output. */
+export type QueryHandler<P extends QueryPath> = (
+  input: QueryInput<P>,
+  state: DemoState,
+) => QueryOutput<P>;
+
+/** TOTAL over every query path — a missing handler or a return shape that drifts
+ *  from the router's inferred output is a compile error. */
+export type QueryHandlers = { [P in QueryPath]: QueryHandler<P> };
 
 /** A demo mutation handler, typed to its path's real input + (awaited) output. */
 export type MutationHandler<P extends MutationPath> = (
