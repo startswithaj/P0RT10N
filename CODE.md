@@ -315,6 +315,31 @@ Card surfaces use Park's **built-in shadow scale**, not a custom token.
   those five files, then rebuild (`deno task build` or restart dev). Softer or
   stronger: `"md"`/`"sm"` or `"xl"` — no config change needed.
 
+## Running — `docker-compose*.yml`
+
+Split into a shared base + one overlay per environment. The base
+(`docker-compose.yml`) has **no build target**, so it never runs alone — always
+pass an overlay:
+
+- **Dev** — `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`
+  builds `Dockerfile.dev`: Vite dev server (UI on `:5173`) + Deno API, repo
+  mounted live for hot-reload.
+- **Prod** — `docker compose -f docker-compose.yml -f docker-compose.prod.yml up`
+  builds `Dockerfile`: Deno serves the pre-built SPA on `:8080`, no Vite.
+
+### Notes
+
+- The base holds everything shared: `p0rt1on-net`, volumes, `.env`, the docker
+  socket, `:8080`/`:8081`, the pantry mount.
+- Prod leaves the admin bind at its safe loopback default. To reach the
+  published `:8080` from a browser, set `P0RT1ON_ADMIN_BIND_HOST=0.0.0.0` in
+  `.env` — the boot guard then needs `P0RT1ON_ADMIN_USERNAME`/`_PASSWORD` too.
+  The overlay doesn't force this, so a local prod run stays loopback-safe.
+- Both run the manager as a container → `network` addressing → instances are
+  reached by name, no host ports published (see `publishHostPort` in
+  `DockerRuntime.ts`). Host ports only exist for the bare host-run manager
+  (`deno task dev:api`), which can't reach the docker network.
+
 ## CI — `.github/workflows/`
 
 Thin `ci.yml` orchestrator calling reusable workflows. Each workflow's header

@@ -1,0 +1,17 @@
+# Dev overlay — layer on top of the base:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Runs the DEV image: Vite dev server (frontend, :5173) alongside the Deno API,
+# with the repo mounted live so both hot-reload on edits — no rebuild per change.
+services:
+  manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev # dev image: also runs the Vite dev server
+    environment:
+      # Bind-mount FS events are unreliable on macOS — make Vite poll for edits
+      # so hot-reload never serves a stale module (see vite.config.ts).
+      P0RT1ON_DEV_POLLING: "1"
+    ports:
+      - "127.0.0.1:5173:5173" # Vite dev server (frontend) — open this in a browser
+    volumes:
+      - .:/app # live source (repo root = build context) — restart picks up code changes
