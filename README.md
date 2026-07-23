@@ -39,11 +39,12 @@ choice (Kopia recommended; any S3 client works).
 - **Nothing exposed to the public internet.** Everything rides on Tailscale — no
   open ports, no router forwarding, no exposed home IP. There's no public
   endpoint to scan or attack.
-- **Headless enrollment, handled by the app.** Each friend gets a
-  pre-authorized, single-use, pre-tagged Tailscale auth key (redeemed with
-  `tailscale up --authkey=…` — no Tailscale account needed). P0RT1ON mints,
-  scopes, and revokes keys via the Tailscale API. (Invite-by-email enrollment is
-  planned; the UI previews it but it isn't wired up yet.)
+- **Enrollment, handled by the app — two ways.** _Auth key_ (default, headless):
+  the friend redeems a pre-authorized, single-use, pre-tagged key with
+  `tailscale up --authkey=…`, no Tailscale account needed. _Email invite_
+  (optional, needs a personal API token): P0RT1ON emails a Tailscale invite so
+  they join with their own account and devices. Either way, P0RT1ON mints,
+  scopes, and revokes access through the Tailscale API.
 - **Ransomware-resistant.** MinIO **Object Lock** (GOVERNANCE by default) keeps
   recent objects immutable even to whoever holds the friend's credentials —
   friend creds are explicitly denied lock bypass — so a compromised client can't
@@ -80,9 +81,9 @@ choice (Kopia recommended; any S3 client works).
   not partitioning, so friends share one filesystem.
 - **Metadata only.** The manager's SQLite DB holds no secrets — friend bundles
   are shown once and never persisted.
-- **One key to rule the fleet.** `P0RT1ON_MASTER_KEY` deterministically derives
-  every instance's root credential. It must be **stable and backed up**: losing
-  or changing it loses admin access to every instance. Keep it in a secret
+- **Back up the master key.** `P0RT1ON_MASTER_KEY` deterministically derives
+  every instance's root credential, so it must be **stable and backed up**: lose
+  or change it and you lose admin access to every instance. Keep it in a secret
   manager; never commit it.
 
 ## Quick start (manager)
@@ -99,7 +100,7 @@ docker compose up
   `docker-compose.yml` wires all of this, including the audit-webhook path from
   instances back to the manager.
 - A handful of settings are required — the master key, the OAuth client secret,
-  the tag owner, your tailnet domain, and the pantry (where friend data is
+  the client's tag, your tailnet domain, and the pantry (where friend data is
   stored). The manager refuses to start without them (no stubs, no degraded
   mode); `.env.example` explains each one.
 
@@ -127,79 +128,101 @@ hand — the app adds them at provision time (owned by `tag:p0rt1on`).
 
 ### 2. Generate the OAuth client
 
-**Settings → `+ Credential` → OAuth Client.** Set each of these to **Write**
-(Write includes Read); leave every other permission at **No access**:
+**Settings → `+ Credential` → OAuth Client.** Set **Policy File**, **Devices →
+Core**, and **Keys → Auth Keys** to **Write** (Write includes Read); **Users**
+is an optional **Read** (see the note below); leave every other permission at
+**No access**. The rows below follow the console's own order — its **General**
+section holds Policy File then Users, while Devices and Keys are their own
+sections:
 
-| Permission           | Access    | Why                                                           |
-| -------------------- | --------- | ------------------------------------------------------------- |
-| **Policy File**      | **Write** | read + edit the ACL (per-friend grant + tagOwners)            |
-| **Devices → Core**   | **Write** | list friend nodes (online state) + delete on suspend/offboard |
-| **Keys → Auth Keys** | **Write** | mint + revoke each friend's auth key                          |
+| Permission             | Access    | Tag           | Why                                                            |
+| ---------------------- | --------- | ------------- | -------------------------------------------------------------- |
+| **Policy File**        | **Write** | _(none)_      | read + edit the ACL (per-friend grant + tagOwners)             |
+| **Users** _(optional)_ | **Read**  | _(none)_      | detect when an email-invited friend accepts (status reconcile) |
+| **Devices → Core**     | **Write** | `tag:p0rt1on` | list friend nodes (online state) + delete on suspend/offboard  |
+| **Keys → Auth Keys**   | **Write** | `tag:p0rt1on` | mint + revoke each friend's auth key                           |
 
-Attach the tag **`tag:p0rt1on`**, then **Generate** and copy the **client
-secret** (shown once) → this is `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
+Tailscale requires a tag on **Devices → Core** and **Keys → Auth Keys** — set
+both to **`tag:p0rt1on`**; **Policy File** and **Users** take no tag. Then
+**Generate** and copy the **client secret** (shown once) → this is
+`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
 
-> **⚠️ Security limitation — read this before using a shared tailnet.** The
-> **Policy File → Write** permission is broad. Tailscale does **not** let you
-> restrict _which_ ACL rules an OAuth client may create, so a client with this
-> permission can edit the **entire** tailnet policy. In practice this means:
-> **if this client's secret is compromised, an attacker can write an ACL rule
-> that grants a P0RT1ON-generated key access to _any_ machine on your tailnet.**
-> P0RT1ON itself only ever writes narrow per-friend rules — but Tailscale can't
-> _enforce_ that limit on the credential, so the credential is as powerful as
-> the whole policy file.
->
-> **Recommendation:** if you have other machines on this tailnet, run P0RT1ON on
-> a **separate tailnet (a separate Tailscale account)**. Then even a fully
-> compromised client can only affect the P0RT1ON tailnet — your personal
-> machines are unreachable because they aren't on it at all. (If you must share
-> one tailnet, the alternative is to drop the **Policy File** permission and
-> manage the ACL by hand — see the note in step 3.)
+#### Email invites (optional)
 
-### 3. Keep friends off the rest of your tailnet
+OAuth clients can't create Tailscale invites — Tailscale restricts invites to
+user-owned tokens. To send invites, set a personal token
+`P0RT1ON_TAILSCALE_API_TOKEN` (`tskey-api-…`). These tokens expire within 90
+days, but you only need a valid one at the moment you create the portion —
+that's when the invite is sent. It doesn't matter if it expires afterward. The
+optional **Users → Read** scope above lets the client detect when a friend
+accepts their invite; without it, P0RT1ON checks devices instead. Auth-key
+onboarding needs neither.
 
-Tailscale denies everything by default — **unless** your policy has a broad
-allow-all (`{"action":"accept","src":["*"],"dst":["*:*"]}`). If it does, scope
-it to your own logins so tagged friend devices aren't swept in:
+#### Security limitation on a shared tailnet
 
-```jsonc
-"grants": [
-  { "src": ["autogroup:member"], "dst": ["*"], "ip": ["*"] }
-]
-```
+The **Policy File → Write** permission is broad: Tailscale does not let you
+restrict _which_ ACL rules an OAuth client may create, so a client with it can
+edit the **entire** tailnet policy. If this client's secret is compromised, an
+attacker can write an ACL rule granting a P0RT1ON-generated key access to
+**any** machine on your tailnet. P0RT1ON only ever writes narrow per-friend
+rules, but Tailscale can't enforce that limit on the credential itself — so a
+stolen secret can change anything in the policy.
 
-Friend devices are **tagged** (not members), so they can only reach what their
-per-friend grant allows — their own storage box, nothing else on your tailnet.
+**Recommendation:** if you have other machines on this tailnet, run P0RT1ON on a
+**separate tailnet** (a separate Tailscale account). A fully compromised client
+can then only affect the P0RT1ON tailnet — your personal machines aren't on it
+at all. To share one tailnet instead, drop the Policy File permission and manage
+the ACL by hand (see step 3).
 
-**Least-privilege alternative (no Policy File permission).** If you'd rather the
-client be _provably_ unable to widen access (see the warning in step 2), omit
-the **Policy File** permission when creating the client and set
-`P0RT1ON_TAILSCALE_ACL_MODE=manual` — P0RT1ON then skips ACL edits and shows you
-the grant lines to paste by hand. Either one static rule for all friends:
+### 3. Notes on Policy File permission
+
+With the **Policy File** permission (step 2), P0RT1ON writes each friend's grant
+automatically — skip to step 4.
+
+If you do not grant Policy File write permission when generating your OAuth key,
+you will be prompted to manually add the required ACLs to Tailscale when
+creating a portion. Set `P0RT1ON_TAILSCALE_ACL_MODE=manual`, and on each add
+P0RT1ON shows you the exact grant lines instead of writing them, for you to
+paste into your policy. Two options:
+
+**One rule for all friends** — they reach only the P0RT1ON serve nodes, and are
+kept apart from each other by their MinIO credentials rather than the network:
 
 ```jsonc
 { "src": ["tag:p0rt1on-friend"], "dst": ["tag:p0rt1on-serve:443"] }
 ```
 
-(friends reach only P0RT1ON serve nodes; isolated from each other by MinIO
-credentials, not the network), or one rule per friend for full network
-isolation:
+**One rule per friend** — full network isolation between friends too:
 
 ```jsonc
 { "src": ["tag:p0rt1on-friend-alice"], "dst": ["alice.<tailnet>:443"] }
 ```
 
-The trade-off is a manual ACL edit when isolation rules change; the win is that
-a leaked client can only mint friend-tagged keys — never grant them new reach.
+You edit the policy by hand whenever friends change. In return, a leaked client
+can only mint friend-tagged keys — it can never open new access on its own.
 
 ### 4. Environment
 
-Copy `.env.example` to `.env` (gitignored) and fill in the required values: the
-master key, the OAuth client **secret** from step 2 (not a personal API token),
-the tag owner you attached to it, your tailnet's MagicDNS name, and the pantry
-(the disk path where friend data is stored). Set
-`P0RT1ON_TAILSCALE_ACL_MODE=manual` as well if you skipped the Policy File
-permission (step 3). Every setting is explained in `.env.example` itself.
+Copy `.env.example` to `.env` (it's gitignored). Five values are required:
+
+- `P0RT1ON_MASTER_KEY` — the master key.
+- `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET` — the OAuth client secret from step 2
+  (the client secret, not a personal token).
+- `P0RT1ON_TAILSCALE_TAG_OWNER` — the client's tag from step 1, `tag:p0rt1on`.
+  New per-friend tags are created under it.
+- `P0RT1ON_TAILSCALE_TAILNET_DOMAIN` — your tailnet's MagicDNS name.
+- `P0RT1ON_PANTRY` — the disk path where friend data is stored.
+
+Two settings are optional:
+
+- `P0RT1ON_TAILSCALE_ACL_MODE=manual` — set this if you dropped the Policy File
+  permission in step 3, so P0RT1ON surfaces ACL grants for you to paste instead
+  of writing them itself.
+- `P0RT1ON_TAILSCALE_API_TOKEN` — a `tskey-api-…` personal token that enables
+  email invites.
+
+Every setting is documented in `.env.example` itself. To run the manager locally
+for development, see [`DEV.md`](DEV.md).
 
 ## How to be a client
 

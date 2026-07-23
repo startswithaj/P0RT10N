@@ -4,6 +4,7 @@ import { css } from "styled-system/css";
 import type { AuditAction, AuditEntryView } from "@p0rt1on/shared/domain";
 import { trpc } from "../trpc.ts";
 import { Button } from "./ui/button.tsx";
+import { Tooltip } from "./ui/tooltip.tsx";
 import { relativeTime } from "./helpers.ts";
 
 // The audit trail on the Status page: every lifecycle event (add, suspend,
@@ -84,10 +85,20 @@ function eventDot(action: AuditAction): string {
   return eventDotNeutral;
 }
 
+// SQLite datetime('now') → "2026-07-22 10:30:00" (UTC, no timezone marker).
+function parseWhen(when: string): number {
+  return Date.parse(`${when.replace(" ", "T")}Z`);
+}
+
 function whenAgo(when: string): string {
-  // SQLite datetime('now') → "2026-07-22 10:30:00" (UTC, no timezone marker).
-  const ms = Date.parse(`${when.replace(" ", "T")}Z`);
+  const ms = parseWhen(when);
   return Number.isNaN(ms) ? when : relativeTime(Date.now() - ms);
+}
+
+/** The exact local timestamp for the hover tooltip. */
+function whenExact(when: string): string {
+  const ms = parseWhen(when);
+  return Number.isNaN(ms) ? when : new Date(ms).toLocaleString();
 }
 
 export function RecentEvents() {
@@ -117,7 +128,14 @@ export function RecentEvents() {
                 <span class={eventDot(e.action)} />
                 <span class={eventFriend}>{e.friend ?? "system"}</span>
                 <span class={eventAction}>{ACTION_LABELS[e.action]}</span>
-                <span class={eventWhen}>{whenAgo(e.when)}</span>
+                <Tooltip
+                  content={whenExact(e.when)}
+                  openDelay={300}
+                  closeDelay={100}
+                  positioning={{ placement: "top" }}
+                >
+                  <span class={eventWhen}>{whenAgo(e.when)}</span>
+                </Tooltip>
                 <Show when={e.detail}>
                   <span class={eventDetail}>{e.detail}</span>
                 </Show>

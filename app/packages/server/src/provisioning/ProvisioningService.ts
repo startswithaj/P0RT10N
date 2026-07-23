@@ -1,6 +1,8 @@
 import type {
   AddFriendInput,
   FriendBundle,
+  InviteStatus,
+  InviteStatusView,
   IsolationMode,
   OffboardResult,
   OffboardStepKey,
@@ -12,10 +14,15 @@ import type { Logger } from "../services/types.ts";
 import type { McClient, McClientFactory, S3Credential } from "../minio/mc.ts";
 import type { InstanceRuntime, InstanceSpec } from "../runtime/runtime.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
+import type { UserInviteApi } from "../tailscale/userInvite.ts";
 import {
   manualAclInstructions,
   manualAclRemovalInstructions,
 } from "../tailscale/manualAcl.ts";
+import {
+  manualInviteInstructions,
+  manualUserRemovalInstructions,
+} from "../tailscale/manualInvite.ts";
 import { ConflictError, ServiceError } from "../lib/ServiceError.ts";
 import { drainForResult } from "../lib/drainGenerator.ts";
 import { Mutex } from "../lib/Mutex.ts";
@@ -37,11 +44,38 @@ type InstanceRef = {
   minioPort: number;
 };
 
-/** Kopia quickstart: the tailnet-join preamble (add flow only). */
+/**
+ * How a friend joined the tailnet, resolved during the `authkey` step. authKey
+ * carries the one-shot key secret; invite carries the acceptance link (or the
+ * manual-console fallback when no token was configured / the create failed).
+ */
+type EnrollmentResult =
+  | { mode: "authKey"; tsAuthKey: string }
+  | {
+    mode: "invite";
+    email: string;
+    inviteUrl?: string;
+    inviteEmailedAt?: string;
+    manualInstructions?: string;
+    warning?: string;
+  };
+
+/** Kopia quickstart join for an auth-key friend: redeem the single-use key. */
 function kopiaJoinLines(tailscaleUpCommand: string): string[] {
   return [
     "# Join the tailnet (redeems your single-use key):",
     tailscaleUpCommand,
+    "",
+  ];
+}
+
+/** Kopia quickstart join for an invited friend: they generate their OWN auth
+ * key (in their Tailscale account, after accepting) and join with it. */
+function kopiaInviteJoinLines(): string[] {
+  return [
+    "# After accepting the invite, generate an auth key in your Tailscale admin",
+    "# console (https://login.tailscale.com/admin/settings/keys), then join:",
+    "tailscale up --authkey=<your-tailscale-auth-key>",
     "",
   ];
 }
@@ -74,6 +108,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     private readonly mc: McClientFactory,
     private readonly runtime: InstanceRuntime,
     private readonly tailscale: TailscaleApi,
+    private readonly userInvite: UserInviteApi,
     private readonly keyGen: KeyGen,
     private readonly smokeTester: SmokeTester,
     private readonly logger: Logger,
@@ -227,6 +262,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
     const log = this.logger.child({ op: "reissueTsKey", friendId });
     log.info("re-issuing tailscale enrollment key");
     const ctx = await this.repo.context(friendId);
+    if (ctx.enrollmentMode === "invite") {
+      throw new ConflictError(
+        "invite-enrolled friends join with their own account — there is no " +
+          "auth key to re-issue.",
+      );
+    }
     const minted = await this.tailscale.mintAuthKey({ tag: ctx.nodeTag });
     await this.repo.recordTsKeyId(friendId, minted.keyId);
     // Mint-then-revoke: the friend is never left keyless if the mint fails.
@@ -241,6 +282,69 @@ export class ProvisioningService implements ProvisioningServiceContract {
       tsAuthKey: minted.key,
       tailscaleUpCommand: `tailscale up --authkey=${minted.key}`,
     };
+  }
+
+  async resendInvite(friendId: number): Promise<void> {
+    const ctx = await this.repo.context(friendId);
+    if (ctx.enrollmentMode !== "invite" || !ctx.inviteId) {
+      throw new ConflictError("no pending Tailscale invite to resend");
+    }
+    if (!this.userInvite.configured) {
+      throw new ServiceError(
+        "PRECONDITION_FAILED",
+        "No Tailscale API token configured — resend from the console.",
+      );
+    }
+    await this.userInvite.resendUserInvite(ctx.inviteId);
+    this.logger.info("resent user-invite", {
+      friendId,
+      email: ctx.inviteEmail,
+    });
+  }
+
+  /**
+   * Reconcile an invited friend's status and persist it. Acceptance is read
+   * WITHOUT the personal token — `tailscale.hasJoined` uses the users list
+   * (with a `users:read` scope) or falls back to devices. Only the finer
+   * pending-vs-expired split needs the personal token (it inspects the invite
+   * itself); without it an un-joined friend reads `pending` (invite sent) or
+   * `manual` (admin invited by hand).
+   */
+  async inviteStatus(friendId: number): Promise<InviteStatusView> {
+    const ctx = await this.repo.context(friendId);
+    if (ctx.enrollmentMode !== "invite" || !ctx.inviteEmail) {
+      throw new ConflictError("friend was not enrolled by invite");
+    }
+    const email = ctx.inviteEmail;
+    if (await this.tailscale.hasJoined(email)) {
+      await this.persistInviteStatus(friendId, email, ctx.inviteId, "accepted");
+      return { status: "accepted", email };
+    }
+    // Not joined yet. With the personal token we can tell pending from expired
+    // by inspecting the invite; otherwise report the outstanding state.
+    if (this.userInvite.configured && ctx.inviteId) {
+      const invite = await this.userInvite.getUserInvite(ctx.inviteId);
+      const status: InviteStatus = invite ? "pending" : "expired";
+      await this.persistInviteStatus(friendId, email, ctx.inviteId, status);
+      return {
+        status,
+        email,
+        inviteUrl: invite?.inviteUrl,
+        emailedAt: invite?.lastEmailSentAt ?? undefined,
+      };
+    }
+    const status: InviteStatus = ctx.inviteId ? "pending" : "manual";
+    await this.persistInviteStatus(friendId, email, ctx.inviteId, status);
+    return { status, email };
+  }
+
+  private persistInviteStatus(
+    friendId: number,
+    email: string,
+    inviteId: string | null,
+    status: InviteStatus,
+  ): Promise<void> {
+    return this.repo.recordInvite(friendId, { email, inviteId, status });
   }
 
   /**
@@ -399,7 +503,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       bucket: ctx.bucket,
       nodeTag: ctx.nodeTag,
     });
-    yield* this.tearDownSteps(ctx, log);
+    const manualUserRemoval = yield* this.tearDownSteps(ctx, log);
     yield { type: "step", step: "record" };
     // Record the offboard BEFORE deleting the friend row: the audit FK points at
     // friends.id, so inserting after the delete trips a FOREIGN KEY constraint.
@@ -410,16 +514,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "step", step: "reap" };
     await this.reapInstanceIfEmpty(ctx, log);
     log.info("offboard complete", { isolationMode: ctx.isolationMode });
-    // Manual ACL mode: the manager never touched the policy, so tell the
-    // admin which entries are now stale — advisory, the offboard is done.
-    // Manual ACL mode: the manager never touched the policy, so tell the
-    // admin which entries are now stale — advisory, the offboard is done.
-    yield {
-      type: "done",
-      result: this.config.aclMode === "manual"
-        ? { manualAclCleanup: manualAclRemovalInstructions(ctx.nodeTag) }
-        : {},
-    };
+    const result: OffboardResult = {};
+    // Manual ACL mode: the manager never touched the policy, so tell the admin
+    // which entries are now stale — advisory, the offboard is done.
+    if (this.config.aclMode === "manual") {
+      result.manualAclCleanup = manualAclRemovalInstructions(
+        this.aclSrcFor(ctx),
+      );
+    }
+    if (manualUserRemoval) result.manualUserRemoval = manualUserRemoval;
+    yield { type: "done", result };
   }
 
   // ---- provisioning steps (PLAN "Add friend" flow) ----
@@ -439,16 +543,23 @@ export class ProvisioningService implements ProvisioningServiceContract {
       minioPort: reservation.hostPort,
     });
     const cred = this.keyGen.generateS3Credential();
+    // The ACL grant subject differs by enrollment: an auth-key friend's node
+    // tag, or an invited friend's own login email (identity-src grant).
+    const aclSrc = input.enrollment.mode === "invite"
+      ? input.enrollment.email
+      : naming.nodeTag;
     log.info("step: ensure instance + ACL");
     // MUST precede minting the friend key: Tailscale rejects an auth key for a
     // tag that isn't yet declared in tagOwners, and ensureFriendAcl declares it.
     // In manual ACL mode this returns the grant lines the admin must paste.
-    const manualAcl = yield* this.ensureInfraSteps(reservation, naming, log);
+    const manualAcl = yield* this.ensureInfraSteps(reservation, aclSrc, log);
     yield { type: "step", step: "authkey" };
-    log.debug("minting friend tailscale auth key", { tag: naming.nodeTag });
-    const friendKey = await this.tailscale.mintAuthKey({ tag: naming.nodeTag });
-    // Key ID only (never the secret) — so failure-reap/offboard can revoke it.
-    await this.repo.recordTsKeyId(reservation.friendId, friendKey.keyId);
+    const enroll = await this.enrollFriend(
+      input,
+      naming,
+      reservation.friendId,
+      log,
+    );
     log.info("step: create bucket + user", { bucket: naming.bucket });
     yield* this.createBucketAndUserSteps(
       mc,
@@ -467,9 +578,92 @@ export class ProvisioningService implements ProvisioningServiceContract {
       naming,
       reservation,
       cred,
-      friendKey.key,
+      enroll,
       manualAcl,
     );
+  }
+
+  /** Dispatch enrollment by mode: invite (create-or-advise) or authKey (mint). */
+  private enrollFriend(
+    input: AddFriendInput,
+    naming: FriendNaming,
+    friendId: number,
+    log: Logger,
+  ): Promise<EnrollmentResult> {
+    if (input.enrollment.mode === "invite") {
+      return this.enrollByInvite(friendId, input.enrollment.email, log);
+    }
+    return this.enrollByAuthKey(friendId, naming.nodeTag, log);
+  }
+
+  /** authKey enrollment: mint the friend's single-use tagged key; store its id
+   * (never the secret) so failure-reap/offboard can revoke it. */
+  private async enrollByAuthKey(
+    friendId: number,
+    tag: string,
+    log: Logger,
+  ): Promise<EnrollmentResult> {
+    log.debug("minting friend tailscale auth key", { tag });
+    const friendKey = await this.tailscale.mintAuthKey({ tag });
+    await this.repo.recordTsKeyId(friendId, friendKey.keyId);
+    return { mode: "authKey", tsAuthKey: friendKey.key };
+  }
+
+  /** invite enrollment: create a real user-invite when a personal token is
+   * configured (Tailscale emails the friend); otherwise — or if the create
+   * fails (expired/insufficient token) — record `manual` and advise the admin
+   * to invite from the console. Never fails the provision on a token problem. */
+  private async enrollByInvite(
+    friendId: number,
+    email: string,
+    log: Logger,
+  ): Promise<EnrollmentResult> {
+    if (!this.userInvite.configured) {
+      log.info("no personal API token — advising manual invite", { email });
+      await this.repo.recordInvite(friendId, {
+        email,
+        inviteId: null,
+        status: "manual",
+      });
+      return {
+        mode: "invite",
+        email,
+        manualInstructions: manualInviteInstructions(email),
+      };
+    }
+    try {
+      const invite = await this.userInvite.createUserInvite(email);
+      await this.repo.recordInvite(friendId, {
+        email,
+        inviteId: invite.id,
+        status: "pending",
+      });
+      log.info("user-invite created", { email, inviteId: invite.id });
+      return {
+        mode: "invite",
+        email,
+        inviteUrl: invite.inviteUrl,
+        inviteEmailedAt: invite.lastEmailSentAt ?? undefined,
+      };
+    } catch (err) {
+      log.warn("invite creation failed — advising manual invite", {
+        email,
+        error: String(err),
+      });
+      await this.repo.recordInvite(friendId, {
+        email,
+        inviteId: null,
+        status: "manual",
+      });
+      return {
+        mode: "invite",
+        email,
+        manualInstructions: manualInviteInstructions(email),
+        warning:
+          "The Tailscale invite could not be sent automatically (check " +
+          "P0RT1ON_TAILSCALE_API_TOKEN). Invite this friend from the console.",
+      };
+    }
   }
 
   /**
@@ -479,7 +673,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
    */
   private async *ensureInfraSteps(
     reservation: InstanceReservation,
-    naming: FriendNaming,
+    aclSrc: string,
     log: Logger,
   ): AsyncGenerator<StepEvent<ProvisionStepKey>, string | undefined> {
     yield { type: "step", step: "instance" };
@@ -511,20 +705,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }`;
     if (this.config.aclMode === "manual") {
       log.info("manual ACL mode — admin must add the grant by hand", {
-        tag: naming.nodeTag,
+        src: aclSrc,
       });
       // The admin owns their own tags when pasting into their policy.
-      return manualAclInstructions(
-        naming.nodeTag,
-        endpointHostPort,
-        "autogroup:admin",
-      );
+      return manualAclInstructions(aclSrc, endpointHostPort, "autogroup:admin");
     }
     log.debug("applying friend ACL", {
-      tag: naming.nodeTag,
+      src: aclSrc,
       endpointHostPort,
     });
-    await this.tailscale.ensureFriendAcl(naming.nodeTag, endpointHostPort);
+    await this.tailscale.ensureFriendAcl(aclSrc, endpointHostPort);
     return undefined;
   }
 
@@ -719,10 +909,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
+  /** Returns the manual user-removal advisory (invite friends, no-token or
+   * guarded-out cases), else undefined. */
   private async *tearDownSteps(
     ctx: FriendProvisionContext,
     log: Logger,
-  ): AsyncGenerator<StepEvent<OffboardStepKey>, void> {
+  ): AsyncGenerator<StepEvent<OffboardStepKey>, string | undefined> {
     const mc = this.mc.forInstance({
       alias: ctx.alias,
       minioPort: ctx.minioPort,
@@ -739,12 +931,82 @@ export class ProvisioningService implements ProvisioningServiceContract {
       await mc.removeBucket(ctx.bucket); // force; deletes all versions
     }
     yield { type: "step", step: "nodes" };
-    await this.revokeFriendNodes(ctx.nodeTag);
-    // The enrollment key too — unused it stays live for ~90 days. Absent ID
-    // (pre-column friend) is a no-op; already-revoked is success.
-    if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
+    const manualUserRemoval = await this.tearDownEnrollment(ctx, log);
     yield { type: "step", step: "acl" };
-    await this.removeAclOrAdvise(ctx.nodeTag, log);
+    await this.removeAclOrAdvise(this.aclSrcFor(ctx), log);
+    return manualUserRemoval;
+  }
+
+  /**
+   * Revoke a friend's tailnet identity. auth-key: delete the tagged nodes and
+   * revoke the enrollment key. invite: revoke a still-pending invite, then
+   * delete the joined user only when it's unambiguously safe (see
+   * deleteInvitedUserOrAdvise), else return a manual-removal advisory.
+   */
+  private async tearDownEnrollment(
+    ctx: FriendProvisionContext,
+    log: Logger,
+  ): Promise<string | undefined> {
+    if (ctx.enrollmentMode !== "invite") {
+      await this.revokeFriendNodes(ctx.nodeTag);
+      // Unused the key stays live ~90 days; absent id / already-revoked = ok.
+      if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
+      return undefined;
+    }
+    if (!ctx.inviteEmail) return undefined;
+    if (!this.userInvite.configured) {
+      log.info("no personal API token — advising manual user removal", {
+        email: ctx.inviteEmail,
+      });
+      return manualUserRemovalInstructions(ctx.inviteEmail);
+    }
+    // Kill a still-pending invite so a re-add doesn't collide / double-send.
+    if (ctx.inviteId) await this.userInvite.deleteUserInvite(ctx.inviteId);
+    return await this.deleteInvitedUserOrAdvise(ctx, ctx.inviteEmail, log);
+  }
+
+  /**
+   * Delete the joined tailnet user, but ONLY when it's unambiguously this
+   * friend's and safe: no other live portion shares the email, the user
+   * actually joined, and it's a plain member (never an owner/admin — deleting
+   * one could lock the admin out of the whole tailnet). Otherwise advise manual
+   * removal — the blast radius is too large to guess.
+   */
+  private async deleteInvitedUserOrAdvise(
+    ctx: FriendProvisionContext,
+    email: string,
+    log: Logger,
+  ): Promise<string | undefined> {
+    const shared = await this.repo.otherFriendsWithInviteEmail(
+      ctx.friendId,
+      email,
+    );
+    if (shared > 0) {
+      log.info("another portion shares this tailnet user — leaving it", {
+        email,
+      });
+      return manualUserRemovalInstructions(email);
+    }
+    const user = await this.userInvite.findUserByEmail(email);
+    if (!user) return undefined; // never joined (pending/expired) — nothing to do
+    if (user.role !== "member") {
+      log.warn("tailnet user is not a plain member — not deleting", {
+        email,
+        role: user.role,
+      });
+      return manualUserRemovalInstructions(email);
+    }
+    await this.userInvite.deleteUser(user.id);
+    log.info("deleted joined tailnet user", { email });
+    return undefined;
+  }
+
+  /** ACL grant subject: an invited friend's login email (identity-src) or an
+   * auth-key friend's node tag. */
+  private aclSrcFor(ctx: FriendProvisionContext): string {
+    return ctx.enrollmentMode === "invite" && ctx.inviteEmail
+      ? ctx.inviteEmail
+      : ctx.nodeTag;
   }
 
   /**
@@ -754,14 +1016,24 @@ export class ProvisioningService implements ProvisioningServiceContract {
    * Removal is then the admin's job; offboard advises via OffboardResult, the
    * sweep can only log.
    */
-  private async removeAclOrAdvise(tag: string, log: Logger): Promise<void> {
+  private async removeAclOrAdvise(src: string, log: Logger): Promise<void> {
     if (this.config.aclMode === "manual") {
       log.info("manual ACL mode — admin should remove the policy entries", {
-        tag,
+        src,
       });
       return;
     }
-    await this.tailscale.removeFriendAcl(tag);
+    await this.tailscale.removeFriendAcl(src);
+  }
+
+  /** Failure-reap: revoke a recorded pending invite so a retry doesn't
+   * double-send. 404-tolerant; no-op for auth-key friends / no token. */
+  private async revokeDanglingInvite(
+    ctx: FriendProvisionContext,
+  ): Promise<void> {
+    if (ctx.enrollmentMode !== "invite" || !ctx.inviteId) return;
+    if (!this.userInvite.configured) return;
+    await this.userInvite.deleteUserInvite(ctx.inviteId);
   }
 
   private async revokeFriendNodes(tag: string): Promise<void> {
@@ -866,7 +1138,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       removeAcl: await this.attempt(
         rlog,
         "removeAcl",
-        () => this.removeAclOrAdvise(ctx.nodeTag, rlog),
+        () => this.removeAclOrAdvise(this.aclSrcFor(ctx), rlog),
       ),
       revokeNodes: await this.attempt(
         rlog,
@@ -876,6 +1148,13 @@ export class ProvisioningService implements ProvisioningServiceContract {
       revokeAuthKey: await this.attempt(rlog, "revokeAuthKey", async () => {
         if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
       }),
+      // Invite friends: drop a dangling pending invite so a retry doesn't
+      // double-send. Inert (no-op) for auth-key friends.
+      revokeInvite: await this.attempt(
+        rlog,
+        "revokeInvite",
+        () => this.revokeDanglingInvite(ctx),
+      ),
     };
     const pending = Object.keys(results).filter((k) => !results[k]);
     if (pending.length > 0) {
@@ -1096,26 +1375,45 @@ export class ProvisioningService implements ProvisioningServiceContract {
     naming: FriendNaming,
     reservation: InstanceReservation,
     cred: S3Credential,
-    tsAuthKey: string,
+    enroll: EnrollmentResult,
     manualAclInstructions?: string,
   ): FriendBundle {
     const endpoint = this.endpointFor(reservation.tsHostname);
-    return {
+    const base: FriendBundle = {
       name: input.name,
       s3Endpoint: endpoint,
       bucket: naming.bucket,
       s3AccessKeyId: cred.accessKeyId,
       s3SecretKey: cred.secretKey,
-      tsAuthKey,
-      tailscaleUpCommand: `tailscale up --authkey=${tsAuthKey}`,
+      enrollmentMode: enroll.mode,
       manualAclInstructions,
+      // Join preamble differs by mode: auth-key redeems the minted key; invite
+      // has the friend generate their own key in their Tailscale account.
       kopiaQuickstart: this.kopiaQuickstart({
         endpoint,
         bucket: naming.bucket,
         cred,
         retentionDays: input.retentionDays,
-        tailscaleUpCommand: `tailscale up --authkey=${tsAuthKey}`,
+        create: true,
+        joinLines: enroll.mode === "authKey"
+          ? kopiaJoinLines(`tailscale up --authkey=${enroll.tsAuthKey}`)
+          : kopiaInviteJoinLines(),
       }),
+    };
+    if (enroll.mode === "authKey") {
+      return {
+        ...base,
+        tsAuthKey: enroll.tsAuthKey,
+        tailscaleUpCommand: `tailscale up --authkey=${enroll.tsAuthKey}`,
+      };
+    }
+    return {
+      ...base,
+      inviteEmail: enroll.email,
+      inviteUrl: enroll.inviteUrl,
+      inviteEmailedAt: enroll.inviteEmailedAt,
+      manualInviteInstructions: enroll.manualInstructions,
+      warnings: enroll.warning ? [enroll.warning] : undefined,
     };
   }
 
@@ -1139,27 +1437,29 @@ export class ProvisioningService implements ProvisioningServiceContract {
         bucket: ctx.bucket,
         cred,
         retentionDays: ctx.lockRetentionDays,
+        create: false,
       }),
     };
   }
 
   /**
-   * Copy-pasteable Kopia setup for the bundle. `create` (add) also joins the
-   * tailnet + arms retention; `connect` (rotate — no tailscaleUpCommand) reuses
-   * the existing node + repo with the new key. Mirrors backup-client/entrypoint.
+   * Copy-pasteable Kopia setup for the bundle. `create` (add) arms retention +
+   * a new repo; `connect` (rotate) reuses the existing repo with the new key.
+   * `tailscaleUpCommand` prepends a tailnet-join preamble (auth-key add only) —
+   * invite friends join with their own account, rotate needs no join. Mirrors
+   * backup-client/entrypoint.
    */
   private kopiaQuickstart(opts: {
     endpoint: string;
     bucket: string;
     cred: S3Credential;
     retentionDays: number;
-    tailscaleUpCommand?: string;
+    create: boolean;
+    joinLines?: string[];
   }): string {
     const host = opts.endpoint.replace(/^https?:\/\//, "");
-    const create = opts.tailscaleUpCommand !== undefined;
-    const join = opts.tailscaleUpCommand === undefined
-      ? []
-      : kopiaJoinLines(opts.tailscaleUpCommand);
+    const create = opts.create;
+    const join = opts.joinLines ?? [];
     const password = create
       ? "# Choose YOUR OWN password — client-side only, NEVER sent to us, and"
       : "# Use the SAME KOPIA_PASSWORD you set when the repo was created —";

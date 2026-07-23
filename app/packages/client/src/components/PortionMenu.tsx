@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
   KeyRound,
+  Mail,
   MoreVertical,
   PauseCircle,
   Pencil,
@@ -39,9 +40,24 @@ export function PortionMenu(
             <Menu.Item value="rotate-s3" class={menuItem}>
               <KeyRound size={15} /> Rotate S3 key
             </Menu.Item>
-            <Menu.Item value="rotate-ts" class={menuItem}>
-              <Radio size={15} /> Re-issue Tailscale key
-            </Menu.Item>
+            {
+              /* Auth-key enrollment only — an invite friend has no tagged node
+                key to re-issue (they join with their own account). */
+            }
+            <Show when={props.friend.enrollmentMode !== "invite"}>
+              <Menu.Item value="rotate-ts" class={menuItem}>
+                <Radio size={15} /> Re-issue Tailscale key
+              </Menu.Item>
+            </Show>
+            {/* Invite-enrolled friends whose invite is still outstanding. */}
+            <Show
+              when={props.friend.enrollmentMode === "invite" &&
+                props.friend.inviteStatus === "pending"}
+            >
+              <Menu.Item value="resend-invite" class={menuItem}>
+                <Mail size={15} /> Resend invite
+              </Menu.Item>
+            </Show>
             <Menu.Separator />
             {
               /* State guards mirror the server: suspend only from active,

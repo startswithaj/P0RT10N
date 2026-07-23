@@ -61,6 +61,16 @@ export interface TailscaleApi {
   isNodeOnline(tag: string): Promise<boolean>;
 
   /**
+   * Whether a user with this login email has joined the tailnet — the
+   * acceptance check for invite enrollment, readable WITHOUT the personal
+   * token. Prefers the users list (needs a `users:read` scope); if that scope
+   * is absent, falls back to scanning devices for one owned by the email
+   * (user-owned devices carry their owner's login). Returns false when neither
+   * finds them.
+   */
+  hasJoined(email: string): Promise<boolean>;
+
+  /**
    * The tailnet IPv4 (100.x) of a node by hostname, or null if it hasn't shown
    * up yet. Used as the ACL grant `dst`: Tailscale rejects a MagicDNS FQDN
    * there, so per-friend scoping targets the instance's IP.
@@ -71,11 +81,12 @@ export interface TailscaleApi {
   deleteNode(nodeId: string): Promise<void>;
 
   /**
-   * Ensure the policy (ACL) grants `tag` access to ONLY `endpointHostPort` and
-   * nothing else — not other friends' instances, not the manager UI. Idempotent;
-   * edits the tailnet policy file via the API. Removing the grant happens on
-   * offboard.
+   * Ensure the policy (ACL) grants `src` access to ONLY `endpointHostPort` and
+   * nothing else — not other friends' instances, not the manager UI. `src` is a
+   * friend's node tag (auth-key enrollment) or a user email (invite enrollment,
+   * where the friend's own account is the grant subject and no tagOwners entry
+   * applies). Idempotent; edits the tailnet policy via the API.
    */
-  ensureFriendAcl(tag: string, endpointHostPort: string): Promise<void>;
-  removeFriendAcl(tag: string): Promise<void>;
+  ensureFriendAcl(src: string, endpointHostPort: string): Promise<void>;
+  removeFriendAcl(src: string): Promise<void>;
 }

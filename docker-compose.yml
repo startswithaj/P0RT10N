@@ -27,6 +27,9 @@ services:
       # instances by container name over p0rt1on-net (see networks below).
       P0RT1ON_INSTANCE_ADDRESSING: "network"
       P0RT1ON_DB_PATH: "/app/data/p0rt1on.db"
+      # Bind-mount FS events are unreliable on macOS — make Vite poll for edits
+      # so hot-reload never serves a stale module (see vite.config.ts).
+      P0RT1ON_DEV_POLLING: "1"
       # Forward every MinIO event to your own webhook (optional, byte-identical):
       # P0RT1ON_MINIO_FORWARD_URL: "https://example.com/minio-events"
       # P0RT1ON_MINIO_FORWARD_AUTHORIZATION: "Bearer your-token"

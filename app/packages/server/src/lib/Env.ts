@@ -36,6 +36,7 @@ export enum EnvVar {
   TailscaleBackend = "P0RT1ON_TAILSCALE_BACKEND",
   TailscaleLoginServer = "P0RT1ON_TAILSCALE_LOGIN_SERVER",
   TailscaleServeMode = "P0RT1ON_TAILSCALE_SERVE_MODE",
+  TailscaleApiToken = "P0RT1ON_TAILSCALE_API_TOKEN",
   HeadscaleUrl = "P0RT1ON_HEADSCALE_URL",
   HeadscaleApiKey = "P0RT1ON_HEADSCALE_API_KEY",
   HeadscaleUser = "P0RT1ON_HEADSCALE_USER",
@@ -294,6 +295,16 @@ export class Env {
   /** OAuth client secret for the Tailscale API. */
   get tailscaleOauthClientSecret(): string {
     return this.#required(EnvVar.TailscaleOauthClientSecret);
+  }
+  /**
+   * Personal Tailscale API token (`tskey-api-…`) for user-invite onboarding.
+   * OPTIONAL and deliberately separate from the OAuth client: creating a
+   * user-invite needs a user-owned token, which OAuth clients categorically
+   * are not. Unset → invite mode falls back to manual console instructions.
+   * Full-access + expires ≤90 days, so it is opt-in and used only for invites.
+   */
+  get tailscaleApiToken(): string | undefined {
+    return this.#opt(EnvVar.TailscaleApiToken);
   }
   /**
    * Who owns each friend tag in the policy's `tagOwners` (e.g. `tag:p0rt1on`).

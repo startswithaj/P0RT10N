@@ -8,10 +8,13 @@
  * visually separated from their neighbours so they don't run together into one
  * dense wall.
  *
- * Only function declarations count: a multi-line DATA declaration (a
- * `createSignal<…>(…)` that merely wraps onto several lines) or a bare
- * multi-line call is left alone — tight groups of related state/assignments
- * stay tight.
+ * At MODULE TOP LEVEL the same air is required around a multi-line OBJECT-DATA
+ * declaration — `export const x = css({ … })`, `const y = { … } as const` — so
+ * a file of stacked style/config defs (e.g. `bundle-styles.ts`) doesn't run
+ * together. This does NOT apply inside a function/component body: a multi-line
+ * DATA declaration there (a `createSignal<…>(…)`, whether its arg wraps or
+ * carries a multi-line object) is left alone — tight groups of related
+ * state/assignments stay tight.
  *
  * A leading comment stays glued to the statement it documents: the required
  * blank line goes ABOVE the comment, never between the comment and its
@@ -74,15 +77,44 @@ export default {
           }
           return false;
         };
-        // The trigger: a multi-line function declaration wants air around it.
-        const isBig = (node: Deno.lint.Node): boolean =>
-          isMultiline(node) && isFnDecl(node);
 
-        const check = (statements: Deno.lint.Node[]) => {
+        // A multi-line object literal anywhere in the initializer: `= { … }`,
+        // `= css({ … })`, `= foo(base, { … }) as const`. This — not a call
+        // whose args merely wrap onto extra lines (a `createSignal<…>(…)`) —
+        // is what makes a data declaration a wall.
+        const hasMultilineObject = (
+          node: Deno.lint.Node | null | undefined,
+        ): boolean => {
+          if (!node) return false;
+          if (node.type === "ObjectExpression") return isMultiline(node);
+          if (node.type === "TSAsExpression") {
+            return hasMultilineObject(node.expression);
+          }
+          if (node.type === "CallExpression") {
+            return node.arguments.some(hasMultilineObject);
+          }
+          return false;
+        };
+        // A data declaration built from a multi-line object literal — a stack
+        // of style/config defs that reads as a wall.
+        const isObjectDecl = (node: Deno.lint.Node): boolean => {
+          const n = unwrap(node);
+          return n.type === "VariableDeclaration" &&
+            n.declarations.some((d) => hasMultilineObject(d.init));
+        };
+
+        // The trigger: a multi-line function declaration always wants air; a
+        // multi-line object-data declaration wants it only at module top level
+        // (`atTop`) — inside a component body, tight state groups stay tight.
+        const isBig = (node: Deno.lint.Node, atTop: boolean): boolean =>
+          isMultiline(node) &&
+          (isFnDecl(node) || (atTop && isObjectDecl(node)));
+
+        const check = (statements: Deno.lint.Node[], atTop: boolean) => {
           for (let i = 1; i < statements.length; i++) {
             const prev = statements[i - 1];
             const cur = statements[i];
-            if (!isBig(prev) && !isBig(cur)) continue;
+            if (!isBig(prev, atTop) && !isBig(cur, atTop)) continue;
 
             // Walk up from `cur` through the comment block glued directly above
             // it (each line adjacent, no blank gap) — that's where the required
@@ -110,7 +142,7 @@ export default {
             context.report({
               range: [insertAt, insertAt],
               message:
-                "Add a blank line here — a multi-line function declaration should be separated from its neighbour.",
+                "Add a blank line here — a multi-line block should be separated from its neighbour.",
               fix(fixer) {
                 return fixer.insertTextBeforeRange([insertAt, insertAt], "\n");
               },
@@ -120,10 +152,10 @@ export default {
 
         return {
           Program(node: Deno.lint.Program) {
-            check(node.body as Deno.lint.Node[]);
+            check(node.body as Deno.lint.Node[], true);
           },
           BlockStatement(node: Deno.lint.BlockStatement) {
-            check(node.body as Deno.lint.Node[]);
+            check(node.body as Deno.lint.Node[], false);
           },
         };
       },

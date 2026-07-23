@@ -66,6 +66,23 @@ export const friendsRouter = router({
       ctx.provisioningService.reissueTsKey(input.friendId)
     ),
 
+  /** Manager capabilities the UI reads (e.g. whether email invites are wired). */
+  capabilities: protectedProcedure.query(({ ctx }) => ctx.capabilities),
+
+  /** Reconcile + return an invited friend's current enrollment status. */
+  inviteStatus: protectedProcedure
+    .input(getFriendInput)
+    .query(({ ctx, input }) =>
+      ctx.provisioningService.inviteStatus(input.friendId)
+    ),
+
+  /** Resend an invited friend's pending Tailscale invite (rate-limited 1/min). */
+  resendInvite: protectedProcedure
+    .input(getFriendInput)
+    .mutation(({ ctx, input }) =>
+      ctx.provisioningService.resendInvite(input.friendId)
+    ),
+
   /** Disable the user + revoke the node (dedicated may also stop the pair). */
   suspend: protectedProcedure
     .input(suspendFriendInput)
@@ -95,7 +112,9 @@ export const friendsRouter = router({
         "offboard",
         ctx.provisioningService.offboardStream(input.friendId),
         undefined,
-        (result) => result.manualAclCleanup,
+        (result) =>
+          [result.manualAclCleanup, result.manualUserRemoval]
+            .filter(Boolean).join("\n\n") || undefined,
       ),
     })),
 });

@@ -78,6 +78,8 @@ export class FriendQueries {
       lockMode: friends.lockMode,
       lockRetentionDays: friends.lockRetentionDays,
       quotaBytes: friends.quotaBytes,
+      enrollmentMode: friends.enrollmentMode,
+      inviteStatus: friends.inviteStatus,
       requestBuckets: activity.requestBuckets,
       lastRequestAt: activity.lastRequestAt,
     }).from(friends)
@@ -98,6 +100,8 @@ export class FriendQueries {
       usage: usageView(latest.get(r.id), r.quotaBytes),
       requests24h: sumLast24h(r.requestBuckets ?? {}, now),
       lastRequestAt: r.lastRequestAt ?? null,
+      enrollmentMode: r.enrollmentMode,
+      inviteStatus: r.inviteStatus as FriendListItem["inviteStatus"],
     }));
   }
 

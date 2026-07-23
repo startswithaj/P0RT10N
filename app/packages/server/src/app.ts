@@ -6,6 +6,7 @@ import { CryptoKeyGen } from "./provisioning/CryptoKeyGen.ts";
 import { McSmokeTester } from "./provisioning/McSmokeTester.ts";
 import { TailscaleHttpApi } from "./tailscale/TailscaleHttpApi.ts";
 import { HeadscaleHttpApi } from "./tailscale/HeadscaleHttpApi.ts";
+import { TailscaleUserInviteApi } from "./tailscale/TailscaleUserInviteApi.ts";
 import type { TailscaleApi } from "./tailscale/tailscale.ts";
 import { McShellClientFactory } from "./minio/McShellClient.ts";
 import {
@@ -143,12 +144,16 @@ export async function buildApp(
     (t) => instanceRuntime.adminEndpoint(t.alias, t.minioPort),
   );
   const tailscale = buildTailscaleApi(env);
+  const userInvite = new TailscaleUserInviteApi({
+    token: env.tailscaleApiToken,
+  });
   const provisioningService = new ProvisioningService(
     config,
     repo,
     mcFactory,
     instanceRuntime,
     tailscale,
+    userInvite,
     keyGen,
     new McSmokeTester(runner, tempFiles),
     logger,
@@ -179,6 +184,7 @@ export async function buildApp(
       logger,
     ),
     jobService: new JobService(logger),
+    capabilities: { inviteApiConfigured: userInvite.configured },
     auth,
     logger,
   };

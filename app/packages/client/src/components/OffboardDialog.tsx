@@ -91,8 +91,8 @@ function AclCleanupBody(props: {
     <>
       <p class={desc}>
         {props.name}{" "}
-        is offboarded. You should remove these entries from your tailnet policy
-        — the manager can't edit it in manual ACL mode:
+        is offboarded. A few follow-ups the manager couldn't do automatically —
+        finish these by hand:
       </p>
       <div class={codeWrap}>
         <pre class={codeBlock}>{props.cleanup}</pre>
@@ -150,6 +150,7 @@ export function OffboardDialog(
       title={`Offboard ${props.friend.name}`}
       onClose={props.onClose}
       onEnter={running() ? undefined : start}
+      wide
     >
       <Switch
         fallback={

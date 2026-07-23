@@ -1,7 +1,7 @@
 import { createSignal, For, onCleanup, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { ArrowLeft, Boxes, Server } from "lucide-solid";
-import { addFriendInput } from "@p0rt1on/shared/domain";
+import { addFriendInput, type Enrollment } from "@p0rt1on/shared/domain";
 import { Button } from "./ui/button.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { Input } from "./ui/input.tsx";
@@ -26,13 +26,15 @@ const GB = 1_000_000_000;
 /** Pause before an invalid name shows its error (don't flash mid-word). */
 const NAME_ERROR_DEBOUNCE_MS = 500;
 
-/** The form's output — an AddFriendInput plus the (frontend-only) enroll choice. */
+/** The form's output — an AddFriendInput plus the (frontend-only) enroll choice.
+ * `enroll` drives the provisioning/bundle screens; `enrollment` is the payload. */
 export type NewPortion = {
   name: string;
   quotaBytes: number;
   retentionDays: number;
   isolationMode: "dedicated" | "shared";
   enroll: "key" | "invite";
+  enrollment: Enrollment;
 };
 
 const page = css({
@@ -129,6 +131,7 @@ function blockReasonFor(name: string, issues: FormIssue[]): string | null {
     name: "Name",
     quotaBytes: "Quota",
     retentionDays: "Retention",
+    enrollment: "Email",
   };
   return `${
     labels[String(first.path[0])] ?? String(first.path[0])
@@ -178,6 +181,40 @@ function createNameField() {
     settleNow: settle.settleNow,
     settled: settle.settled,
   };
+}
+
+/** Enrollment state: the key/invite choice, the invite email, and the derived
+ * `Enrollment` payload (email trimmed). */
+function createEnrollField() {
+  const [enroll, setEnroll] = createSignal<"key" | "invite">("key");
+  const [email, setEmail] = createSignal("");
+
+  const enrollment = (): Enrollment =>
+    enroll() === "invite"
+      ? { mode: "invite", email: email().trim() }
+      : { mode: "authKey" };
+
+  return { enroll, setEnroll, email, setEmail, enrollment };
+}
+
+function FormHeader(props: { onBack: () => void }) {
+  return (
+    <>
+      <div class={topRow}>
+        <IconButton
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label="Back"
+          onClick={props.onBack}
+        >
+          <ArrowLeft size={18} />
+        </IconButton>
+        <h1 class={title}>Add a portion</h1>
+      </div>
+      <p class={subtitle}>Provision a new friend's immutable S3 endpoint.</p>
+    </>
+  );
 }
 
 function RetentionField(
@@ -260,6 +297,9 @@ export function AddPortion(
   props: {
     onBack: () => void;
     onSubmit: (data: NewPortion) => void;
+    /** Whether the manager has an invite API token. Undefined = still loading
+     * (treat as configured — the warning is a hint, never a submit gate). */
+    inviteApiConfigured?: boolean;
   },
 ) {
   const nameField = createNameField();
@@ -267,7 +307,8 @@ export function AddPortion(
   const [mode, setMode] = createSignal<"dedicated" | "shared">("dedicated");
   const [quota, setQuota] = createSignal(30);
   const [retention, setRetention] = createSignal(14);
-  const [enroll, setEnroll] = createSignal<"key" | "invite">("key");
+  const { enroll, setEnroll, email, setEmail, enrollment } =
+    createEnrollField();
 
   // The AddFriendInput fields this form assembles. Validation is delegated to
   // the same `addFriendInput` schema the server enforces (single source of
@@ -280,6 +321,7 @@ export function AddPortion(
     quotaBytes: Math.round(quota() * GB),
     retentionDays: retention(),
     isolationMode: mode(),
+    enrollment: enrollment(),
   });
 
   const issues = () => formIssues(core());
@@ -295,19 +337,7 @@ export function AddPortion(
   return (
     <main class={page}>
       <div class={shell}>
-        <div class={topRow}>
-          <IconButton
-            type="button"
-            variant="outline"
-            size="sm"
-            aria-label="Back"
-            onClick={props.onBack}
-          >
-            <ArrowLeft size={18} />
-          </IconButton>
-          <h1 class={title}>Add a portion</h1>
-        </div>
-        <p class={subtitle}>Provision a new friend's immutable S3 endpoint.</p>
+        <FormHeader onBack={props.onBack} />
 
         <form
           class={card}
@@ -346,7 +376,16 @@ export function AddPortion(
             error={() => errFor("retentionDays")}
           />
 
-          <EnrollPicker enroll={enroll} setEnroll={setEnroll} />
+          <EnrollPicker
+            enroll={enroll}
+            setEnroll={setEnroll}
+            email={email}
+            setEmail={setEmail}
+            emailError={() => (email().trim() !== ""
+              ? errFor("enrollment")
+              : null)}
+            inviteApiConfigured={props.inviteApiConfigured ?? true}
+          />
 
           <div class={actions}>
             <Show when={blockReason()}>

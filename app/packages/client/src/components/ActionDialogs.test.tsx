@@ -11,6 +11,7 @@ vi.mock("../trpc.ts", () => ({
       reissueTsKey: { mutate: vi.fn() },
       suspend: { mutate: vi.fn() },
       resume: { mutate: vi.fn() },
+      resendInvite: { mutate: vi.fn() },
       resize: { mutate: vi.fn() },
       offboardStart: { mutate: vi.fn() },
     },
@@ -25,12 +26,65 @@ import { SuspendDialog } from "./SuspendDialog.tsx";
 import { ResizeDialog } from "./ResizeDialog.tsx";
 import { RotateS3Dialog } from "./RotateS3Dialog.tsx";
 import { RotateTsDialog } from "./RotateTsDialog.tsx";
+import { ResendInviteDialog } from "./ResendInviteDialog.tsx";
 import { OffboardDialog } from "./OffboardDialog.tsx";
 
 const { mutateOf } = vi.hoisted(() => ({
   // deno-lint-ignore no-explicit-any -- the mocked mutate is a vi.fn under a real tRPC type
   mutateOf: (fn: unknown) => fn as any,
 }));
+
+describe("ResendInviteDialog", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("confirms: resendInvite mutate → success toast → invalidate → close", async () => {
+    mutateOf(trpc.friends.resendInvite.mutate).mockResolvedValue(undefined);
+    const create = vi.spyOn(toaster, "create");
+    const onClose = vi.fn();
+    render(() => (
+      <ResendInviteDialog
+        friend={makeFriend({ id: 9, name: "bob", enrollmentMode: "invite" })}
+        onClose={onClose}
+      />
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+
+    await waitFor(() =>
+      expect(trpc.friends.resendInvite.mutate).toHaveBeenCalledWith({
+        friendId: 9,
+      })
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "success",
+        title: "Invite resent to bob",
+      }),
+    );
+    create.mockRestore();
+  });
+
+  it("surfaces the rate-limit error inline and does not close", async () => {
+    mutateOf(trpc.friends.resendInvite.mutate).mockRejectedValue(
+      new Error("Tailscale limits invite resends to one per minute"),
+    );
+    const onClose = vi.fn();
+    render(() => (
+      <ResendInviteDialog
+        friend={makeFriend({ id: 3, name: "carol", enrollmentMode: "invite" })}
+        onClose={onClose}
+      />
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/one per minute/i)).toBeInTheDocument()
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
 
 describe("SuspendDialog", () => {
   beforeEach(() => vi.clearAllMocks());

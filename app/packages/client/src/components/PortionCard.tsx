@@ -4,6 +4,7 @@ import { Activity, Lock, TriangleAlert } from "lucide-solid";
 import * as Card from "./ui/card.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
+import { InviteStatusBadge } from "./InviteStatusBadge.tsx";
 import { PortionMenu } from "./PortionMenu.tsx";
 import { UsageBar } from "./UsageBar.tsx";
 import { gb, pct, staleness } from "./helpers.ts";
@@ -58,12 +59,22 @@ export function PortionCard(
             <Lock size={14} /> {props.friend.lockRetentionDays}d
           </span>
         </div>
-        <span class={stale().warn ? staleWarn : staleNeutral}>
-          <Show when={stale().warn}>
-            <TriangleAlert size={14} />
-          </Show>
-          {stale().label}
-        </span>
+        <div
+          class={css({
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "2",
+          })}
+        >
+          <span class={stale().warn ? staleWarn : staleNeutral}>
+            <Show when={stale().warn}>
+              <TriangleAlert size={14} />
+            </Show>
+            {stale().label}
+          </span>
+          <InviteStatusBadge friend={props.friend} />
+        </div>
       </Card.Body>
     </Card.Root>
   );

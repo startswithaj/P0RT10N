@@ -40,6 +40,8 @@ interface ApiDevice {
   tags?: string[];
   lastSeen?: string;
   addresses?: string[];
+  /** Owner login (email) for USER-owned devices; empty for tagged nodes. */
+  user?: string;
 }
 
 /** One grant rule (modern policy model): src principals → dst destinations. */
@@ -148,9 +150,7 @@ export class TailscaleHttpApi implements TailscaleApi {
   }
 
   async nodesByTag(tag: string): Promise<TailnetNode[]> {
-    const json = await this.request("GET", `/tailnet/${this.tn()}/devices`);
-    const devices = (json as { devices?: ApiDevice[] }).devices ?? [];
-    return devices
+    return (await this.listDevices())
       .filter((d) => (d.tags ?? []).includes(tag))
       .map((d) => ({
         nodeId: d.id,
@@ -158,6 +158,36 @@ export class TailscaleHttpApi implements TailscaleApi {
         tags: d.tags ?? [],
         online: this.isFresh(d.lastSeen),
       }));
+  }
+
+  async hasJoined(email: string): Promise<boolean> {
+    const want = email.toLowerCase();
+    const users = await this.listUsersOrNull();
+    if (users !== null) {
+      return users.some((u) => u.loginName.toLowerCase() === want);
+    }
+    // No users:read scope (404) — fall back to devices: a user-owned device
+    // carries its owner's login email, so a matching one means they've joined.
+    return (await this.listDevices())
+      .some((d) => (d.user ?? "").toLowerCase() === want);
+  }
+
+  private async listDevices(): Promise<ApiDevice[]> {
+    const json = await this.request("GET", `/tailnet/${this.tn()}/devices`);
+    return (json as { devices?: ApiDevice[] }).devices ?? [];
+  }
+
+  /** The tailnet's users, or null when the token lacks `users:read` (404). */
+  private async listUsersOrNull(): Promise<{ loginName: string }[] | null> {
+    try {
+      const json = await this.request("GET", `/tailnet/${this.tn()}/users`);
+      return (json as { users?: { loginName: string }[] }).users ?? [];
+    } catch (err) {
+      if (err instanceof ServiceError && /\(404\)/.test(err.message)) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   async isNodeOnline(tag: string): Promise<boolean> {
@@ -175,50 +205,52 @@ export class TailscaleHttpApi implements TailscaleApi {
     await this.request("DELETE", `/device/${nodeId}`);
   }
 
-  /** Grant `tag` access to ONLY `endpointHostPort`; own the tag. Idempotent.
-   * A stale grant for the same friend (endpoint changed) is replaced, not
-   * left to accumulate beside the new one. */
-  async ensureFriendAcl(tag: string, endpointHostPort: string): Promise<void> {
+  /** Grant `src` (tag or user email) access to ONLY `endpointHostPort`; own the
+   * tag when `src` is one. Idempotent. A stale grant for the same friend
+   * (endpoint changed) is replaced, not left to accumulate beside the new one. */
+  async ensureFriendAcl(src: string, endpointHostPort: string): Promise<void> {
+    const ownsTag = src.startsWith("tag:");
     try {
       const { host, port } = splitHostPort(endpointHostPort);
       const desired: AclGrant = {
-        src: [tag],
+        src: [src],
         dst: [host],
         ip: [`tcp:${port}`],
       };
       await this.updatePolicy((policy) => {
         const grants = policy.grants ?? [];
         const hasGrant = grants.some((g) => matchesGrant(g, desired));
-        const hasOwner = Boolean(policy.tagOwners?.[tag]);
+        const hasOwner = !ownsTag || Boolean(policy.tagOwners?.[src]);
         if (hasGrant && hasOwner) return null; // already in place
+        const tagOwners = { ...policy.tagOwners };
+        if (ownsTag) {
+          tagOwners[src] = policy.tagOwners?.[src] ?? [this.tagOwner()];
+        }
         return {
           ...policy,
-          tagOwners: {
-            ...policy.tagOwners,
-            [tag]: policy.tagOwners?.[tag] ?? [this.tagOwner()],
-          },
+          tagOwners,
           grants: hasGrant
             ? grants
-            : [...grants.filter((g) => !sameSrc(g, tag)), desired],
+            : [...grants.filter((g) => !sameSrc(g, src)), desired],
         };
       });
     } catch (err) {
       // No policy_file write scope → tell the admin exactly what to paste.
       if (err instanceof ServiceError && err.code === "FORBIDDEN") {
         throw new ManualAclRequiredError(
-          manualAclInstructions(tag, endpointHostPort, this.tagOwner()),
+          manualAclInstructions(src, endpointHostPort, this.tagOwner()),
         );
       }
       throw err;
     }
   }
 
-  /** Drop the friend's grant + tag ownership (offboard). Idempotent. */
-  async removeFriendAcl(tag: string): Promise<void> {
+  /** Drop the friend's grant (and tag ownership, if a tag). Idempotent. */
+  async removeFriendAcl(src: string): Promise<void> {
     await this.updatePolicy((policy) => {
-      const grants = (policy.grants ?? []).filter((g) => !sameSrc(g, tag));
+      const grants = (policy.grants ?? []).filter((g) => !sameSrc(g, src));
       const tagOwners = { ...policy.tagOwners };
-      delete tagOwners[tag];
+      if (src.startsWith("tag:")) delete tagOwners[src];
       return { ...policy, grants, tagOwners };
     });
   }

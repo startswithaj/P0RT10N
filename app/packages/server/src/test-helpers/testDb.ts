@@ -46,6 +46,7 @@ export function makeAddInput(
     retentionDays: 30,
     isolationMode,
     lockMode: "GOVERNANCE",
+    enrollment: { mode: "authKey" },
   };
 }
 

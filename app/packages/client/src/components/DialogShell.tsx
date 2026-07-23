@@ -1,7 +1,12 @@
 import { type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import * as Dialog from "./ui/dialog.tsx";
-import { body, contentShadow, dimBackdrop } from "./action-dialog-shared.ts";
+import {
+  body,
+  bodyWide,
+  contentShadow,
+  dimBackdrop,
+} from "./action-dialog-shared.ts";
 
 /**
  * The modal frame shared by every action dialog: dimmed backdrop, floating
@@ -13,6 +18,8 @@ export function DialogShell(props: {
   title: string;
   onClose: () => void;
   onEnter?: () => void;
+  /** Wider frame for code-block-heavy dialogs (offboard advice). */
+  wide?: boolean;
   children: JSX.Element;
 }) {
   const onKeyDown = (e: KeyboardEvent) => {
@@ -28,7 +35,7 @@ export function DialogShell(props: {
         <Dialog.Backdrop class={dimBackdrop} />
         <Dialog.Positioner>
           <Dialog.Content class={contentShadow}>
-            <div class={body} onKeyDown={onKeyDown}>
+            <div class={props.wide ? bodyWide : body} onKeyDown={onKeyDown}>
               <Dialog.Title>{props.title}</Dialog.Title>
               {props.children}
             </div>

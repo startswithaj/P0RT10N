@@ -15,6 +15,8 @@ vi.mock("./trpc.ts", async () => {
       friends: {
         list: { query: vi.fn() },
         addStart: { mutate: vi.fn() },
+        capabilities: { query: vi.fn() },
+        inviteStatus: { query: vi.fn() },
       },
       jobs: {
         progress: { subscribe: vi.fn() },
@@ -63,6 +65,13 @@ describe("App dashboard", () => {
       minio: [],
       tailscale: [],
       host: [{ name: "p0rt1on-api", detail: "control-plane API", state: "up" }],
+    });
+    asMock(trpc.friends.capabilities.query).mockResolvedValue({
+      inviteApiConfigured: true,
+    });
+    asMock(trpc.friends.inviteStatus.query).mockResolvedValue({
+      status: "pending",
+      email: "friend@example.com",
     });
   });
 

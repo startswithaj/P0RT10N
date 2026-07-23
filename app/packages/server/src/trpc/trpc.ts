@@ -1,4 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
+import type { ManagerCapabilities } from "@p0rt1on/shared/domain";
 import { ServiceError } from "../lib/ServiceError.ts";
 import type { AdminAuth } from "../auth/AdminAuth.ts";
 import type {
@@ -21,6 +22,8 @@ export interface TrpcContext {
   auditService: AuditService;
   inventoryService: InventoryService;
   jobService: JobService;
+  /** Static manager capabilities the client reads to shape the UI. */
+  capabilities: ManagerCapabilities;
   logger: Logger;
   /** Admin auth (disabled → protectedProcedure lets everything through). */
   auth: AdminAuth;

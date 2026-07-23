@@ -9,17 +9,18 @@
  * friend is gone. Advisory only — the offboard has already completed. Names
  * the same entries manualAclInstructions told them to add, keyed by tag.
  */
-export function manualAclRemovalInstructions(tag: string): string {
+export function manualAclRemovalInstructions(src: string): string {
   return [
     `Remove from your Tailscale policy (https://login.tailscale.com/admin/acls):`,
     ``,
-    `- the "tagOwners" entry for "${tag}"`,
-    `- any "grants" entry with "src": ["${tag}"]`,
+    // A user-email src owns itself; only tag srcs have a tagOwners entry.
+    ...(src.startsWith("tag:") ? [`- the "tagOwners" entry for "${src}"`] : []),
+    `- any "grants" entry with "src": ["${src}"]`,
   ].join("\n");
 }
 
 export function manualAclInstructions(
-  tag: string,
+  src: string,
   endpointHostPort: string,
   tagOwner: string,
 ): string {
@@ -27,17 +28,19 @@ export function manualAclInstructions(
   const colon = endpointHostPort.lastIndexOf(":");
   const host = colon > 0 ? endpointHostPort.slice(0, colon) : endpointHostPort;
   const port = colon > 0 ? endpointHostPort.slice(colon + 1) : "443";
-  const tagOwners = JSON.stringify({ [tag]: [tagOwner] }, null, 2);
   const grant = JSON.stringify(
-    { src: [tag], dst: [host], ip: [`tcp:${port}`] },
+    { src: [src], dst: [host], ip: [`tcp:${port}`] },
     null,
     2,
   );
+  // Only a tag needs a tagOwners declaration; a user email owns itself.
+  const tagOwnerLines = src.startsWith("tag:")
+    ? [`"tagOwners": ${JSON.stringify({ [src]: [tagOwner] }, null, 2)},`, ``]
+    : [];
   return [
     `Add to your Tailscale policy (https://login.tailscale.com/admin/acls):`,
     ``,
-    `"tagOwners": ${tagOwners},`,
-    ``,
+    ...tagOwnerLines,
     `"grants": [`,
     grant,
     `]`,

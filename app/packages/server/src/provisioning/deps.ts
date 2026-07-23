@@ -1,6 +1,7 @@
 import type {
   AddFriendInput,
   AuditAction,
+  EnrollmentMode,
   FriendStatus,
   IsolationMode,
   LockMode,
@@ -86,6 +87,10 @@ export interface FriendProvisionContext {
   /** Tailscale auth-key ID (never the secret); null pre-column friends. */
   tsKeyId: string | null;
   nodeTag: string;
+  enrollmentMode: EnrollmentMode;
+  /** Invite mode only; null for authKey friends. */
+  inviteEmail: string | null;
+  inviteId: string | null;
   lockMode: LockMode;
   lockRetentionDays: number;
   instanceId: number;
@@ -119,6 +124,12 @@ export interface ProvisioningRepo {
   /** Persist the Tailscale auth-key **ID** (never the secret) at mint time. */
   recordTsKeyId(friendId: number, tsKeyId: string): Promise<void>;
 
+  /** Persist invite-mode enrollment (also flips enrollmentMode to `invite`). */
+  recordInvite(
+    friendId: number,
+    invite: { email: string; inviteId: string | null; status: string },
+  ): Promise<void>;
+
   /** Persist the serve node's tailnet ID once it has enrolled. */
   recordServeNodeId(instanceId: number, serveNodeId: string): Promise<void>;
 
@@ -147,6 +158,15 @@ export interface ProvisioningRepo {
 
   /** Join friend + instance for rotate/offboard. */
   context(friendId: number): Promise<FriendProvisionContext>;
+
+  /**
+   * Count of OTHER non-`failed` friends sharing an invite email — offboard's
+   * guard against deleting a tailnet user another portion still depends on.
+   */
+  otherFriendsWithInviteEmail(
+    excludeFriendId: number,
+    email: string,
+  ): Promise<number>;
 
   /** Count of non-`failed` friends still on an instance (offboard reaping). */
   friendsOnInstance(instanceId: number): Promise<number>;

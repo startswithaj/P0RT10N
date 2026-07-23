@@ -107,14 +107,48 @@ describe("Bundle", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows the invite note instead when there is no auth key", () => {
-      // Invite enroll: no tailscaleUpCommand, so the command block is absent and
-      // the emailed-invite note takes its place.
-      renderBundle({ tailscaleUpCommand: undefined }, "invite");
+    it("invite: shows 'emailed to X' + the link, hides the up-command", () => {
+      renderBundle({
+        tailscaleUpCommand: undefined,
+        enrollmentMode: "invite",
+        inviteEmail: "bob@example.com",
+        inviteEmailedAt: "2026-07-01T00:00:00Z",
+        inviteUrl: "https://login.tailscale.com/uinv/inv1",
+      }, "invite");
 
-      expect(screen.getByText(/An invite has been emailed/i))
+      expect(screen.getByText(/emailed to bob@example.com/i))
+        .toBeInTheDocument();
+      expect(screen.getByText("https://login.tailscale.com/uinv/inv1"))
         .toBeInTheDocument();
       expect(screen.queryByText(/tailscale up --authkey/i)).toBeNull();
+    });
+
+    it("invite without an emailed time reads 'created — share the link'", () => {
+      renderBundle({
+        tailscaleUpCommand: undefined,
+        enrollmentMode: "invite",
+        inviteEmail: "bob@example.com",
+        inviteUrl: "https://login.tailscale.com/uinv/inv1",
+      }, "invite");
+
+      expect(screen.getByText(/share the link below/i)).toBeInTheDocument();
+    });
+
+    it("invite with no token surfaces the manual-invite console steps", () => {
+      renderBundle({
+        tailscaleUpCommand: undefined,
+        enrollmentMode: "invite",
+        inviteEmail: "bob@example.com",
+        manualInviteInstructions: "1. Open the Tailscale users console",
+      }, "invite");
+
+      expect(screen.getByText(/invite manually/i)).toBeInTheDocument();
+      expect(screen.getByText(/Open the Tailscale users console/i))
+        .toBeInTheDocument();
+      // The header must NOT claim an invite was created — none was sent.
+      expect(screen.getByText(/No invite was sent automatically/i))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/Invite created/i)).toBeNull();
     });
   });
 });

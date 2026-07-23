@@ -8,6 +8,7 @@ import {
 import { sql } from "drizzle-orm";
 import {
   AUDIT_ACTION_VALUES,
+  ENROLLMENT_MODE_VALUES,
   FRIEND_STATUS_VALUES,
   INSTANCE_KIND_VALUES,
   INSTANCE_STATUS_VALUES,
@@ -77,6 +78,17 @@ export const friends = sqliteTable("friends", {
   // so the key can be revoked on failure-reap, re-issue, and offboard. Null
   // for friends provisioned before this column (their keys expire naturally).
   tsKeyId: text("ts_key_id"),
+  // How the friend joined the tailnet. Default authKey so pre-column rows read
+  // as the existing tagged-node flow (see ENROLLMENT_MODE_VALUES).
+  enrollmentMode: text("enrollment_mode", { enum: ENROLLMENT_MODE_VALUES })
+    .notNull()
+    .default("authKey"),
+  // Invite flow only (null for authKey friends): the invited email (== login
+  // identity for the ACL grant), the Tailscale invite id (status/resend/revoke),
+  // and the tracked invite status (pending / accepted / expired / manual).
+  inviteEmail: text("invite_email"),
+  inviteId: text("invite_id"),
+  inviteStatus: text("invite_status"),
   status: text("status", { enum: FRIEND_STATUS_VALUES })
     .notNull()
     .default("provisioning"),

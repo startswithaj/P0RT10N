@@ -63,6 +63,7 @@ export type ActionKind =
   | "rotate-ts"
   | "suspend"
   | "resume"
+  | "resend-invite"
   | "offboard";
 export type Pending = { friend: FriendRow; kind: ActionKind };
 
@@ -85,20 +86,36 @@ export const body = css({
   w: "full",
   maxW: "440px",
 });
+
+// Wider frame for dialogs with code blocks (offboard advice), so paste-in
+// snippets don't wrap mid-token.
+export const bodyWide = css({
+  display: "flex",
+  flexDirection: "column",
+  gap: "4",
+  p: "6",
+  w: "full",
+  maxW: "560px",
+});
+
 // Softer backdrop than the recipe default (`!` = Panda !important so it wins).
 export const dimBackdrop = css({ background: "rgba(0, 0, 0, 0.35)!" });
+
 // Lift the panel off the dimmed page — modals should float (shadow > hard border).
 export const contentShadow = css({
   boxShadow:
     "0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.4)!",
 });
+
 export const desc = css({
   fontSize: "sm",
   color: "fg.muted",
   lineHeight: "1.5",
 });
+
 export const errText = css({ fontSize: "sm", color: "fg.error" });
 export const codeWrap = css({ position: "relative" });
+
 export const codeBlock = css({
   fontFamily: "body",
   fontSize: "xs",
@@ -113,14 +130,17 @@ export const codeBlock = css({
   pr: "10",
   color: "fg.default",
 });
+
 // Copy sits in the code block's top-right; IconButton supplies the box + hover.
 export const copyPos = css({ position: "absolute", top: "2", right: "2" });
+
 export const actionsRow = css({
   display: "flex",
   justifyContent: "flex-end",
   gap: "3",
   mt: "1",
 });
+
 // Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
 // Button recipe still supplies sizing, radius and typography.
 export const sparkBtn = css({

@@ -4,6 +4,7 @@ import { RotateS3Dialog } from "./RotateS3Dialog.tsx";
 import { RotateTsDialog } from "./RotateTsDialog.tsx";
 import { SuspendDialog } from "./SuspendDialog.tsx";
 import { ResumeDialog } from "./ResumeDialog.tsx";
+import { ResendInviteDialog } from "./ResendInviteDialog.tsx";
 import { OffboardDialog } from "./OffboardDialog.tsx";
 import type { AddBundle, Pending } from "./action-dialog-shared.ts";
 
@@ -39,6 +40,9 @@ export function ActionDialogs(props: {
           </Match>
           <Match when={p().kind === "resume"}>
             <ResumeDialog friend={p().friend} onClose={props.onClose} />
+          </Match>
+          <Match when={p().kind === "resend-invite"}>
+            <ResendInviteDialog friend={p().friend} onClose={props.onClose} />
           </Match>
           <Match when={p().kind === "offboard"}>
             <OffboardDialog friend={p().friend} onClose={props.onClose} />

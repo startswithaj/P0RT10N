@@ -22,6 +22,28 @@ export const INSTANCE_KIND_VALUES = ISOLATION_MODE_VALUES;
 export type InstanceKind = IsolationMode;
 
 /**
+ * How a friend joins the tailnet, chosen per friend at "Add friend" time.
+ * - authKey: their machine enrols as a tagged node via a minted key (default).
+ * - invite: Tailscale emails them a user-invite; they join as a real user and
+ *   their email is the login identity for an identity-based ACL grant. Needs a
+ *   personal API token configured; absent → manual console-invite fallback.
+ */
+export const ENROLLMENT_MODE_VALUES = ["authKey", "invite"] as const;
+export type EnrollmentMode = (typeof ENROLLMENT_MODE_VALUES)[number];
+
+/** Friend email == invite recipient == login identity for the ACL grant. */
+export const emailSchema: z.ZodString = z.string().trim().email().max(254);
+
+export const enrollmentSchema: z.ZodDiscriminatedUnion<"mode", [
+  z.ZodObject<{ mode: z.ZodLiteral<"authKey"> }>,
+  z.ZodObject<{ mode: z.ZodLiteral<"invite">; email: typeof emailSchema }>,
+]> = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("authKey") }),
+  z.object({ mode: z.literal("invite"), email: emailSchema }),
+]);
+export type Enrollment = z.infer<typeof enrollmentSchema>;
+
+/**
  * Friend lifecycle. provisioning → active is the happy path; a crash leaves the
  * row recoverable (failed) for the cleanup sweep. suspend/offboard are admin actions.
  */
@@ -109,12 +131,16 @@ export const addFriendInput: z.ZodObject<{
   retentionDays: typeof retentionDaysSchema;
   isolationMode: typeof isolationModeSchema;
   lockMode: z.ZodDefault<typeof lockModeSchema>;
+  enrollment: z.ZodDefault<typeof enrollmentSchema>;
 }> = z.object({
   name: friendNameSchema,
   quotaBytes: byteCountSchema,
   retentionDays: retentionDaysSchema,
   isolationMode: isolationModeSchema,
   lockMode: lockModeSchema.default("GOVERNANCE"),
+  // Default keeps the existing auth-key flow byte-for-byte for callers that
+  // omit it; invite mode carries the friend's email.
+  enrollment: enrollmentSchema.default({ mode: "authKey" }),
 });
 export type AddFriendInput = z.infer<typeof addFriendInput>;
 
@@ -210,8 +236,18 @@ export type FriendBundle = {
   bucket: string;
   s3AccessKeyId: string;
   s3SecretKey: string; // shown once
-  tsAuthKey?: string; // shown once; addFriend only
-  tailscaleUpCommand?: string; // addFriend only
+  /** Which enrollment path this bundle is for; drives the client's TS section. */
+  enrollmentMode?: EnrollmentMode; // addFriend only; undefined == authKey (legacy)
+  tsAuthKey?: string; // shown once; addFriend + authKey only
+  tailscaleUpCommand?: string; // addFriend + authKey only
+  // --- invite enrollment (addFriend only) ---
+  inviteEmail?: string;
+  /** Copyable acceptance link (not a secret) — email fallback. */
+  inviteUrl?: string;
+  /** ISO time Tailscale emailed the invite; absent = not sent. */
+  inviteEmailedAt?: string;
+  /** No-token fallback: console steps for the admin to invite manually. */
+  manualInviteInstructions?: string;
   /** Manual-ACL mode: grant lines the admin must paste into their policy. */
   manualAclInstructions?: string; // addFriend only, when aclMode="manual"
   kopiaQuickstart: string;
@@ -240,6 +276,37 @@ export {
  */
 export type OffboardResult = {
   manualAclCleanup?: string;
+  /** Invite mode with no API token: console steps to remove the tailnet user
+   * by hand. Advisory — offboard already completed. */
+  manualUserRemoval?: string;
+};
+
+/** Manager capabilities the client reads to shape the UI. `inviteApiConfigured`
+ * reflects only that a token is SET (not that it is still valid), so the invite
+ * pre-submit warning is a hint, not a guarantee. */
+export type ManagerCapabilities = { inviteApiConfigured: boolean };
+
+/**
+ * Lifecycle of an invited friend's tailnet enrollment. `pending` = invite still
+ * outstanding; `accepted` = the friend joined; `expired` = the invite lapsed or
+ * was revoked without a join; `manual` = created by hand (no API token).
+ */
+export const INVITE_STATUS_VALUES = [
+  "pending",
+  "accepted",
+  "expired",
+  "manual",
+] as const;
+export type InviteStatus = (typeof INVITE_STATUS_VALUES)[number];
+
+/** Reconciled invite state for the friend-detail screen. */
+export type InviteStatusView = {
+  status: InviteStatus;
+  email: string;
+  /** Copyable acceptance link while `pending` (not a secret). */
+  inviteUrl?: string;
+  /** ISO time Tailscale last emailed the invite. */
+  emailedAt?: string;
 };
 
 /** The re-issued Tailscale enrollment key hand-off (shown once). */
@@ -303,6 +370,10 @@ export type FriendListItem = {
   usage: UsageView;
   requests24h: number;
   lastRequestAt: string | null;
+  /** How the friend joined the tailnet; drives invite-only UI (resend). */
+  enrollmentMode: EnrollmentMode;
+  /** Last-known invite status (null for authKey friends). */
+  inviteStatus: InviteStatus | null;
 };
 
 /** Full friend-detail screen payload. */

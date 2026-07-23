@@ -213,6 +213,57 @@ describe("DrizzleProvisioningRepo", () => {
     expect(ctx.serveNodeId).toBe("srv-node-1");
   });
 
+  it("recordInvite flips the friend to invite mode; context reflects it", async () => {
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    const before = await repo.context(res.friendId);
+    expect(before.enrollmentMode).toBe("authKey");
+    expect(before.inviteEmail).toBeNull();
+
+    await repo.recordInvite(res.friendId, {
+      email: "bob@example.com",
+      inviteId: "inv1",
+      status: "pending",
+    });
+
+    const ctx = await repo.context(res.friendId);
+    expect(ctx.enrollmentMode).toBe("invite");
+    expect(ctx.inviteEmail).toBe("bob@example.com");
+    expect(ctx.inviteId).toBe("inv1");
+  });
+
+  it("otherFriendsWithInviteEmail counts sharers, excluding self", async () => {
+    const alice = await repo.reserveFriend(
+      makeAddInput("alice", "shared"),
+      namingFor("alice", "shared"),
+    );
+    const bob = await repo.reserveFriend(
+      makeAddInput("bob", "shared"),
+      namingFor("bob", "shared"),
+    );
+    const email = "friend@example.com";
+    await repo.recordInvite(alice.friendId, {
+      email,
+      inviteId: "i1",
+      status: "pending",
+    });
+    await repo.recordInvite(bob.friendId, {
+      email,
+      inviteId: "i2",
+      status: "pending",
+    });
+
+    // From alice's perspective, one OTHER portion (bob) shares the email.
+    expect(await repo.otherFriendsWithInviteEmail(alice.friendId, email)).toBe(
+      1,
+    );
+    // A different email nobody uses → 0.
+    expect(await repo.otherFriendsWithInviteEmail(alice.friendId, "x@y.z"))
+      .toBe(0);
+  });
+
   it("counts live friends and excludes failed ones", async () => {
     const a = await repo.reserveFriend(
       makeAddInput("bob", "shared"),

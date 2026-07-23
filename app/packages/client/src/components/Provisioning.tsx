@@ -17,13 +17,21 @@ export type ProvisionState =
   | { kind: "done" }
   | { kind: "error"; message: string; step: ProvisionStepKey | null };
 
-/** Label for a step, swapping the auth-key wording for invite-enrolled friends. */
-function stepLabels(enroll: "key" | "invite"): string[] {
-  return PROVISION_STEPS.map((s) =>
-    s.key === "authkey" && enroll === "invite"
+/**
+ * Step labels, swapping the auth-key wording for invite friends. With no API
+ * token no invite is actually sent (it's recorded for the admin to send by
+ * hand), so the label must not claim otherwise.
+ */
+function stepLabels(
+  enroll: "key" | "invite",
+  inviteApiConfigured: boolean,
+): string[] {
+  return PROVISION_STEPS.map((s) => {
+    if (s.key !== "authkey" || enroll !== "invite") return s.label;
+    return inviteApiConfigured
       ? "Sending Tailscale invite"
-      : s.label
-  );
+      : "Preparing manual invite";
+  });
 }
 
 /** Index of the live step (0 before the first event); length when fully done. */
@@ -92,12 +100,14 @@ export function Provisioning(
   props: {
     name: string;
     enroll: "key" | "invite";
+    /** Whether email invites are wired; drives the invite step's honest label. */
+    inviteApiConfigured?: boolean;
     state: () => ProvisionState;
     onDone: () => void;
     onViewBundle: () => void;
   },
 ) {
-  const steps = stepLabels(props.enroll);
+  const steps = stepLabels(props.enroll, props.inviteApiConfigured ?? true);
   const complete = () => props.state().kind === "done";
   const failed = () => props.state().kind === "error";
   const status = () => stepStatusFor(activeIndexFor(props.state()), failed());

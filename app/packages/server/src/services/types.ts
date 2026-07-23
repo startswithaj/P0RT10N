@@ -6,6 +6,7 @@ import type {
   FriendBundle,
   FriendDetail,
   FriendListItem,
+  InviteStatusView,
   OffboardResult,
   OffboardStepKey,
   ProvisionStepKey,
@@ -55,6 +56,10 @@ export interface ProvisioningService {
   sweepFailed(): Promise<number>;
   /** Boot recovery: fail stale `provisioning` rows; returns names. */
   recoverStaleProvisioning(): Promise<string[]>;
+  /** Resend an invited friend's pending Tailscale invite (rate-limited 1/min). */
+  resendInvite(friendId: number): Promise<void>;
+  /** Reconcile + return an invited friend's current enrollment status. */
+  inviteStatus(friendId: number): Promise<InviteStatusView>;
 }
 
 /** Point-in-time usage history (`mc du` samples). */

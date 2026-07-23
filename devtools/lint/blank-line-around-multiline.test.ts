@@ -121,6 +121,52 @@ Deno.test("a comment detached by a blank line is not glued to the statement", ()
   assertEquals(d.length, 0);
 });
 
+Deno.test("flags a wall of top-level multi-line style declarations (bundle-styles before)", () => {
+  // The state bundle-styles.ts was in: multi-line `css({…})` exports packed
+  // against their neighbours with no separating blank lines.
+  const src = `import { css } from "styled-system/css";
+
+export const section = css({ mb: "6" });
+export const eyebrow = css({
+  fontSize: "xs",
+  mb: "2",
+});
+export const codeWrap = css({ position: "relative" });
+`;
+  const d = Deno.lint.runPlugin(plugin, "bundle-styles.ts", src);
+  // section↔eyebrow and eyebrow↔codeWrap both straddle a multi-line block.
+  assertEquals(d.length, 2);
+});
+
+Deno.test("passes the spaced top-level style declarations (bundle-styles after)", () => {
+  const src = `import { css } from "styled-system/css";
+
+export const section = css({ mb: "6" });
+
+export const eyebrow = css({
+  fontSize: "xs",
+  mb: "2",
+});
+
+export const codeWrap = css({ position: "relative" });
+`;
+  const d = Deno.lint.runPlugin(plugin, "bundle-styles.ts", src);
+  assertEquals(d.length, 0);
+});
+
+Deno.test("recognises an object-literal declaration merged over a base (css(base, override))", () => {
+  const src = `const base = {
+  a: 1,
+} as const;
+export const merged = css(base, {
+  b: 2,
+});
+`;
+  const d = Deno.lint.runPlugin(plugin, "bundle-styles.ts", src);
+  // base (object-as-const) ↔ merged (css(_, {…})) — both multi-line objects.
+  assertEquals(d.length, 1);
+});
+
 Deno.test("passes when a blank line already separates the blocks", () => {
   const src = `function f() {
   const a = () => {

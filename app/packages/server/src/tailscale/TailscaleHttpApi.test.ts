@@ -92,6 +92,39 @@ describe("TailscaleHttpApi", () => {
     expect(stale).toBe(false);
   });
 
+  it("hasJoined matches the users list (users:read scope), case-insensitively", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, () => ({
+      json: {
+        users: [{ loginName: "Bob@Example.com" }, { loginName: "x@y.z" }],
+      },
+    }));
+    expect(await client.hasJoined("bob@example.com")).toBe(true);
+    expect(await client.hasJoined("nobody@example.com")).toBe(false);
+    // Reads the users endpoint, not devices.
+    expect(reqs.every((r) => r.url.endsWith("/users"))).toBe(true);
+  });
+
+  it("hasJoined falls back to devices when users:read is absent (404)", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, (req) => {
+      if (req.url.endsWith("/users")) return { status: 404, json: {} };
+      return {
+        json: {
+          devices: [
+            { id: "n1", hostname: "srv", tags: ["tag:x"] }, // tagged, no user
+            { id: "n2", hostname: "laptop", user: "Bob@Example.com" },
+          ],
+        },
+      };
+    });
+    expect(await client.hasJoined("bob@example.com")).toBe(true);
+    expect(await client.hasJoined("carol@example.com")).toBe(false);
+    // It tried users first, then devices.
+    expect(reqs.some((r) => r.url.endsWith("/users"))).toBe(true);
+    expect(reqs.some((r) => r.url.endsWith("/devices"))).toBe(true);
+  });
+
   it("revokeAuthKey and deleteNode issue DELETEs to the right paths", async () => {
     const reqs: RecordedRequest[] = [];
     const client = api(reqs, () => ({ status: 204 }));
@@ -196,6 +229,28 @@ describe("TailscaleHttpApi", () => {
         src: ["tag:p0rt1on-friend-alice"],
         dst: ["alice.example.ts.net"], // bare host — no colon (Tailscale rejects it)
         ip: ["tcp:443"], // port lives here
+      },
+    ]);
+  });
+
+  it("ensureFriendAcl writes an email-src grant with NO tagOwners entry", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, (req) => {
+      if (req.method === "GET") {
+        return { json: { grants: [], tagOwners: {} }, headers: { ETag: "v1" } };
+      }
+      return { status: 200 };
+    });
+
+    await client.ensureFriendAcl("bob@example.com", "alice.example.ts.net:443");
+
+    const body = JSON.parse(reqs[1].body ?? "{}");
+    expect(body.tagOwners).toEqual({}); // a user owns itself — no tag ownership
+    expect(body.grants).toEqual([
+      {
+        src: ["bob@example.com"],
+        dst: ["alice.example.ts.net"],
+        ip: ["tcp:443"],
       },
     ]);
   });
@@ -333,6 +388,32 @@ describe("TailscaleHttpApi", () => {
       dst: ["y"],
     }]);
     expect(body.tagOwners["tag:p0rt1on-friend-alice"]).toBeUndefined();
+    expect(body.tagOwners["tag:p0rt1on-friend-bob"]).toEqual(["b"]);
+  });
+
+  it("removeFriendAcl drops an email-src grant, leaving tagOwners intact", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, (req) => {
+      if (req.method !== "GET") return { status: 200 };
+      return {
+        json: {
+          grants: [
+            { src: ["bob@example.com"], dst: ["x"] },
+            { src: ["tag:p0rt1on-friend-bob"], dst: ["y"] },
+          ],
+          tagOwners: { "tag:p0rt1on-friend-bob": ["b"] },
+        },
+        headers: { ETag: "v2" },
+      };
+    });
+
+    await client.removeFriendAcl("bob@example.com");
+
+    const body = JSON.parse(reqs[1].body ?? "{}");
+    expect(body.grants).toEqual([{
+      src: ["tag:p0rt1on-friend-bob"],
+      dst: ["y"],
+    }]);
     expect(body.tagOwners["tag:p0rt1on-friend-bob"]).toEqual(["b"]);
   });
 });

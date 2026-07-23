@@ -129,6 +129,11 @@ export class HeadscaleHttpApi implements TailscaleApi {
     return (await this.nodesByTag(tag)).some((n) => n.online);
   }
 
+  /** Invite enrollment isn't used on the headscale (test-tier) backend. */
+  hasJoined(_email: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
   async nodeIpv4(hostname: string): Promise<string | null> {
     const node = (await this.listNodes()).find((n) => n.givenName === hostname);
     return (node?.ipAddresses ?? []).find((a) => a.startsWith("100.")) ?? null;
@@ -138,41 +143,44 @@ export class HeadscaleHttpApi implements TailscaleApi {
     await this.request("DELETE", `/api/v1/node/${nodeId}`);
   }
 
-  /** Grant `tag` access to ONLY its endpoint via a classic acls rule; own the
-   * tag. Idempotent; a stale same-src rule is replaced, never accumulated. */
-  async ensureFriendAcl(tag: string, endpointHostPort: string): Promise<void> {
+  /** Grant `src` (tag or user email) access to ONLY its endpoint via a classic
+   * acls rule; own the tag when `src` is one. Idempotent; a stale same-src rule
+   * is replaced, never accumulated. */
+  async ensureFriendAcl(src: string, endpointHostPort: string): Promise<void> {
+    const ownsTag = src.startsWith("tag:");
     const { host, port } = splitHostPort(endpointHostPort);
     const desired: AclRule = {
       action: "accept",
-      src: [tag],
+      src: [src],
       dst: [`${host}:${port}`],
     };
     await this.updatePolicy((policy) => {
       const acls = policy.acls ?? [];
       const hasRule = acls.some((r) =>
-        sameSrc(r, tag) && JSON.stringify(r) === JSON.stringify(desired)
+        sameSrc(r, src) && JSON.stringify(r) === JSON.stringify(desired)
       );
-      const hasOwner = Boolean(policy.tagOwners?.[tag]);
+      const hasOwner = !ownsTag || Boolean(policy.tagOwners?.[src]);
       if (hasRule && hasOwner) return null; // already in place
+      const tagOwners = { ...policy.tagOwners };
+      if (ownsTag) {
+        tagOwners[src] = policy.tagOwners?.[src] ?? [this.tagOwner()];
+      }
       return {
         ...policy,
-        tagOwners: {
-          ...policy.tagOwners,
-          [tag]: policy.tagOwners?.[tag] ?? [this.tagOwner()],
-        },
+        tagOwners,
         acls: hasRule
           ? acls
-          : [...acls.filter((r) => !sameSrc(r, tag)), desired],
+          : [...acls.filter((r) => !sameSrc(r, src)), desired],
       };
     });
   }
 
-  /** Drop the friend's rule + tag ownership (offboard). Idempotent. */
-  async removeFriendAcl(tag: string): Promise<void> {
+  /** Drop the friend's rule (and tag ownership, if a tag). Idempotent. */
+  async removeFriendAcl(src: string): Promise<void> {
     await this.updatePolicy((policy) => {
-      const acls = (policy.acls ?? []).filter((r) => !sameSrc(r, tag));
+      const acls = (policy.acls ?? []).filter((r) => !sameSrc(r, src));
       const tagOwners = { ...policy.tagOwners };
-      delete tagOwners[tag];
+      if (src.startsWith("tag:")) delete tagOwners[src];
       return { ...policy, acls, tagOwners };
     });
   }

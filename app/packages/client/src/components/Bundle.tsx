@@ -1,11 +1,20 @@
 import { createSignal, For, Show } from "solid-js";
 import { css } from "styled-system/css";
-import { Check, Copy, Mail, ShieldAlert } from "lucide-solid";
+import { Check, Copy, ShieldAlert } from "lucide-solid";
 import { Wordmark } from "./Wordmark.tsx";
 import { Button } from "./ui/button.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { CredentialsCard } from "./CredentialsCard.tsx";
-import { eyebrow, section } from "./bundle-styles.ts";
+import { InviteBundleSection } from "./InviteBundleSection.tsx";
+import {
+  aclEyebrow,
+  codeBlock,
+  codeBlockWrapped,
+  codeCopy,
+  codeWrap,
+  eyebrow,
+  section,
+} from "./bundle-styles.ts";
 import { toastError } from "./action-dialog-shared.ts";
 import { trpc } from "../trpc.ts";
 
@@ -41,49 +50,7 @@ const warn = css({
 const warnIcon = css({ color: "spark", flexShrink: "0", mt: "0.5" });
 const warnText = css({ fontSize: "sm", lineHeight: "1.5" });
 
-const codeWrap = css({ position: "relative" });
-// Kept as an object so the Tailscale block can merge a wrapping override over
-// it (Panda's `cx` only concatenates — `css(base, override)` resolves).
-const codeBlockStyles = {
-  fontFamily: "body",
-  fontSize: "xs",
-  lineHeight: "1.9",
-  color: "fg.default",
-  bg: "bg.default",
-  borderWidth: "1px",
-  borderColor: "border.default",
-  rounded: "l2",
-  p: "4",
-  pr: "12",
-  overflowX: "auto",
-  whiteSpace: "pre",
-  boxShadow: "lg",
-} as const;
-const codeBlock = css(codeBlockStyles);
-// The auth key is one long unbroken token: wrap it rather than scroll, so it
-// stops at the reserved right padding instead of running under the copy button.
-const codeBlockWrapped = css(codeBlockStyles, {
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-all",
-});
-const codeCopy = css({ position: "absolute", top: "2.5", right: "2.5" });
-
-const inviteNote = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "2",
-  fontSize: "sm",
-  color: "fg.muted",
-});
-const inviteIcon = css({ color: "cyan.9" });
 const aclNote = css({ fontSize: "sm", color: "fg.default", mb: "2" });
-const aclEyebrow = css({
-  fontSize: "xs",
-  letterSpacing: "0.18em",
-  textTransform: "uppercase",
-  color: "spark",
-  mb: "2",
-});
 
 const actions = css({
   display: "flex",
@@ -125,6 +92,7 @@ function ServerWarnings(props: { warnings?: string[] }) {
 
 function TailscaleSection(
   props: {
+    bundle: FriendBundle;
     enroll: "key" | "invite";
     authCmd: string;
     copied: () => string | null;
@@ -137,12 +105,11 @@ function TailscaleSection(
       <Show
         when={props.enroll === "key"}
         fallback={
-          <span class={inviteNote}>
-            <span class={inviteIcon}>
-              <Mail size={16} />
-            </span>
-            An invite has been emailed — they join with their own identity.
-          </span>
+          <InviteBundleSection
+            bundle={props.bundle}
+            copied={props.copied}
+            onCopy={props.onCopy}
+          />
         }
       >
         <div class={codeWrap}>
@@ -191,6 +158,34 @@ function QuickstartSection(
  * the same order — S3 credentials, Tailscale enrollment, manual ACL lines
  * (when shown), and the Kopia quickstart.
  */
+/** The Tailscale lines for "copy all": the up-command (key) or the invite
+ * link + connect/manual steps (invite). */
+function tailscaleCopyLines(
+  bundle: FriendBundle,
+  enroll: "key" | "invite",
+): string[] {
+  if (enroll === "key") {
+    return bundle.tailscaleUpCommand
+      ? ["", "Tailscale:", bundle.tailscaleUpCommand]
+      : [];
+  }
+  return [
+    "",
+    inviteCopyHeader(bundle),
+    ...(bundle.inviteUrl ? [`Accept: ${bundle.inviteUrl}`] : []),
+    ...(bundle.manualInviteInstructions
+      ? ["", bundle.manualInviteInstructions]
+      : []),
+  ];
+}
+
+/** Copy-all header line for an invite bundle — honest about what was sent. */
+function inviteCopyHeader(bundle: FriendBundle): string {
+  if (bundle.inviteEmailedAt) return `Invite emailed to ${bundle.inviteEmail}`;
+  if (bundle.inviteUrl) return `Invite created for ${bundle.inviteEmail}`;
+  return `No invite sent — invite ${bundle.inviteEmail} manually`;
+}
+
 function buildCopyAllText(
   bundle: FriendBundle,
   enroll: "key" | "invite",
@@ -201,9 +196,7 @@ function buildCopyAllText(
     `Endpoint: ${bundle.s3Endpoint}`,
     `Bucket: ${bundle.bucket}`,
   ];
-  const tailscale = enroll === "key" && bundle.tailscaleUpCommand
-    ? ["", "Tailscale:", bundle.tailscaleUpCommand]
-    : [];
+  const tailscale = tailscaleCopyLines(bundle, enroll);
   const aclHeader = ["", "Tailscale ACL (paste into your policy):"];
   const acl = bundle.manualAclInstructions
     ? [...aclHeader, bundle.manualAclInstructions]
@@ -280,6 +273,7 @@ export function Bundle(
 
         <Show when={authCmd() || props.enroll === "invite"}>
           <TailscaleSection
+            bundle={props.bundle}
             enroll={props.enroll}
             authCmd={authCmd()}
             copied={copied}

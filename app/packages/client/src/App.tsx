@@ -101,6 +101,7 @@ export function createAddFlow() {
       quotaBytes: input.quotaBytes,
       retentionDays: input.retentionDays,
       isolationMode: input.isolationMode,
+      enrollment: input.enrollment,
     })
       .then(({ jobId }) => observeAdd(jobId))
       .catch((err) => fail(err instanceof Error ? err.message : String(err)));
@@ -150,6 +151,24 @@ function createStatusQuery(active: () => boolean) {
   }));
 }
 
+/** Static manager capabilities (e.g. whether email invites are wired). */
+function createCapabilitiesQuery(active: () => boolean) {
+  return createQuery(() => ({
+    queryKey: ["capabilities"],
+    queryFn: () => trpc.friends.capabilities.query(),
+    enabled: active(),
+  }));
+}
+
+/** The dashboard friends list; only fetched once auth resolved and unlocked. */
+function createFriendsQuery(active: () => boolean) {
+  return createQuery(() => ({
+    queryKey: ["friends"],
+    queryFn: () => trpc.friends.list.query(),
+    enabled: active(),
+  }));
+}
+
 /** Tab state; returning to Portions refetches the friends list. */
 function createViewState() {
   const [view, setView] = createSignal<"portions" | "status">("portions");
@@ -185,11 +204,8 @@ export function App() {
   // Fetch dashboard data only once auth resolved and unlocked — no stray 401s.
   const unlocked = () => gate.ready() && !gate.locked();
 
-  const friends = createQuery(() => ({
-    queryKey: ["friends"],
-    queryFn: () => trpc.friends.list.query(),
-    enabled: unlocked(),
-  }));
+  const friends = createFriendsQuery(unlocked);
+  const capabilities = createCapabilitiesQuery(unlocked);
   const status = createStatusQuery(unlocked);
 
   const rows = () => friends.data ?? [];
@@ -228,6 +244,8 @@ export function App() {
                     <Provisioning
                       name={pending()?.name ?? ""}
                       enroll={pending()?.enroll ?? "key"}
+                      inviteApiConfigured={capabilities.data
+                        ?.inviteApiConfigured}
                       state={addState}
                       onViewBundle={() => setPhase("bundle")}
                       onDone={finishAdd}
@@ -238,6 +256,7 @@ export function App() {
                 <AddPortion
                   onBack={finishAdd}
                   onSubmit={startAdd}
+                  inviteApiConfigured={capabilities.data?.inviteApiConfigured}
                 />
               </Show>
             }

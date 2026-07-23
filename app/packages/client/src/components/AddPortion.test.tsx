@@ -130,7 +130,8 @@ describe("AddPortion", () => {
       expect(payload.enroll).toBe("key");
 
       // Drop the frontend-only enroll field; the rest must parse cleanly as an
-      // AddFriendInput (schema injects the lockMode default) with exact values.
+      // AddFriendInput (schema injects the lockMode + enrollment defaults) with
+      // exact values.
       const { enroll: _enroll, ...core } = payload;
       const parsed = addFriendInput.parse(core);
       expect(parsed).toEqual({
@@ -139,6 +140,79 @@ describe("AddPortion", () => {
         retentionDays: 14,
         isolationMode: "dedicated",
         lockMode: "GOVERNANCE",
+        enrollment: { mode: "authKey" },
+      });
+    });
+  });
+
+  describe("invite enrollment", () => {
+    const renderWith = (inviteApiConfigured: boolean) => {
+      const onSubmit = vi.fn<(data: NewPortion) => void>();
+      render(() => (
+        <AddPortion
+          onBack={vi.fn()}
+          onSubmit={onSubmit}
+          inviteApiConfigured={inviteApiConfigured}
+        />
+      ));
+      return { onSubmit };
+    };
+
+    const emailField = () => screen.findByPlaceholderText("friend@example.com");
+
+    const pickInvite = () =>
+      fireEvent.click(
+        screen.getByRole("radio", { name: /Invite to tailnet/i }),
+      );
+
+    const warning = () =>
+      screen.queryByText(/can do everything except create invites/i);
+
+    it("shows the not-configured warning (invite + no token)", async () => {
+      renderWith(false);
+      pickInvite();
+      await emailField();
+      expect(warning()).toBeInTheDocument();
+    });
+
+    it("shows no warning when the invite API is configured", async () => {
+      renderWith(true);
+      pickInvite();
+      await emailField();
+      expect(warning()).toBeNull();
+    });
+
+    it("blocks submit until a valid email is entered", async () => {
+      renderWith(true);
+      fireEvent.input(nameField(), { target: { value: "alice" } });
+      pickInvite();
+      const email = await emailField();
+
+      expect(createBtn()).toBeDisabled(); // no email yet
+      fireEvent.input(email, { target: { value: "not-an-email" } });
+      expect(createBtn()).toBeDisabled();
+      fireEvent.input(email, { target: { value: "bob@example.com" } });
+      expect(createBtn()).toBeEnabled();
+    });
+
+    it("emits an invite enrollment payload; the warning never blocks submit", async () => {
+      const { onSubmit } = renderWith(false);
+      fireEvent.input(nameField(), { target: { value: "alice" } });
+      pickInvite();
+      const email = await emailField();
+      fireEvent.input(email, { target: { value: "bob@example.com" } });
+
+      // The advisory is visible, but submit is still enabled (a hint, not a gate).
+      expect(warning()).toBeInTheDocument();
+      expect(createBtn()).toBeEnabled();
+
+      fireEvent.submit(form());
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      const payload = onSubmit.mock.calls[0][0];
+      expect(payload.enroll).toBe("invite");
+      expect(payload.enrollment).toEqual({
+        mode: "invite",
+        email: "bob@example.com",
       });
     });
   });

@@ -17,6 +17,8 @@ import type {
   InstanceSpec,
 } from "../runtime/runtime.ts";
 import type { TailnetNode, TailscaleApi } from "../tailscale/tailscale.ts";
+import type { UserInviteApi } from "../tailscale/userInvite.ts";
+import { TailscaleUserInviteApi } from "../tailscale/TailscaleUserInviteApi.ts";
 import type {
   FriendNaming,
   FriendProvisionContext,
@@ -283,6 +285,7 @@ export function mockTailscaleApi(
     },
     nodesByTag: () => Promise.resolve(nodes),
     isNodeOnline: () => Promise.resolve(true),
+    hasJoined: () => Promise.resolve(false),
     nodeIpv4: () => Promise.resolve("100.64.0.1"),
     deleteNode: (id) => {
       calls.push(`ts:deleteNode:${id}`);
@@ -296,6 +299,47 @@ export function mockTailscaleApi(
       calls.push("ts:removeFriendAcl");
       return Promise.resolve();
     },
+  };
+}
+
+/** UserInviteApi mock: records each op into `calls`; `configured` defaults true.
+ * Override any method (e.g. findUserByEmail returning a member) via `overrides`. */
+export function mockUserInviteApi(
+  calls: Calls,
+  overrides: Partial<UserInviteApi> = {},
+): UserInviteApi {
+  return {
+    configured: true,
+    createUserInvite: (email) => {
+      calls.push(`invite:create:${email}`);
+      return Promise.resolve({
+        id: "inv1",
+        email,
+        inviteUrl: "https://login.tailscale.com/uinv/inv1",
+        lastEmailSentAt: null,
+      });
+    },
+    getUserInvite: (id) => {
+      calls.push(`invite:get:${id}`);
+      return Promise.resolve(null);
+    },
+    resendUserInvite: (id) => {
+      calls.push(`invite:resend:${id}`);
+      return Promise.resolve();
+    },
+    deleteUserInvite: (id) => {
+      calls.push(`invite:deleteInvite:${id}`);
+      return Promise.resolve();
+    },
+    findUserByEmail: (email) => {
+      calls.push(`invite:findUser:${email}`);
+      return Promise.resolve(null);
+    },
+    deleteUser: (userId) => {
+      calls.push(`invite:deleteUser:${userId}`);
+      return Promise.resolve();
+    },
+    ...overrides,
   };
 }
 
@@ -422,6 +466,10 @@ export function mockProvisioningRepo(
       calls.push(`repo:recordTsKeyId:${tsKeyId}`);
       return Promise.resolve();
     },
+    recordInvite: (_friendId, invite) => {
+      calls.push(`repo:recordInvite:${invite.status}`);
+      return Promise.resolve();
+    },
     recordServeNodeId: (_instanceId, serveNodeId) => {
       calls.push(`repo:recordServeNodeId:${serveNodeId}`);
       return Promise.resolve();
@@ -443,6 +491,7 @@ export function mockProvisioningRepo(
       return Promise.resolve();
     },
     context: () => Promise.reject(new Error("context not stubbed")),
+    otherFriendsWithInviteEmail: () => Promise.resolve(0),
     friendsOnInstance: () => Promise.resolve(0),
     liveFriendTagsOnInstance: () => Promise.resolve([]),
     markInstanceReaping: (_instanceId, opts) => {
@@ -496,6 +545,34 @@ export const ADD_INPUT: AddFriendInput = {
   retentionDays: 30,
   isolationMode: "dedicated",
   lockMode: "GOVERNANCE",
+  enrollment: { mode: "authKey" },
+};
+
+export const INVITE_INPUT: AddFriendInput = {
+  ...ADD_INPUT,
+  enrollment: { mode: "invite", email: "bob@example.com" },
+};
+
+/** An invite-enrolled friend context (offboard/status tests). */
+export const INVITE_CTX: FriendProvisionContext = {
+  friendId: 1,
+  name: "alice",
+  isolationMode: "dedicated",
+  bucket: "alice",
+  s3AccessKeyId: "AKIAOLD",
+  tsKeyId: null,
+  nodeTag: "tag:p0rt1on-friend-alice",
+  enrollmentMode: "invite",
+  inviteEmail: "bob@example.com",
+  inviteId: "inv1",
+  lockMode: "GOVERNANCE",
+  lockRetentionDays: 30,
+  instanceId: 10,
+  instanceName: "p0rt1on-minio-alice",
+  alias: "alias",
+  tsHostname: "alice",
+  serveNodeId: null,
+  minioPort: 9100,
 };
 
 export const CTX: FriendProvisionContext = {
@@ -506,6 +583,9 @@ export const CTX: FriendProvisionContext = {
   s3AccessKeyId: "AKIAOLD",
   tsKeyId: "kid-old",
   nodeTag: "tag:p0rt1on-friend-alice",
+  enrollmentMode: "authKey",
+  inviteEmail: null,
+  inviteId: null,
   lockMode: "GOVERNANCE",
   lockRetentionDays: 30,
   instanceId: 10,
@@ -526,6 +606,8 @@ export interface ProvisioningParts {
   nodes?: TailnetNode[];
   /** Override individual tailscale operations (e.g. inject revoke failures). */
   tailscale?: Partial<TailscaleApi>;
+  /** Invite API; default is unconfigured (authKey-only flow). */
+  userInvite?: UserInviteApi;
   config?: Partial<ProvisioningConfig>;
 }
 
@@ -541,6 +623,7 @@ export function buildProvisioningService(
     mockMcFactory({ ...mockMcClient(calls), ...parts.mc }),
     { ...mockInstanceRuntime(calls), ...parts.runtime },
     { ...mockTailscaleApi(calls, parts.nodes), ...parts.tailscale },
+    parts.userInvite ?? new TailscaleUserInviteApi({}),
     {
       generateS3Credential: () => TEST_CRED,
       rootCredentialFor: () => TEST_CRED,

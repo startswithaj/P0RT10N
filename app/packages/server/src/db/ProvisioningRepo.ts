@@ -76,6 +76,20 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     });
   }
 
+  recordInvite(
+    friendId: number,
+    invite: { email: string; inviteId: string | null; status: string },
+  ): Promise<void> {
+    return defer(() => {
+      this.db.update(friends).set({
+        enrollmentMode: "invite",
+        inviteEmail: invite.email,
+        inviteId: invite.inviteId,
+        inviteStatus: invite.status,
+      }).where(eq(friends.id, friendId)).run();
+    });
+  }
+
   recordServeNodeId(instanceId: number, serveNodeId: string): Promise<void> {
     return defer(() => {
       this.db.update(instances).set({ serveNodeId })
@@ -144,6 +158,9 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       s3AccessKeyId: friends.s3AccessKeyId,
       tsKeyId: friends.tsKeyId,
       nodeTag: friends.tsNodeTag,
+      enrollmentMode: friends.enrollmentMode,
+      inviteEmail: friends.inviteEmail,
+      inviteId: friends.inviteId,
       lockMode: friends.lockMode,
       lockRetentionDays: friends.lockRetentionDays,
       instanceId: friends.instanceId,
@@ -160,6 +177,21 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       instanceName: row.tsHostname,
       alias: row.tsHostname,
     };
+  }
+
+  otherFriendsWithInviteEmail(
+    excludeFriendId: number,
+    email: string,
+  ): Promise<number> {
+    return defer(() => {
+      const row = this.db.select({ c: count() }).from(friends)
+        .where(and(
+          eq(friends.inviteEmail, email),
+          ne(friends.id, excludeFriendId),
+          ne(friends.status, "failed"),
+        )).get();
+      return row ? row.c : 0;
+    });
   }
 
   friendsOnInstance(instanceId: number): Promise<number> {
