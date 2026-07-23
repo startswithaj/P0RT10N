@@ -28,8 +28,6 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
     // Required on the real Tailscale backend — the OAuth client can only mint
     // keys for tags it owns (see Env.tagOwner).
     "P0RT1ON_TAILSCALE_TAG_OWNER",
-    "P0RT1ON_ADMIN_USERNAME",
-    "P0RT1ON_ADMIN_PASSWORD",
   ];
 
   beforeAll(() => {
@@ -52,6 +50,17 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const network = "p0rt1on-net";
   const port = 18080;
   const base = `http://127.0.0.1:${port}`;
+  // Admin auth is a TEST-HARNESS concern, not a real secret: the non-loopback
+  // manager bind requires auth on, so the test mints its own ephemeral creds
+  // rather than pulling them from .env (which only needs the tailnet secrets).
+  // The test owns both sides of this login.
+  const adminUser = "it-admin";
+  const adminPass = crypto.randomUUID();
+  // The pantry is required manager config (a host dir the manager and the
+  // instances it launches share), not a secret — the test supplies its own
+  // throwaway path and bind-mounts it at the SAME absolute path inside the
+  // manager, exactly like compose, so instance data dirs resolve identically.
+  const pantry = `${Deno.cwd()}/.p0rt1on-it-tmp/pantry-${id}`;
   const tmp = new DenoTempFiles("./.p0rt1on-it-tmp");
   const env = (k: string) => Deno.env.get(k) ?? "";
 
@@ -96,7 +105,10 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           // so it only collides with a dev instance that is stopped (its port
           // reads as free) and is started again mid-run.
           `\nP0RT1ON_ADMIN_BIND_HOST=0.0.0.0` +
+          `\nP0RT1ON_ADMIN_USERNAME=${adminUser}` +
+          `\nP0RT1ON_ADMIN_PASSWORD=${adminPass}` +
           `\nP0RT1ON_INSTANCE_ADDRESSING=network` +
+          `\nP0RT1ON_PANTRY=${pantry}` +
           `\nP0RT1ON_DB_PATH=/tmp/p0rt1on.db` +
           `\nP0RT1ON_INSTANCE_IMAGE=${
             Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ?? "p0rt1on-instance:it"
@@ -135,6 +147,10 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
       };
 
       try {
+        // The manager creates each friend's dir under the pantry; instances
+        // (launched on the host daemon) bind-mount the same host path, so it
+        // must exist and be mounted at the identical path inside the manager.
+        await Deno.mkdir(pantry, { recursive: true });
         // 1. The REAL manager image, launching instances via the host socket.
         const run = await docker([
           "run",
@@ -147,6 +163,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           "root", // needs the mounted docker socket
           "-v",
           "/var/run/docker.sock:/var/run/docker.sock",
+          "-v",
+          `${pantry}:${pantry}`,
           "--network",
           network,
           "-p",
@@ -164,8 +182,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
 
         // 2. Auth is REQUIRED for the non-loopback bind — log in for real.
         await trpc("auth.login", {
-          username: env("P0RT1ON_ADMIN_USERNAME"),
-          password: env("P0RT1ON_ADMIN_PASSWORD"),
+          username: adminUser,
+          password: adminPass,
         });
 
         // 3. Create the portion. The manager mints the tailnet key from the
@@ -255,6 +273,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         await docker(["rm", "-f", `p0rt1on-instance-p0rt1on-${portion}`]);
         await tmp.remove(managerEnv).catch(() => undefined);
         if (friendEnv) await tmp.remove(friendEnv).catch(() => undefined);
+        await Deno.remove(pantry, { recursive: true }).catch(() => undefined);
       }
     },
   );
