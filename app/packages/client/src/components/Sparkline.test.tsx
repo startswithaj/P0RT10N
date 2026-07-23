@@ -25,9 +25,9 @@ describe("Sparkline", () => {
     expect(lineOf([])).toEqual({ points: "0,9 40,9", dashed: true });
   });
 
-  it("centres the waveform on the mid baseline, solid line", () => {
-    // Two points [0, 8]: mean 4 sits on MID (9); the low deviates down to y=17
-    // and the high up to y=1 (1px inset), centring the line on the status dot.
+  it("anchors active volume to the bottom, solid line", () => {
+    // Two points [0, 8]: zero sits on the bottom baseline y=17, the peak reaches
+    // the 1px top inset y=1 — taller bars read as busier (volume, not variation).
     const { points, dashed } = lineOf([0, 8]);
     expect(points).toBe("0.0,17.0 40.0,1.0");
     expect(dashed).toBe(false);

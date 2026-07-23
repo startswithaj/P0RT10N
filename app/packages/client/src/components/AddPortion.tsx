@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { ArrowLeft, Boxes, Server } from "lucide-solid";
 import { addFriendInput, type Enrollment } from "@p0rt1on/shared/domain";
@@ -311,6 +311,10 @@ export function AddPortion(
 ) {
   const nameField = createNameField();
   const name = nameField.name;
+  // Focus the name field when the form mounts (native autofocus doesn't fire for
+  // an element added on a view change rather than a page load).
+  const [nameEl, setNameEl] = createSignal<HTMLInputElement>();
+  onMount(() => nameEl()?.focus());
   const [mode, setMode] = createSignal<"dedicated" | "shared">("dedicated");
   const [quota, setQuota] = createSignal(30);
   const [retention, setRetention] = createSignal(14);
@@ -357,6 +361,7 @@ export function AddPortion(
           <Field.Root invalid={name().trim() !== "" && nameError() !== null}>
             <Field.Label>Friend name</Field.Label>
             <Input
+              ref={(el) => setNameEl(el)}
               placeholder="e.g. alice"
               autocomplete="off"
               value={name()}

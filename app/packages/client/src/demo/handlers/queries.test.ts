@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { queryHandlers } from "./queries.ts";
+import type { DemoState } from "../state.ts";
 import { getDemoState, resetDemoState } from "../state.ts";
 
 describe("demo query handlers", () => {
+  // The handler map is total-typed by path; widen for string-keyed test access.
+  const handlers = queryHandlers as unknown as Record<
+    string,
+    (input: unknown, state: DemoState) => unknown
+  >;
+
   const q = (path: string, input: unknown = {}): unknown => {
-    const handler = queryHandlers[path];
+    const handler = handlers[path];
     if (!handler) throw new Error(`no query handler for ${path}`);
     return handler(input, getDemoState());
   };

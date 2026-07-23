@@ -1,4 +1,5 @@
-import type { QueryHandler } from "./types.ts";
+import type { QueryHandlers } from "./types.ts";
+import type { QueryOutput } from "../paths.ts";
 import type { DemoFriend, DemoState } from "../state.ts";
 import { requireFriend, toDetail, toListItem } from "../state.ts";
 import type {
@@ -9,9 +10,6 @@ import type {
   StatusView,
 } from "@p0rt1on/shared/domain";
 
-const friendId = (input: unknown): number =>
-  (input as { friendId: number }).friendId;
-
 const inviteView = (f: DemoFriend): InviteStatusView => ({
   status: f.inviteStatus ?? "manual",
   email: f.inviteEmail ?? `${f.name}@example.com`,
@@ -21,9 +19,9 @@ const inviteView = (f: DemoFriend): InviteStatusView => ({
 
 const pageAudit = (
   audit: AuditEntryView[],
-  input: unknown,
+  input: { limit?: number; before?: number },
 ): AuditEntryView[] => {
-  const { limit, before } = input as { limit?: number; before?: number };
+  const { limit, before } = input;
   const rows = before === undefined
     ? audit
     : audit.filter((e) => e.id < before);
@@ -81,8 +79,11 @@ const buildStatus = (state: DemoState): StatusView => ({
   host: [{ name: "manager", detail: "manager daemon", state: "up" }],
 });
 
-// status.diagnose output = InstanceDiagnostics (server type); shape matched here.
-const diagnose = (instanceName: string): unknown => ({
+// Return type pinned to the router's inferred output (InstanceDiagnostics), so a
+// server-side shape change is a compile error here rather than a silent drift.
+const diagnose = (
+  instanceName: string,
+): QueryOutput<"status.diagnose"> => ({
   name: instanceName,
   state: "running",
   health: "healthy",
@@ -93,21 +94,22 @@ const diagnose = (instanceName: string): unknown => ({
     "API: SYSTEM\nMinIO Object Storage Server\nStatus: 1 Online, 0 Offline.",
 });
 
-export const queryHandlers: Record<string, QueryHandler> = {
+// TOTAL over every query path; each handler's input + output are the router's
+// inferred types, so a wrong shape is a compile error (see QueryHandlers).
+export const queryHandlers: QueryHandlers = {
   "auth.status": () => ({ enabled: false, authenticated: true }),
   "friends.list": (_input, state) => state.friends.map(toListItem),
   "friends.get": (input, state) =>
-    toDetail(requireFriend(state, friendId(input))),
+    toDetail(requireFriend(state, input.friendId)),
   "friends.capabilities": () => ({ inviteApiConfigured: true }),
   "friends.inviteStatus": (input, state) =>
-    inviteView(requireFriend(state, friendId(input))),
+    inviteView(requireFriend(state, input.friendId)),
   "usage.history": (input, state) => [
-    requireFriend(state, friendId(input)).usage,
+    requireFriend(state, input.friendId).usage,
   ],
   "activity.current": (input, state) =>
-    requireFriend(state, friendId(input)).activity,
+    requireFriend(state, input.friendId).activity,
   "audit.list": (input, state) => pageAudit(state.audit, input),
   "status.get": (_input, state) => buildStatus(state),
-  "status.diagnose": (input) =>
-    diagnose((input as { instanceName: string }).instanceName),
+  "status.diagnose": (input) => diagnose(input.instanceName),
 };
