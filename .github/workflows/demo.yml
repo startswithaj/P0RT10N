@@ -1,11 +1,11 @@
 name: Demo (GitHub Pages)
 
 # Builds the client in demo mode (all tRPC endpoints mocked in-browser, no
-# backend) and publishes it to GitHub Pages. Runs on push to main or manually.
+# backend) and publishes it to GitHub Pages. Called by ci.yml on main after
+# tests pass (so a failing test never publishes the demo), or run manually.
 # One-time repo setup: Settings → Pages → Source = "GitHub Actions".
 on:
-  push:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -31,7 +31,7 @@ jobs:
           path: ~/.cache/deno
           key: deno-${{ runner.os }}-${{ hashFiles('deno.lock') }}
           restore-keys: deno-${{ runner.os }}-
-      - run: deno task --cwd app/packages/client build:demo
+      - run: deno task build:demo
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

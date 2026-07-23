@@ -314,3 +314,44 @@ Card surfaces use Park's **built-in shadow scale**, not a custom token.
 - **Turn shadows off:** find-and-replace `boxShadow: "lg"` → `"none"` across
   those five files, then rebuild (`deno task build` or restart dev). Softer or
   stronger: `"md"`/`"sm"` or `"xl"` — no config change needed.
+
+## CI — `.github/workflows/`
+
+Thin `ci.yml` orchestrator calling reusable workflows. Each workflow's header
+comment documents its own details; this is the map.
+
+### The graph
+
+- `ci.yml` — triggers (`push` to main, `pull_request`, `workflow_dispatch`),
+  `concurrency` guard, and the job wiring below.
+- `test.yml` — read-only `deno task verify` (fmt/lint/typecheck/unit/coverage).
+- `integration.yml` — the three tiers (`mc ↔ MinIO`, `k8s e2e`, `docker-tailnet`).
+- `build.yml` — 3-image matrix → GHCR, plus a PR-image comment.
+- `release.yml` — date-based `vYYYY.MM.DD` tag, re-tags the `:main` images, cuts
+  a GitHub Release.
+- `demo.yml` — `deno task build:demo` → GitHub Pages.
+- `build-pr.yml` — standalone; a maintainer's `/build` comment publishes a fork
+  PR's images (write-access gated).
+
+### What runs when
+
+| Event | test | integration | build | release | demo |
+|---|---|---|---|---|---|
+| Same-repo PR | ✅ | — | push `pr-<n>` + comment | — | — |
+| Fork PR | ✅ | — | skipped → use `/build` | — | — |
+| Push to `main` | ✅ | ✅ (gates build) | push `main`/`latest`/`sha-<short>` | ✅ | ✅ |
+| `workflow_dispatch` | ✅ | ✅ | push `branch-*`/`sha` | — | — |
+
+- Integration runs on main/manual only; its skip on PRs still satisfies `build`'s
+  `needs`. On main a red tier blocks the image push.
+- Fork PRs skip `build` entirely — `/build` is their only image path.
+- Images: `ghcr.io/<repo>/p0rt1on-{manager,instance,backup-client}`.
+
+### One-time repo setup
+
+- **Actions secret:** `TAILSCALE_OAUTH_CLIENT_SECRET` — a **dedicated throwaway
+  CI tailnet**, never a personal one (the tier mints keys + creates nodes).
+- **Actions variables:** `TAILNET_DOMAIN`, `TAILSCALE_TAG_OWNER` (public policy
+  identifiers, so vars not secrets).
+- **Settings → Pages → Source = "GitHub Actions"** (for `demo.yml`).
+- GHCR push uses the built-in `GITHUB_TOKEN` — no extra secret.

@@ -1,0 +1,66 @@
+name: release
+
+on:
+  workflow_call:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    name: tag images + create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lowercase repo name
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute date-based version
+        id: version
+        run: |
+          BASE="v$(date +%Y.%m.%d)"
+          N=1
+          TAG="$BASE"
+          while git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; do
+            TAG="${BASE}-${N}"
+            N=$((N+1))
+          done
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-tag each built :main image with the version
+        run: |
+          for img in manager instance backup-client; do
+            SRC="${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}/p0rt1on-$img:main"
+            DST="${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}/p0rt1on-$img:${{ steps.version.outputs.tag }}"
+            docker pull "$SRC"
+            docker tag "$SRC" "$DST"
+            docker push "$DST"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          body: |
+            Docker images (tag `${{ steps.version.outputs.tag }}`):
+            - `${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}/p0rt1on-manager:${{ steps.version.outputs.tag }}`
+            - `${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}/p0rt1on-instance:${{ steps.version.outputs.tag }}`
+            - `${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}/p0rt1on-backup-client:${{ steps.version.outputs.tag }}`
+
+            The `latest` tag tracks the current main branch.
