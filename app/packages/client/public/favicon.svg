@@ -12,7 +12,6 @@
     fill="none"
     stroke="#2DE2E6"
     stroke-width="10.5"
-  >
-  </circle>
+  ></circle>
   <circle cx="50" cy="50" r="11" fill="#FF2E97"></circle>
 </svg>
