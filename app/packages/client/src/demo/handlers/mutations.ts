@@ -18,8 +18,18 @@ type AddInput = MutationInput<"friends.addStart">;
 const GB = 1_000_000_000;
 const gb = (bytes: number): number => Math.round(bytes / GB);
 
-const uid = (n: number): string =>
-  crypto.randomUUID().replace(/-/g, "").slice(0, n);
+// crypto.randomUUID() only exists in a secure context — it throws over plain
+// http on a LAN IP, a common way to open the demo. getRandomValues works
+// anywhere and these are cosmetic mock IDs, so it's plenty.
+const randomHex = (n: number): string => {
+  const bytes = new Uint8Array(Math.ceil(n / 2));
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, n);
+};
+
+const uid = (n: number): string => randomHex(n);
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -232,7 +242,7 @@ export const mutationHandlers: MutationHandlers = {
   },
 
   "friends.addStart": (input) => {
-    const jobId = crypto.randomUUID();
+    const jobId = randomHex(32);
     const fid = getDemoState().seq + 1;
     const f: DemoFriend = {
       ...friendFromInput(fid, input),
@@ -261,7 +271,7 @@ export const mutationHandlers: MutationHandlers = {
   },
 
   "friends.offboardStart": (input) => {
-    const jobId = crypto.randomUUID();
+    const jobId = randomHex(32);
     const target = requireFriend(getDemoState(), input.friendId);
     updateDemoState((s) => ({
       ...s,
