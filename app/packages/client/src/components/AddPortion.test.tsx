@@ -9,10 +9,16 @@ import { AddPortion, type NewPortion } from "./AddPortion.tsx";
 describe("AddPortion", () => {
   // Per-test helpers stay INSIDE describe (the no-test-globals lint plugin
   // forbids module-level const/function in *.test.* files).
-  const setup = () => {
+  const setup = (takenNames?: string[]) => {
     const onSubmit = vi.fn<(data: NewPortion) => void>();
     const onBack = vi.fn();
-    render(() => <AddPortion onBack={onBack} onSubmit={onSubmit} />);
+    render(() => (
+      <AddPortion
+        onBack={onBack}
+        onSubmit={onSubmit}
+        takenNames={takenNames ? () => takenNames : undefined}
+      />
+    ));
     return { onSubmit, onBack };
   };
 
@@ -75,6 +81,24 @@ describe("AddPortion", () => {
       setup();
 
       fireEvent.input(nameField(), { target: { value: "alice" } });
+      expect(createBtn()).toBeEnabled();
+    });
+
+    it("blocks a name that clashes with an existing portion", () => {
+      // Caught on the form (well-formed but taken) so it never reaches
+      // provisioning to trip the friends.name UNIQUE constraint mid-run.
+      const { onSubmit } = setup(["alice"]);
+
+      fireEvent.input(nameField(), { target: { value: "alice" } });
+      fireEvent.blur(nameField());
+      expect(createBtn()).toBeDisabled();
+      expect(screen.getAllByText(/already exists/i).length)
+        .toBeGreaterThanOrEqual(1);
+      fireEvent.submit(form());
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      // A free name on the same form submits fine.
+      fireEvent.input(nameField(), { target: { value: "bob" } });
       expect(createBtn()).toBeEnabled();
     });
 

@@ -4,13 +4,14 @@ import { AuthGate, createAuthGate } from "./components/AuthGate.tsx";
 import { Dashboard } from "./components/Dashboard.tsx";
 import type { FriendRow } from "./components/types.ts";
 import { invalidate, pct, pollMs, systemHealth } from "./components/helpers.ts";
-import { trpc } from "./trpc.ts";
+import { queryClient, trpc } from "./trpc.ts";
 import type { ProvisionStepKey } from "@p0rt1on/shared/steps";
 import { AddPortion, type NewPortion } from "./components/AddPortion.tsx";
 import { Provisioning } from "./components/Provisioning.tsx";
 import { Bundle } from "./components/Bundle.tsx";
 import { ActionDialogs } from "./components/ActionDialogs.tsx";
 import { InsecureBanner } from "./components/InsecureBanner.tsx";
+import { SystemHealthBanner } from "./components/SystemHealthBanner.tsx";
 import type { Pending } from "./components/action-dialog-shared.ts";
 import { Toaster } from "./components/ui/toast.tsx";
 
@@ -152,6 +153,18 @@ function createStatusQuery(active: () => boolean) {
   }));
 }
 
+/** Boot-preflight report — banners + gates portion creation on the tailnet
+ * prerequisites. Polled slowly; an admin fixes these in the Tailscale console. */
+function createSystemHealthQuery(active: () => boolean) {
+  return createQuery(() => ({
+    queryKey: ["systemHealth"],
+    queryFn: () => trpc.status.health.query(),
+    refetchInterval: pollMs(30000),
+    retry: false,
+    enabled: active(),
+  }));
+}
+
 /** Static manager capabilities (e.g. whether email invites are wired). */
 function createCapabilitiesQuery(active: () => boolean) {
   return createQuery(() => ({
@@ -168,6 +181,41 @@ function createFriendsQuery(active: () => boolean) {
     queryFn: () => trpc.friends.list.query(),
     enabled: active(),
   }));
+}
+
+/** All dashboard-scoped queries + derived state, so App stays orchestration.
+ * A blocked preflight check disables "Add portion" (the banner explains why). */
+function createDashboardData(active: () => boolean) {
+  const friends = createFriendsQuery(active);
+  const capabilities = createCapabilitiesQuery(active);
+  const status = createStatusQuery(active);
+  const preflight = createSystemHealthQuery(active);
+  const rows = () => friends.data ?? [];
+  const canProvision = () => preflight.data?.canProvision ?? true;
+
+  const addBlockReason = () =>
+    canProvision()
+      ? undefined
+      : "Resolve the system-health issues above before adding a portion.";
+
+  // Re-run the boot preflight on demand (after fixing the Tailscale console),
+  // writing the fresh result straight into the cache so the banner updates.
+  const recheckHealth = () =>
+    trpc.status.recheckHealth.mutate().then((h) => {
+      queryClient.setQueryData(["systemHealth"], h);
+    });
+
+  return {
+    friends,
+    capabilities,
+    status,
+    preflightData: () => preflight.data,
+    rows,
+    canProvision,
+    addBlockReason,
+    recheckHealth,
+    ...createTotals(rows),
+  };
 }
 
 /** Tab state; returning to Portions refetches the friends list. */
@@ -203,16 +251,11 @@ export function App() {
 
   const gate = createAuthGate();
   // Fetch dashboard data only once auth resolved and unlocked — no stray 401s.
-  const unlocked = () => gate.ready() && !gate.locked();
-  const friends = createFriendsQuery(unlocked);
-  const capabilities = createCapabilitiesQuery(unlocked);
-  const status = createStatusQuery(unlocked);
-
-  const rows = () => friends.data ?? [];
-  const { totalUsed, totalQuota, overallPct } = createTotals(rows);
+  const d = createDashboardData(() => gate.ready() && !gate.locked());
   return (
     <AuthGate gate={gate}>
       <InsecureBanner noPassword={gate.noPassword} />
+      <SystemHealthBanner report={d.preflightData} onRetry={d.recheckHealth} />
       <Toaster />
       <ActionDialogs
         pending={pendingAction()}
@@ -245,7 +288,7 @@ export function App() {
                     <Provisioning
                       name={pending()?.name ?? ""}
                       enroll={pending()?.enroll ?? "key"}
-                      inviteApiConfigured={capabilities.data
+                      inviteApiConfigured={d.capabilities.data
                         ?.inviteApiConfigured}
                       state={addState}
                       onViewBundle={() => setPhase("bundle")}
@@ -257,7 +300,10 @@ export function App() {
                 <AddPortion
                   onBack={finishAdd}
                   onSubmit={startAdd}
-                  inviteApiConfigured={capabilities.data?.inviteApiConfigured}
+                  inviteApiConfigured={d.capabilities.data?.inviteApiConfigured}
+                  gated={() => !d.canProvision()}
+                  gateReason={d.addBlockReason}
+                  takenNames={() => d.rows().map((r) => r.name)}
                 />
               </Show>
             }
@@ -266,12 +312,14 @@ export function App() {
               view={view}
               setView={setView}
               onAdd={openAdd}
-              friends={friends}
-              rows={rows}
-              totalQuota={totalQuota}
-              totalUsed={totalUsed}
-              overallPct={overallPct}
-              health={() => systemHealth(status)}
+              canAdd={d.canProvision}
+              addBlockReason={d.addBlockReason}
+              friends={d.friends}
+              rows={d.rows}
+              totalQuota={d.totalQuota}
+              totalUsed={d.totalUsed}
+              overallPct={d.overallPct}
+              health={() => systemHealth(d.status)}
               onAction={setPendingAction}
               onLogout={gate.enabled() ? gate.logout : undefined}
             />

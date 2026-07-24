@@ -204,6 +204,50 @@ function createEnrollField() {
   return { enroll, setEnroll, email, setEmail, enrollment };
 }
 
+/** Submit gate: form-valid, no name clash, AND not preflight-blocked. Precedence
+ * for the hint text: preflight block (hardest) > name clash > first form issue. */
+function submitGate(
+  props: { gated?: () => boolean; gateReason?: () => string | undefined },
+  issues: () => FormIssue[],
+  name: () => string,
+  nameTaken: () => boolean,
+) {
+  const gated = () => props.gated?.() ?? false;
+
+  const reason = () => {
+    if (gated()) return props.gateReason?.();
+    if (nameTaken()) {
+      return `Name: a portion named "${name().trim()}" already exists`;
+    }
+    return blockReasonFor(name(), issues());
+  };
+
+  return {
+    canSubmit: () => issues().length === 0 && !nameTaken() && !gated(),
+    blockReason: reason,
+  };
+}
+
+/** True when the trimmed name already belongs to an existing portion. Names are
+ * lowercase-enforced (friendNameSchema), so an exact match mirrors the
+ * friends.name UNIQUE constraint the server would otherwise trip. */
+function isNameTaken(name: string, taken?: () => string[]): boolean {
+  const trimmed = name.trim();
+  return trimmed !== "" && (taken?.() ?? []).includes(trimmed);
+}
+
+/** The name field's error: a clash (already well-formed) takes the slot over a
+ * format issue. Returns null while the field is unsettled (mid-word typing). */
+function nameFieldError(
+  settled: boolean,
+  taken: boolean,
+  formErr: () => string | null,
+): string | null {
+  if (!settled) return null;
+  if (taken) return "A portion with this name already exists";
+  return formErr();
+}
+
 function FormHeader(props: { onBack: () => void }) {
   return (
     <>
@@ -307,6 +351,12 @@ export function AddPortion(
     /** Whether the manager has an invite API token. Undefined = still loading
      * (treat as configured — the warning is a hint, never a submit gate). */
     inviteApiConfigured?: boolean;
+    /** A blocked preflight check forbids new portions — a hard submit gate. */
+    gated?: () => boolean;
+    gateReason?: () => string | undefined;
+    /** Names of existing portions; a clash is caught here rather than tripping
+     * the DB UNIQUE constraint mid-provisioning. */
+    takenNames?: () => string[];
   },
 ) {
   const nameField = createNameField();
@@ -337,13 +387,14 @@ export function AddPortion(
 
   const issues = () => formIssues(core());
   const errFor = (field: string) => issueFor(issues(), field);
-  const valid = () => issues().length === 0;
-  const blockReason = () => blockReasonFor(name(), issues());
+  const nameTaken = () => isNameTaken(name(), props.takenNames);
+  const { canSubmit, blockReason } = submitGate(props, issues, name, nameTaken);
 
-  // The name error is debounced (see createNameField): submit gating stays
-  // immediate, but the error's visibility waits for a typing pause so "al…"
-  // doesn't flash an error at someone mid-word.
-  const nameError = () => (nameField.settled() ? errFor("name") : null);
+  // Debounced (see createNameField): submit gating stays immediate, but the
+  // error's visibility waits for a typing pause so "al…" doesn't flash an error
+  // at someone mid-word.
+  const nameError = () =>
+    nameFieldError(nameField.settled(), nameTaken(), () => errFor("name"));
 
   return (
     <main class={page}>
@@ -354,7 +405,7 @@ export function AddPortion(
           class={card}
           onSubmit={(e) => {
             e.preventDefault();
-            if (!valid()) return;
+            if (!canSubmit()) return;
             props.onSubmit({ ...core(), enroll: enroll() });
           }}
         >
@@ -406,7 +457,7 @@ export function AddPortion(
             <Button type="button" variant="outline" onClick={props.onBack}>
               Cancel
             </Button>
-            <Button type="submit" class={sparkBtn} disabled={!valid()}>
+            <Button type="submit" class={sparkBtn} disabled={!canSubmit()}>
               Create portion
             </Button>
           </div>
