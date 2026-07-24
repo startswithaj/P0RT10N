@@ -29,8 +29,6 @@ export interface ProvisioningConfig {
   portRange: { min: number; max: number };
   /** The single shared pool's instance name (PLAN: one shared pool for v1). */
   sharedInstanceName: string;
-  /** Tailnet base, e.g. `tailXXXX.ts.net`; endpoint = `<tsHostname>.<this>`. */
-  tailnetDomain: string;
   /**
    * How instances publish MinIO on the tailnet: `https` (tailscale serve with
    * control-plane certs, port 443) or `http` (port 80 — control planes

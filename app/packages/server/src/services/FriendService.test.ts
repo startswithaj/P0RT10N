@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ActivityServiceImpl, FriendServiceImpl } from "./DbServices.ts";
+import { FriendServiceImpl } from "./FriendService.ts";
 import { FriendQueries } from "../db/FriendQueries.ts";
 import { DrizzleProvisioningRepo } from "../db/ProvisioningRepo.ts";
 import type { Database } from "../db/Database.ts";
@@ -20,16 +20,6 @@ import {
   noopLogger,
 } from "../test-helpers/mocks.ts";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
-
-describe("ActivityServiceImpl.stream", () => {
-  it("throws NOT_IMPLEMENTED when iterated", () => {
-    const database = createTestDatabase();
-    const svc = new ActivityServiceImpl(new FriendQueries(database.db));
-    const iterable = svc.stream(1, new AbortController().signal);
-    expect(() => iterable[Symbol.asyncIterator]()).toThrow("not implemented");
-    database.driver.close();
-  });
-});
 
 describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
   let database: Database;
@@ -104,7 +94,6 @@ describe("FriendServiceImpl", () => {
       repo,
       mockMcFactory(mockMcClient(calls)),
       mockTailscaleApi(calls, nodes),
-      "example.ts.net",
       serveMode,
       noopLogger(),
     );
@@ -127,20 +116,44 @@ describe("FriendServiceImpl", () => {
     const d = await service.get(res.friendId);
     expect(d.name).toBe("alice");
     expect(d.bucket).toBe("alice");
-    expect(d.s3Endpoint).toBe("https://alice.example.ts.net");
+    // https resolves the node's real MagicDNS FQDN live (mock: <host>.tailnet.ts.net).
+    expect(d.s3Endpoint).toBe("https://alice.tailnet.ts.net");
     expect(d.nodeOnline).toBe(true);
   });
 
-  it("get: http serve mode yields an http endpoint", async () => {
+  it("get: http serve mode yields an http endpoint (tailnet IP)", async () => {
     const res = await seed("alice");
     const { service } = build([], "http");
     const d = await service.get(res.friendId);
-    expect(d.s3Endpoint).toBe("http://alice.example.ts.net");
+    // http mode addresses the node by tailnet IP, not the MagicDNS FQDN.
+    expect(d.s3Endpoint).toBe("http://100.64.0.1");
+  });
+
+  it("get: throws when the serve node isn't on the tailnet yet (no domain fallback)", async () => {
+    const res = await seed("alice");
+    const calls: string[] = [];
+    const service = new FriendServiceImpl(
+      queries,
+      repo,
+      mockMcFactory(mockMcClient(calls)),
+      // Node not registered → nodeFqdn null → no composed guess, surface it.
+      { ...mockTailscaleApi(calls, []), nodeFqdn: () => Promise.resolve(null) },
+      "https",
+      noopLogger(),
+    );
+    await expect(service.get(res.friendId)).rejects.toThrow(
+      "has no MagicDNS name yet",
+    );
   });
 
   it("get: throws NOT_FOUND for an unknown friend", async () => {
     const { service } = build();
     await expect(service.get(999)).rejects.toThrow("not found");
+  });
+
+  it("suspend: throws NOT_FOUND for an unknown friend", async () => {
+    const { service } = build();
+    await expect(service.suspend(999)).rejects.toThrow("not found");
   });
 
   it("resize: sets the hard quota on mc, persists, returns fresh detail", async () => {
@@ -220,7 +233,6 @@ describe("FriendServiceImpl", () => {
       repo,
       mockMcFactory(mockMcClient(calls)),
       brokenTs,
-      "example.ts.net",
       "https",
       noopLogger(),
     );
@@ -255,7 +267,6 @@ describe("FriendServiceImpl", () => {
       repo,
       mockMcFactory(brokenMc),
       mockTailscaleApi(calls),
-      "example.ts.net",
       "https",
       noopLogger(),
     );

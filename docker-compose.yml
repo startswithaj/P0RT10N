@@ -14,8 +14,8 @@
 # manager launches over the docker socket):
 #   docker network create p0rt1on-net
 #
-# Needs a .env with at least P0RT1ON_MASTER_KEY,
-# P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET and P0RT1ON_TAILSCALE_TAILNET_DOMAIN.
+# Needs a .env with at least P0RT1ON_MASTER_KEY and
+# P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET.
 services:
   manager:
     env_file: .env

@@ -23,7 +23,7 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
     }
   });
   const runner = new DenoCommandRunner();
-  const alias = "p0rt1on-it";
+  const alias = "p0rt1on-integrationtest";
 
   // Root creds ride per-call MC_HOST env vars — no `mc alias set` bootstrap;
   // this also grounds the env mechanism against the pinned mc release.

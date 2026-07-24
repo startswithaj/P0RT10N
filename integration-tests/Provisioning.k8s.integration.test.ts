@@ -20,15 +20,18 @@ import {
   DenoCommandRunner,
   DenoTempFiles,
 } from "../app/packages/server/src/lib/CommandRunner.ts";
+import { FriendServiceImpl } from "../app/packages/server/src/services/FriendService.ts";
 import {
   ActivityServiceImpl,
-  FriendServiceImpl,
+  AuditServiceImpl,
   UsageServiceImpl,
-} from "../app/packages/server/src/services/DbServices.ts";
+} from "../app/packages/server/src/services/queryServices.ts";
 import { RuntimeInventoryService } from "../app/packages/server/src/services/InventoryService.ts";
 import { JobService } from "../app/packages/server/src/jobs/JobService.ts";
 import { HeadscaleHttpApi } from "../app/packages/server/src/tailscale/HeadscaleHttpApi.ts";
+import { TailscaleUserInviteApi } from "../app/packages/server/src/tailscale/TailscaleUserInviteApi.ts";
 import {
+  mockSystemHealthService,
   noopLogger,
   TEST_CONFIG,
 } from "../app/packages/server/src/test-helpers/mocks.ts";
@@ -40,7 +43,7 @@ import { createTestDatabase } from "../app/packages/server/src/test-helpers/test
 // materialises in the cluster as a side effect — real router, real services,
 // real SQLite, real `mc` (bundled in the manager image), the real instance
 // image (tailscaled ENABLED) and the real KubernetesRuntime. ZERO mocks: an
-// in-cluster HEADSCALE control plane (integration-tests/headscale-it.yaml) makes the
+// in-cluster HEADSCALE control plane (integration-tests/headscale-integrationtest.yaml) makes the
 // tailnet real too — the preauth key is actually minted, the pod's userspace
 // tailscaled actually enrolls, and offboard actually deletes the node. What
 // this still can't prove: `tailscale serve` over HTTPS (headscale issues no
@@ -105,17 +108,18 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       tsAuthKey?: string;
     },
   ): Promise<void> => {
-    const clientNs = "p0rt1on-it-clients";
+    const clientNs = "p0rt1on-integrationtest-clients";
     const payload = crypto.randomUUID();
     await k8s("POST", `/api/v1/namespaces/${clientNs}/pods`, {
       apiVersion: "v1",
       kind: "Pod",
-      metadata: { name: "p0rt1on-it-client", namespace: clientNs },
+      metadata: { name: "p0rt1on-integrationtest-client", namespace: clientNs },
       spec: {
         restartPolicy: "Never",
         containers: [{
           name: "client",
-          image: Deno.env.get("CLIENT_IMAGE") ?? "p0rt1on-backup-client:it",
+          image: Deno.env.get("CLIENT_IMAGE") ??
+            "p0rt1on-backup-client:integrationtest",
           // Seed a known file, then hand off to the real entrypoint; the
           // pod's exit status is Kopia's.
           command: [
@@ -144,7 +148,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     const podPhase = async (attemptsLeft: number): Promise<string> => {
       const pod = await k8s(
         "GET",
-        `/api/v1/namespaces/${clientNs}/pods/p0rt1on-it-client`,
+        `/api/v1/namespaces/${clientNs}/pods/p0rt1on-integrationtest-client`,
       ) as { status?: { phase?: string } };
       const phase = pod.status?.phase ?? "Unknown";
       if (phase === "Succeeded" || phase === "Failed") return phase;
@@ -157,7 +161,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     if (phase !== "Succeeded") {
       const logRes = await fetch(
         `https://kubernetes.default.svc/api/v1/namespaces/${clientNs}` +
-          "/pods/p0rt1on-it-client/log?tailLines=100",
+          "/pods/p0rt1on-integrationtest-client/log?tailLines=100",
         { headers: { Authorization: `Bearer ${token}` } },
       );
       console.error(
@@ -201,7 +205,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         // In-cluster: auto-detect the mounted SA (token + CA + server).
         await buildRestClient({}),
       );
-      const keyGen = new CryptoKeyGen("k8s-it-master-key");
+      const keyGen = new CryptoKeyGen("k8s-integrationtest-master-key");
       const runner = new DenoCommandRunner();
       // /app is read-only for the runner pod's non-root uid — write temp
       // files (mc policy JSON, smoke objects) under /tmp instead.
@@ -224,15 +228,19 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         baseUrl: headscaleUrl,
         apiKey: Deno.env.get("HEADSCALE_API_KEY") ?? "",
         user: "p0rt1on",
+        baseDomain: "hs.test",
       });
+      // Auth-key enrollment only here — unconfigured (no personal token), so
+      // `configured` is false and no invite path is exercised.
+      const userInvite = new TailscaleUserInviteApi({});
       const logger = noopLogger();
       const config = {
         ...TEST_CONFIG,
-        instanceImage: Deno.env.get("INSTANCE_IMAGE") ?? "p0rt1on-instance:it",
-        // Headscale serves over HTTP (no certs) and its MagicDNS base is
-        // hs.test — endpoints + ACL grants must line up with the real tailnet.
+        instanceImage: Deno.env.get("INSTANCE_IMAGE") ??
+          "p0rt1on-instance:integrationtest",
+        // Headscale serves over HTTP (no certs); the friend endpoint is the
+        // node's live tailnet IP, so no MagicDNS base domain is configured.
         serveMode: "http" as const,
-        tailnetDomain: "hs.test",
       };
       // Mirrors app.ts wiring with the runtime + headscale swaps.
       const context: TrpcContext = {
@@ -241,7 +249,6 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           repo,
           mc,
           tailscale,
-          config.tailnetDomain,
           config.serveMode,
           logger,
         ),
@@ -251,19 +258,22 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           mc,
           runtime,
           tailscale,
+          userInvite,
           keyGen,
           new McSmokeTester(runner, tempFiles),
           logger,
         ),
         usageService: new UsageServiceImpl(queries),
         activityService: new ActivityServiceImpl(queries),
+        auditService: new AuditServiceImpl(queries, repo),
         inventoryService: new RuntimeInventoryService(
           queries,
           runtime,
-          config.tailnetDomain,
           logger,
         ),
+        systemHealthService: mockSystemHealthService(),
         jobService: new JobService(logger),
+        capabilities: { inviteApiConfigured: userInvite.configured },
         auth: AdminAuth.disabled(),
         logger,
       };
@@ -457,7 +467,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         // Best-effort teardown if any step failed mid-way.
         await k8s(
           "DELETE",
-          "/api/v1/namespaces/p0rt1on-it-clients/pods/p0rt1on-it-client",
+          "/api/v1/namespaces/p0rt1on-integrationtest-clients/pods/p0rt1on-integrationtest-client",
         ).catch(() => undefined);
         await runtime.removeInstance("p0rt1on-k8sit", { removeData: true })
           .catch(() => undefined);

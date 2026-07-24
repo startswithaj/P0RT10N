@@ -100,6 +100,24 @@ await runBoot({
       logger.error("boot reconcile failed", { error: String(err) })
     ),
   sweep,
+  // Probe tailnet prerequisites so the UI can gate portion creation. Loud but
+  // never fatal — the admin UI must come up to surface the problem.
+  preflight: () =>
+    context.systemHealthService.probe()
+      .then((h) => {
+        if (h.canProvision) {
+          logger.info("preflight ok", { checks: h.checks.length });
+        } else {
+          logger.warn("preflight found blocking issues", {
+            blocked: h.checks
+              .filter((c) => c.status === "blocked")
+              .map((c) => c.id),
+          });
+        }
+      })
+      .catch((err) =>
+        logger.error("preflight probe failed", { error: String(err) })
+      ),
   serve: () => {
     // Reap tombstones every 10 min after the boot-time pass.
     setInterval(sweep, 10 * 60 * 1000);

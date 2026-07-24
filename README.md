@@ -67,8 +67,9 @@ choice (Kopia recommended; any S3 client works).
 
 - A container runtime (Docker/Podman/k8s) — the manager launches the combined
   MinIO + tailscaled instance image per friend.
-- A Tailscale account + API access (tailnet + OAuth client) to mint auth keys —
-  see [Setup](#setup--tailscale-oauth-client).
+- A Tailscale account + API access (tailnet + OAuth client) to mint auth keys,
+  with **MagicDNS + HTTPS certificates enabled** on the tailnet — see
+  [Setup](#setup--tailscale-oauth-client).
 - Disk space for the sum of the portions you hand out — one filesystem is fine;
   quotas keep friends apart.
 - A volume for the manager's SQLite DB (metadata only, no secrets).
@@ -100,9 +101,9 @@ docker compose up
   `docker-compose.yml` wires all of this, including the audit-webhook path from
   instances back to the manager.
 - A handful of settings are required — the master key, the OAuth client secret,
-  the client's tag, your tailnet domain, and the pantry (where friend data is
-  stored). The manager refuses to start without them (no stubs, no degraded
-  mode); `.env.example` explains each one.
+  the OAuth client's tag, and the pantry (where friend data is stored). The
+  manager refuses to start without them (no stubs, no degraded mode);
+  `.env.example` explains each one.
 
 ## Setup — Tailscale OAuth client
 
@@ -112,40 +113,87 @@ long-lived **OAuth client** rather than a personal API token (those are
 full-access and expire in ≤90 days). The Tailscale API **cannot** create OAuth
 clients, so this is a one-time manual step in the admin console.
 
+### Prerequisite: enable MagicDNS + HTTPS certificates
+
+Each instance publishes its MinIO over the tailnet via `tailscale serve` with
+HTTPS (`--https=443`), which needs your tailnet to issue TLS certificates. That
+feature is **off by default**, and the Tailscale API can neither turn it on nor
+even report whether it's on — so enable it once, by hand, in the admin console:
+
+1. Admin console → **DNS**.
+2. Enable **MagicDNS** (if it isn't already).
+3. Under **HTTPS Certificates**, click **Enable HTTPS**.
+
+These are two separate switches: MagicDNS is the prerequisite, HTTPS is a second
+toggle on top of it — turning on MagicDNS alone is **not** enough. Skip this and
+every provision fails its health check with _"Serve is not enabled on your
+tailnet."_
+
+> **No cert issuance? (e.g. headscale).** If your control plane can't mint
+> certs, set `P0RT1ON_TAILSCALE_SERVE_MODE=http`: MinIO is served as plain HTTP
+> over the (already encrypted) tailnet instead of HTTPS.
+
+### Concepts
+
+- **OAuth client** — a Tailscale credential (id + secret), created in step 2.
+  The manager reads its secret from `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET` to
+  authenticate API calls. The credential, not the manager.
+- **`tag:p0rt1on`** — the OAuth client's identity tag; owns and mints the
+  others. You create it (step 1).
+- **`tag:p0rt1on-serve`** — worn by each MinIO instance's tailscaled serve node.
+  Manager declares it (owned by `tag:p0rt1on`) at provision time.
+- **`tag:p0rt1on-friend-<name>`** — worn by each friend's node. Manager declares
+  one per friend at provision time.
+
+The friend and serve tags namespace the connection: the ACL is written as
+`src: tag:p0rt1on-friend-alice → dst: alice's serve node`, so a friend's node
+can open a tailnet connection to only its own instance — not the manager, not
+other friends' instances. The tag is the identity the ACL matches on; without it
+a node is unscoped. Auth keys are minted pre-tagged, so a friend's node wears
+its tag from the moment it joins.
+
 ### 1. Create the tags
 
-Tags must exist in the policy before the client can own/use them.
+The OAuth client's identity tag must exist in the policy before the OAuth client
+can own or use it.
 
-**Access Controls → `Tags` (right-hand panel) → Create Tag**, twice:
+**Access Controls → `Tags` (right-hand panel) → Create Tag**, once:
 
-| Tag name        | Tag owner         | Purpose                                                      |
-| --------------- | ----------------- | ------------------------------------------------------------ |
-| `p0rt1on`       | `autogroup:admin` | the client's identity tag (so it can own + mint friend tags) |
-| `p0rt1on-serve` | `tag:p0rt1on`     | worn by each MinIO instance's tailscaled serve node          |
+| Tag name  | Tag owner         | Purpose                                                            |
+| --------- | ----------------- | ------------------------------------------------------------------ |
+| `p0rt1on` | `autogroup:admin` | the OAuth client's identity tag (so it can own + mint friend tags) |
 
-**Save.** Per-friend tags (`tag:p0rt1on-friend-<name>`) are **not** created by
-hand — the app adds them at provision time (owned by `tag:p0rt1on`).
+**Save.** The serve tag (`tag:p0rt1on-serve`, worn by each MinIO instance's
+tailscaled serve node) and the per-friend tags (`tag:p0rt1on-friend-<name>`) are
+**not** created by hand — the app declares them in `tagOwners` at provision time
+(owned by `tag:p0rt1on`). The one exception is manual ACL mode
+(`P0RT1ON_TAILSCALE_ACL_MODE=manual`, step 3): with no policy-write access the
+app can't declare the serve tag, so create `p0rt1on-serve` (owner `tag:p0rt1on`)
+here too.
 
 ### 2. Generate the OAuth client
 
 **Settings → `+ Credential` → OAuth Client.** Set **Policy File**, **Devices →
-Core**, and **Keys → Auth Keys** to **Write** (Write includes Read); **Users**
-is an optional **Read** (see the note below); leave every other permission at
-**No access**. The rows below follow the console's own order — its **General**
-section holds Policy File then Users, while Devices and Keys are their own
+Core**, and **Keys → Auth Keys** to **Write** (Write includes Read); set **DNS**
+and **Settings → Networking Settings** to **Read**; **Users** is an optional
+**Read** (see the note below); leave every other permission at **No access**.
+The rows below follow the console's own order — its **General** section holds
+DNS, Policy File, then Users, while Devices, Keys, and Settings are their own
 sections:
 
-| Permission             | Access    | Tag           | Why                                                            |
-| ---------------------- | --------- | ------------- | -------------------------------------------------------------- |
-| **Policy File**        | **Write** | _(none)_      | read + edit the ACL (per-friend grant + tagOwners)             |
-| **Users** _(optional)_ | **Read**  | _(none)_      | detect when an email-invited friend accepts (status reconcile) |
-| **Devices → Core**     | **Write** | `tag:p0rt1on` | list friend nodes (online state) + delete on suspend/offboard  |
-| **Keys → Auth Keys**   | **Write** | `tag:p0rt1on` | mint + revoke each friend's auth key                           |
+| Permission                         | Access    | Tag           | Why                                                            |
+| ---------------------------------- | --------- | ------------- | -------------------------------------------------------------- |
+| **DNS**                            | **Read**  | _(none)_      | read tailnet DNS preferences — MagicDNS on/off (`magicDNS`)    |
+| **Policy File**                    | **Write** | _(none)_      | read + edit the ACL (per-friend grant + tagOwners)             |
+| **Users** _(optional)_             | **Read**  | _(none)_      | detect when an email-invited friend accepts (status reconcile) |
+| **Devices → Core**                 | **Write** | `tag:p0rt1on` | list friend nodes (online state) + delete on suspend/offboard  |
+| **Keys → Auth Keys**               | **Write** | `tag:p0rt1on` | mint + revoke each friend's auth key                           |
+| **Settings → Networking Settings** | **Read**  | _(none)_      | read tailnet settings — HTTPS certs on/off (`httpsEnabled`)    |
 
 Tailscale requires a tag on **Devices → Core** and **Keys → Auth Keys** — set
-both to **`tag:p0rt1on`**; **Policy File** and **Users** take no tag. Then
-**Generate** and copy the **client secret** (shown once) → this is
-`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
+both to **`tag:p0rt1on`**; **Policy File**, **Users**, **DNS**, and **Networking
+Settings** take no tag. Then **Generate** and copy the **client secret** (shown
+once) → this is `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
 
 #### Email invites (optional)
 
@@ -154,25 +202,25 @@ user-owned tokens. To send invites, set a personal token
 `P0RT1ON_TAILSCALE_API_TOKEN` (`tskey-api-…`). These tokens expire within 90
 days, but you only need a valid one at the moment you create the portion —
 that's when the invite is sent. It doesn't matter if it expires afterward. The
-optional **Users → Read** scope above lets the client detect when a friend
+optional **Users → Read** scope above lets the OAuth client detect when a friend
 accepts their invite; without it, P0RT1ON checks devices instead. Auth-key
 onboarding needs neither.
 
 #### Security limitation on a shared tailnet
 
 The **Policy File → Write** permission is broad: Tailscale does not let you
-restrict _which_ ACL rules an OAuth client may create, so a client with it can
-edit the **entire** tailnet policy. If this client's secret is compromised, an
+restrict _which_ ACL rules an OAuth client may create, so an OAuth client with
+it can edit the **entire** tailnet policy. If this secret is compromised, an
 attacker can write an ACL rule granting a P0RT1ON-generated key access to
 **any** machine on your tailnet. P0RT1ON only ever writes narrow per-friend
 rules, but Tailscale can't enforce that limit on the credential itself — so a
 stolen secret can change anything in the policy.
 
 **Recommendation:** if you have other machines on this tailnet, run P0RT1ON on a
-**separate tailnet** (a separate Tailscale account). A fully compromised client
-can then only affect the P0RT1ON tailnet — your personal machines aren't on it
-at all. To share one tailnet instead, drop the Policy File permission and manage
-the ACL by hand (see step 3).
+**separate tailnet** (a separate Tailscale account). A fully compromised OAuth
+client can then only affect the P0RT1ON tailnet — your personal machines aren't
+on it at all. To share one tailnet instead, drop the Policy File permission and
+manage the ACL by hand (see step 3).
 
 ### 3. Notes on Policy File permission
 
@@ -198,20 +246,23 @@ kept apart from each other by their MinIO credentials rather than the network:
 { "src": ["tag:p0rt1on-friend-alice"], "dst": ["alice.<tailnet>:443"] }
 ```
 
-You edit the policy by hand whenever friends change. In return, a leaked client
-can only mint friend-tagged keys — it can never open new access on its own.
+You edit the policy by hand whenever friends change. In return, a leaked OAuth
+client can only mint friend-tagged keys — it can never open new access on its
+own.
 
 ### 4. Environment
 
-Copy `.env.example` to `.env` (it's gitignored). Five values are required:
+Copy `.env.example` to `.env` (it's gitignored). Four values are required:
 
 - `P0RT1ON_MASTER_KEY` — the master key.
 - `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET` — the OAuth client secret from step 2
   (the client secret, not a personal token).
-- `P0RT1ON_TAILSCALE_TAG_OWNER` — the client's tag from step 1, `tag:p0rt1on`.
-  New per-friend tags are created under it.
-- `P0RT1ON_TAILSCALE_TAILNET_DOMAIN` — your tailnet's MagicDNS name.
+- `P0RT1ON_TAILSCALE_TAG_OWNER` — the OAuth client's tag from step 1,
+  `tag:p0rt1on`. New per-friend tags are created under it.
 - `P0RT1ON_PANTRY` — the disk path where friend data is stored.
+
+Your tailnet's MagicDNS name is no longer configured — each friend's serve URL
+is read live from its node's FQDN via the Tailscale API.
 
 Two settings are optional:
 

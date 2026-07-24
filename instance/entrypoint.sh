@@ -49,6 +49,10 @@ MINIO_DRIVES="${MINIO_DRIVES:-$DATA_DIR}"
 TS_STATE_DIR="/var/lib/tailscale/state"
 TS_SOCKET="$TS_STATE_DIR/tailscaled.sock"
 mkdir -p "$TS_STATE_DIR"
+# The healthcheck reads this to report a `tailscale serve` failure as the real
+# reason; clear it each boot so a past failure never sticks.
+SERVE_FAILED="$TS_STATE_DIR/serve-failed"
+rm -f "$SERVE_FAILED"
 # Pre-subdir instances (docker, root) kept state at the volume root — move it
 # so they keep their node identity instead of re-enrolling.
 if [ -f /var/lib/tailscale/tailscaled.state ] &&
@@ -109,15 +113,29 @@ done
 log "tailnet is up"
 
 # --- serve MinIO over the tailnet (https:443 -> localhost:MINIO_PORT) ---------
+# On failure we do NOT die: dying here exits before MinIO starts, so the
+# healthcheck would report a misleading "minio not live". Instead we record the
+# real reason for the healthcheck to surface (the manager reads it as
+# healthReason). HTTPS serve needs a cert, which Tailscale only issues when
+# MagicDNS + HTTPS certificates are enabled on the tailnet.
 log "publishing MinIO via tailscale serve (${TAILSCALE_SERVE_MODE})"
 if [ "$TAILSCALE_SERVE_MODE" = "http" ]; then
   # No cert issuance on this control plane (headscale) — serve plain HTTP :80.
   # The tailnet itself (WireGuard) is the encryption on this path.
-  tailscale --socket="$TS_SOCKET" serve --bg --http=80 \
-    "http://localhost:${MINIO_PORT}"
+  serve_port="--http=80"
 else
-  tailscale --socket="$TS_SOCKET" serve --bg --https=443 \
-    "http://localhost:${MINIO_PORT}"
+  serve_port="--https=443"
+fi
+serve_rc=0
+# timeout guards against serve blocking on a cert that will never issue.
+serve_out=$(timeout 30 tailscale --socket="$TS_SOCKET" serve --bg "$serve_port" \
+  "http://localhost:${MINIO_PORT}" 2>&1) || serve_rc=$?
+if [ "$serve_rc" -ne 0 ]; then
+  printf '%s\n' \
+    "tailscale serve (${TAILSCALE_SERVE_MODE}) failed (rc=${serve_rc}): ${serve_out}" \
+    "enable MagicDNS + HTTPS certificates on the tailnet (admin console -> DNS)" \
+    > "$SERVE_FAILED"
+  log "ERROR: tailscale serve failed (rc=${serve_rc}): ${serve_out}"
 fi
 fi
 

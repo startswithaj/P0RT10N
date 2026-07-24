@@ -53,16 +53,15 @@ jobs:
       # and creates nodes, so its OAuth client must belong to a throwaway
       # tailnet. Missing config FAILS the suite (never skips) → blocks build.
       #
-      # Only the OAuth client secret is a credential. The MagicDNS name and the
-      # tag owner are public policy identifiers, so they are repo VARIABLES —
-      # secrets are for things that grant access.
+      # Only the OAuth client secret is a credential. The tag owner is a public
+      # policy identifier, so it is a repo VARIABLE — secrets are for things
+      # that grant access.
       P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
-      P0RT1ON_TAILSCALE_TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
       # Who owns each friend tag in the CI tailnet's `tagOwners` — set it to
       # that tailnet's OAuth client tag (e.g. `tag:p0rt1on`). REQUIRED: the
       # client can only mint keys for tags it owns.
       P0RT1ON_TAILSCALE_TAG_OWNER: ${{ vars.TAILSCALE_TAG_OWNER }}
-      P0RT1ON_ADMIN_USERNAME: p0rt1on-it
+      P0RT1ON_ADMIN_USERNAME: p0rt1on-integrationtest
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2

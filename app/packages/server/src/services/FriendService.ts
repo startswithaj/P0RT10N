@@ -1,41 +1,26 @@
-import type {
-  ActivityView,
-  AuditAction,
-  AuditEntryView,
-  FriendDetail,
-  FriendListItem,
-  UsageView,
-} from "@p0rt1on/shared/domain";
+import type { FriendDetail, FriendListItem } from "@p0rt1on/shared/domain";
 import type { FriendDetailRow, FriendQueries } from "../db/FriendQueries.ts";
 import type { McClientFactory } from "../minio/mc.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
+import { serveEndpoint } from "../tailscale/serveEndpoint.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
-import {
-  ConflictError,
-  NotFoundError,
-  NotImplementedError,
-} from "../lib/ServiceError.ts";
-import type {
-  ActivityService,
-  AuditService,
-  FriendService,
-  Logger,
-  UsageService,
-} from "./types.ts";
+import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
+import type { FriendService, Logger } from "./types.ts";
 
 // ============================================================================
-// Service impls backed by FriendQueries (read-side) + the external boundaries
-// (`mc`, Tailscale) for the lightweight mutations. ActivityService.stream is
-// still NOT_IMPLEMENTED until the audit-event bus lands (#9).
+// The friend-lifecycle orchestrator: reads friend detail through FriendQueries
+// but drives the external boundaries (`mc` for S3/quota, Tailscale for node
+// state + revocation) and persists status/quota/audit through the repo. Unlike
+// the thin query services in queryServices.ts, this one owns real side effects
+// and compensation logic, so it lives on its own.
 // ============================================================================
 
 export class FriendServiceImpl implements FriendService {
   constructor(
     private readonly queries: FriendQueries,
-    private readonly repo: ProvisioningRepo,
+    private readonly friendRepo: ProvisioningRepo,
     private readonly mc: McClientFactory,
     private readonly tailscale: TailscaleApi,
-    private readonly tailnetDomain: string,
     /** Endpoint scheme — must match how instances serve (see ProvisioningConfig). */
     private readonly serveMode: "https" | "http",
     private readonly logger: Logger,
@@ -57,14 +42,14 @@ export class FriendServiceImpl implements FriendService {
   async resize(friendId: number, quotaBytes: number): Promise<FriendDetail> {
     const log = this.logger.child({ op: "resize", friendId });
     log.info("resizing quota", { quotaBytes });
-    const ctx = await this.repo.context(friendId);
+    const ctx = await this.friendRepo.context(friendId);
     await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
       .setHardQuota(
         ctx.bucket,
         quotaBytes,
       );
-    await this.repo.setQuota(friendId, quotaBytes);
-    await this.repo.audit(friendId, "resize", `quotaBytes=${quotaBytes}`);
+    await this.friendRepo.setQuota(friendId, quotaBytes);
+    await this.friendRepo.audit(friendId, "resize", `quotaBytes=${quotaBytes}`);
     log.info("quota resized");
     return this.get(friendId);
   }
@@ -73,7 +58,7 @@ export class FriendServiceImpl implements FriendService {
     const log = this.logger.child({ op: "suspend", friendId });
     log.info("suspending friend");
     await this.requireStatus(friendId, "active", "suspend");
-    const ctx = await this.repo.context(friendId);
+    const ctx = await this.friendRepo.context(friendId);
     // Disable the S3 user (reversible) + revoke the friend's tailnet nodes.
     if (ctx.s3AccessKeyId) {
       await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
@@ -106,8 +91,8 @@ export class FriendServiceImpl implements FriendService {
       }
       throw err;
     }
-    await this.repo.setStatus(friendId, "suspended");
-    await this.repo.audit(friendId, "suspend");
+    await this.friendRepo.setStatus(friendId, "suspended");
+    await this.friendRepo.audit(friendId, "suspend");
     log.info("friend suspended");
     return this.get(friendId);
   }
@@ -116,7 +101,7 @@ export class FriendServiceImpl implements FriendService {
     const log = this.logger.child({ op: "resume", friendId });
     log.info("resuming friend");
     await this.requireStatus(friendId, "suspended", "resume");
-    const ctx = await this.repo.context(friendId);
+    const ctx = await this.friendRepo.context(friendId);
     // Re-enable the S3 user; the friend re-enrolls a node with a fresh key.
     // Status flips only after the enable succeeded (mirror of suspend).
     if (ctx.s3AccessKeyId) {
@@ -125,8 +110,8 @@ export class FriendServiceImpl implements FriendService {
           ctx.s3AccessKeyId,
         );
     }
-    await this.repo.setStatus(friendId, "active");
-    await this.repo.audit(friendId, "resume");
+    await this.friendRepo.setStatus(friendId, "active");
+    await this.friendRepo.audit(friendId, "resume");
     log.info("friend resumed");
     return this.get(friendId);
   }
@@ -154,56 +139,19 @@ export class FriendServiceImpl implements FriendService {
     );
   }
 
-  private toDetail(row: FriendDetailRow, nodeOnline: boolean): FriendDetail {
+  private async toDetail(
+    row: FriendDetailRow,
+    nodeOnline: boolean,
+  ): Promise<FriendDetail> {
     const { tsHostname, ...rest } = row;
     return {
       ...rest,
-      s3Endpoint: `${this.serveMode}://${tsHostname}.${this.tailnetDomain}`,
+      s3Endpoint: await serveEndpoint(
+        this.tailscale,
+        this.serveMode,
+        tsHostname,
+      ),
       nodeOnline,
-    };
-  }
-}
-
-export class UsageServiceImpl implements UsageService {
-  constructor(private readonly queries: FriendQueries) {}
-
-  history(friendId: number, limit: number): Promise<UsageView[]> {
-    return this.queries.usageHistory(friendId, limit);
-  }
-}
-
-export class AuditServiceImpl implements AuditService {
-  constructor(
-    private readonly queries: FriendQueries,
-    // The write side lives on the repo; only `audit` is needed here.
-    private readonly writer: Pick<ProvisioningRepo, "audit">,
-  ) {}
-
-  list(limit: number, before?: number): Promise<AuditEntryView[]> {
-    return this.queries.recentAuditEntries(limit, before);
-  }
-
-  record(action: AuditAction, detail?: string): Promise<void> {
-    return this.writer.audit(null, action, detail);
-  }
-}
-
-export class ActivityServiceImpl implements ActivityService {
-  constructor(private readonly queries: FriendQueries) {}
-
-  current(friendId: number): Promise<ActivityView> {
-    return this.queries.activityFor(friendId);
-  }
-
-  // The live stream needs the audit-event bus — pending the aggregator impl.
-  // Returns an iterable that throws on iteration (so the subscription errors).
-  stream(_friendId: number, _signal: AbortSignal): AsyncIterable<ActivityView> {
-    return {
-      [Symbol.asyncIterator]() {
-        throw new NotImplementedError(
-          "ActivityService.stream not implemented",
-        );
-      },
     };
   }
 }

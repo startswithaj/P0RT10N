@@ -19,6 +19,9 @@ export function NavBar(
     view: () => "portions" | "status";
     setView: (v: "portions" | "status") => void;
     onAdd: () => void;
+    /** False when a blocked preflight check forbids new portions. */
+    canAdd: () => boolean;
+    addBlockReason: () => string | undefined;
   },
 ) {
   return (
@@ -67,6 +70,8 @@ export function NavBar(
         <Button
           class={sparkBtn}
           onClick={props.onAdd}
+          disabled={!props.canAdd()}
+          title={props.addBlockReason()}
         >
           <Plus size={16} /> Add portion
         </Button>

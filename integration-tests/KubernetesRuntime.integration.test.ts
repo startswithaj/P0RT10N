@@ -15,17 +15,18 @@ import type { InstanceSpec } from "../app/packages/server/src/runtime/runtime.ts
 // Driver: integration-tests/run-integration.sh (creates the cluster, applies the
 // manifests, mints the SA token + a headscale preauth key, imports the REAL
 // instance image — readiness means tailscaled actually enrolled). No secrets
-// needed — the tailnet is the local headscale. Missing K8S_IT_* config FAILS
+// needed — the tailnet is the local headscale. Missing K8S_INTEGRATIONTEST_* config FAILS
 // (never skips): run it via the driver, not by hand.
 describe("KubernetesRuntime (integration: real k8s API)", () => {
-  const server = Deno.env.get("K8S_IT_SERVER");
-  const token = Deno.env.get("K8S_IT_TOKEN");
-  const caFile = Deno.env.get("K8S_IT_CA");
-  const image = Deno.env.get("K8S_IT_IMAGE") ?? "p0rt1on-instance:it";
+  const server = Deno.env.get("K8S_INTEGRATIONTEST_SERVER");
+  const token = Deno.env.get("K8S_INTEGRATIONTEST_TOKEN");
+  const caFile = Deno.env.get("K8S_INTEGRATIONTEST_CA");
+  const image = Deno.env.get("K8S_INTEGRATIONTEST_IMAGE") ??
+    "p0rt1on-instance:integrationtest";
   beforeAll(() => {
     if (!(server && token && caFile)) {
       throw new Error(
-        "K8S_IT_SERVER/K8S_IT_TOKEN/K8S_IT_CA not set — run via " +
+        "K8S_INTEGRATIONTEST_SERVER/K8S_INTEGRATIONTEST_TOKEN/K8S_INTEGRATIONTEST_CA not set — run via " +
           "./integration-tests/run-integration.sh tier1 (it derives them from " +
           "the k3d cluster).",
       );
@@ -63,7 +64,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         // Real image enrolls against the local headscale; no certs there,
         // so serve runs in HTTP mode.
         tailscale: {
-          loginServer: Deno.env.get("K8S_IT_LOGIN_SERVER") ??
+          loginServer: Deno.env.get("K8S_INTEGRATIONTEST_LOGIN_SERVER") ??
             "http://headscale.p0rt1on.svc:8080",
           serveMode: "http",
         },
@@ -74,21 +75,26 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
           memoryRequest: "64Mi",
           memoryLimit: "1Gi",
         },
+        pantryStorageClass: "p0rt1on-pantry",
       },
       await restClient(),
     );
 
   const spec: InstanceSpec = {
-    name: "it-alice",
+    name: "integrationtest-alice",
     image,
     // Tier-1-only tag: this node must never satisfy the portion tier's
     // tag:p0rt1on-serve assertions.
-    tag: "tag:p0rt1on-it-tier1",
+    tag: "tag:p0rt1on-integrationtest-tier1",
     minioPort: 9100,
-    rootCred: { accessKeyId: "AKIAIT", secretKey: "it-secret-123" },
+    rootCred: {
+      accessKeyId: "AKIAINTEGRATIONTEST",
+      secretKey: "integrationtest-secret-123",
+    },
     // A REAL single-use headscale key, minted by the driver — readiness
     // requires actually redeeming it.
-    tsAuthKey: Deno.env.get("K8S_IT_AUTHKEY") ?? "tskey-it-fake",
+    tsAuthKey: Deno.env.get("K8S_INTEGRATIONTEST_AUTHKEY") ??
+      "tskey-integrationtest-fake",
   };
 
   it(
@@ -108,22 +114,23 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         expect(await rt.instanceHealth(spec.name)).toBe("healthy");
 
         // The configured CPU/memory actually landed on the pod container.
-        const podRes = (await (await readApi()).getPod("it-alice-0"))
-          .spec?.containers?.[0].resources;
+        const podRes =
+          (await (await readApi()).getPod("integrationtest-alice-0"))
+            .spec?.containers?.[0].resources;
         expect(podRes?.requests?.cpu?.serialize()).toBe("50m");
         expect(podRes?.requests?.memory?.serialize()).toBe("64Mi");
         expect(podRes?.limits?.cpu?.serialize()).toBe("1");
         expect(podRes?.limits?.memory?.serialize()).toBe("1Gi");
 
         expect(await rt.listInstances()).toContainEqual({
-          name: "it-alice",
+          name: "integrationtest-alice",
           state: "running",
         });
 
         // Suspend = scale to 0; resume brings it back.
         await rt.stopInstance(spec.name);
         expect(await rt.listInstances()).toContainEqual({
-          name: "it-alice",
+          name: "integrationtest-alice",
           state: "stopped",
         });
         await rt.ensureRunning(spec.name);
@@ -132,7 +139,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         // Teardown WITHOUT removeData keeps the PVCs (tombstone gating).
         await rt.removeInstance(spec.name, { removeData: false });
         const pvc = await (await readApi())
-          .getPersistentVolumeClaim("it-alice-data")
+          .getPersistentVolumeClaim("integrationtest-alice-data")
           .catch(() => null);
         expect(pvc).not.toBeNull();
       } finally {

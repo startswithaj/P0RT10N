@@ -15,6 +15,10 @@ export interface BootSteps {
   reconcile(): Promise<unknown>;
   /** Reap failed-provision tombstones. */
   sweep(): Promise<unknown>;
+  /** Probe tailnet prerequisites (MagicDNS, serve tag) so the UI can gate
+   * portion creation. Loud but never fatal — the admin UI must come up to
+   * SHOW the problem. */
+  preflight(): Promise<unknown>;
   /** Start the HTTP listeners (and any recurring timers). */
   serve(): void;
 }
@@ -24,5 +28,6 @@ export async function runBoot(steps: BootSteps): Promise<void> {
   await steps.recoverStaleProvisioning();
   await steps.reconcile();
   await steps.sweep();
+  await steps.preflight();
   steps.serve();
 }

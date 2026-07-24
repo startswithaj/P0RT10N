@@ -2,14 +2,17 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up
 # Runs the PRODUCTION image: Deno serves the pre-built SPA on :8080 (no Vite, no
 # live source mount).
+# `name` sets the Compose project so it groups as "p0rt1on-prod" (e.g. in OrbStack).
 #
 # The admin surface binds loopback by default — safe, and fine for a local run.
 # To reach the published :8080 from a browser, the Deno listener has to bind all
 # interfaces IN the container; opt in via .env (the boot guard then needs auth):
 #   P0RT1ON_ADMIN_BIND_HOST=0.0.0.0
 #   P0RT1ON_ADMIN_USERNAME=... and P0RT1ON_ADMIN_PASSWORD=...
+name: p0rt1on-prod
 services:
   manager:
+    container_name: p0rt1on-manager-prod # prod marker in the container name
     build:
       context: .
       dockerfile: Dockerfile # production image: SPA built in, served by Deno

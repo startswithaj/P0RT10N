@@ -7,7 +7,6 @@ describe("Env", () => {
   const REQUIRED = {
     P0RT1ON_MASTER_KEY: "k",
     P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
-    P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
     // Required on the default (docker) runtime — the pantry host path.
     P0RT1ON_PANTRY: "/srv/p0rt1on",
   };
@@ -93,8 +92,8 @@ describe("Env", () => {
 
   it("construction fails naming every missing required var", () => {
     expect(() => new Env({ get: () => undefined })).toThrow(
-      "P0RT1ON_MASTER_KEY, P0RT1ON_TAILSCALE_TAILNET_DOMAIN, " +
-        "P0RT1ON_PANTRY, P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set",
+      "P0RT1ON_MASTER_KEY, P0RT1ON_PANTRY, " +
+        "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET is not set",
     );
     expect(() =>
       new Env({
@@ -143,7 +142,6 @@ describe("Env", () => {
           ({
             P0RT1ON_MASTER_KEY: "k",
             P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
-            P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
             P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
             P0RT1ON_RUNTIME: "kubernetes",
             P0RT1ON_PANTRY: pantry,
@@ -162,7 +160,6 @@ describe("Env", () => {
           ({
             P0RT1ON_MASTER_KEY: "k",
             P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
-            P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
             P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
             P0RT1ON_RUNTIME: "kubernetes",
           } as Record<string, string>)[k],
@@ -175,10 +172,10 @@ describe("Env", () => {
       get: (k) =>
         ({
           P0RT1ON_MASTER_KEY: "k",
-          P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
           P0RT1ON_TAILSCALE_BACKEND: "headscale",
           P0RT1ON_HEADSCALE_URL: "http://hs:8080",
           P0RT1ON_HEADSCALE_API_KEY: "hs-key",
+          P0RT1ON_HEADSCALE_BASE_DOMAIN: "hs.test",
           P0RT1ON_PANTRY: "/srv/p0rt1on",
         } as Record<string, string>)[k],
     });
@@ -187,6 +184,7 @@ describe("Env", () => {
       baseUrl: "http://hs:8080",
       apiKey: "hs-key",
       user: "p0rt1on",
+      baseDomain: "hs.test",
     });
 
     expect(() =>
@@ -194,12 +192,14 @@ describe("Env", () => {
         get: (k) =>
           ({
             P0RT1ON_MASTER_KEY: "k",
-            P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
             P0RT1ON_TAILSCALE_BACKEND: "headscale",
             P0RT1ON_PANTRY: "/srv/p0rt1on",
           } as Record<string, string>)[k],
       })
-    ).toThrow("P0RT1ON_HEADSCALE_URL, P0RT1ON_HEADSCALE_API_KEY is not set");
+    ).toThrow(
+      "P0RT1ON_HEADSCALE_URL, P0RT1ON_HEADSCALE_API_KEY, " +
+        "P0RT1ON_HEADSCALE_BASE_DOMAIN is not set",
+    );
   });
 
   it("defaults to the tailscale backend, ignoring bogus values", () => {
@@ -208,14 +208,18 @@ describe("Env", () => {
       .toBe("tailscale");
   });
 
-  it("instanceTailscale defaults to SaaS https; reads the http override", () => {
+  it("instanceTailscale: SaaS https by default; headscale derives its login server", () => {
     expect(env({}).instanceTailscale()).toEqual({
       loginServer: undefined,
       serveMode: "https",
     });
+    // Headscale derives loginServer from its own URL (same as the API base).
     expect(
       env({
-        P0RT1ON_TAILSCALE_LOGIN_SERVER: "http://hs:8080",
+        P0RT1ON_TAILSCALE_BACKEND: "headscale",
+        P0RT1ON_HEADSCALE_URL: "http://hs:8080",
+        P0RT1ON_HEADSCALE_API_KEY: "hs-key",
+        P0RT1ON_HEADSCALE_BASE_DOMAIN: "hs.test",
         P0RT1ON_TAILSCALE_SERVE_MODE: "http",
       }).instanceTailscale(),
     ).toEqual({ loginServer: "http://hs:8080", serveMode: "http" });

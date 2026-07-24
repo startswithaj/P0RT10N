@@ -9,7 +9,12 @@ describe("HeadscaleHttpApi", () => {
     handler: Parameters<typeof fakeFetch>[1] = () => ({ json: {} }),
   ) =>
     new HeadscaleHttpApi(
-      { baseUrl: "http://hs.test", apiKey: "hs-api-key", user: "p0rt1on" },
+      {
+        baseUrl: "http://hs.test",
+        apiKey: "hs-api-key",
+        user: "p0rt1on",
+        baseDomain: "hs.test",
+      },
       fakeFetch(reqs, handler),
       () => Date.parse("2026-01-01T00:00:00.000Z"),
     );
@@ -130,6 +135,12 @@ describe("HeadscaleHttpApi", () => {
     expect(await api.nodeIpv4("nobody")).toBeNull();
   });
 
+  it("nodeFqdn composes givenName + configured base domain, else null", async () => {
+    const api = build([], () => ({ json: nodes }));
+    expect(await api.nodeFqdn("alice")).toBe("alice.hs.test");
+    expect(await api.nodeFqdn("nobody")).toBeNull();
+  });
+
   it("ensureFriendAcl writes the acls rule + tagOwners into the policy string", async () => {
     const reqs: RecordedRequest[] = [];
     await build(
@@ -176,6 +187,28 @@ describe("HeadscaleHttpApi", () => {
       src: ["tag:p0rt1on-friend-alice"],
       dst: ["alice.ts.net:443"],
     }]);
+  });
+
+  it("ensureTagOwner writes an absent tag into the policy tagOwners", async () => {
+    const reqs: RecordedRequest[] = [];
+    await build(
+      reqs,
+      (req) => req.method === "GET" ? { json: { policy: "" } } : { json: {} },
+    ).ensureTagOwner("tag:p0rt1on-serve");
+
+    const put = reqs.find((r) => r.method === "PUT");
+    const policy = JSON.parse(JSON.parse(put?.body ?? "{}").policy);
+    expect(policy.tagOwners).toEqual({ "tag:p0rt1on-serve": ["p0rt1on@"] });
+  });
+
+  it("ensureTagOwner is a no-op when the tag is already owned", async () => {
+    const existing = JSON.stringify({
+      tagOwners: { "tag:p0rt1on-serve": ["p0rt1on@"] },
+    });
+    const reqs: RecordedRequest[] = [];
+    await build(reqs, () => ({ json: { policy: existing } }))
+      .ensureTagOwner("tag:p0rt1on-serve");
+    expect(reqs.map((r) => r.method)).toEqual(["GET"]);
   });
 
   it("ensureFriendAcl is a no-op when the rule and owner already exist", async () => {

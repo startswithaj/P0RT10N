@@ -424,6 +424,34 @@ export type StatusView = {
   host: ServiceStatus[];
 };
 
+/** One boot-preflight check. `blocked` = a hard misconfiguration that dooms
+ * provisioning (gate creation); `warn` = a caveat that can't be proven either
+ * way (surface, don't block); `ok` = verified good. */
+export type HealthStatus = "ok" | "warn" | "blocked";
+export type HealthCheckId =
+  | "tailscaleApi"
+  | "magicDns"
+  | "serveTag"
+  | "httpsServe";
+export type HealthCheck = {
+  id: HealthCheckId;
+  status: HealthStatus;
+  title: string;
+  /** Human explanation of the state + what to do about it. */
+  detail: string;
+  /** Admin-console link that fixes it, when there is one. */
+  fixUrl?: string;
+};
+
+/** Boot-preflight result the client reads to banner + gate portion creation. */
+export type SystemHealth = {
+  checks: HealthCheck[];
+  /** False when any check is `blocked` — disables "Add portion". */
+  canProvision: boolean;
+  /** ISO time the checks last ran (boot, or a runtime re-probe). */
+  probedAt: string;
+};
+
 // ============================================================================
 // Router contract — the tRPC AppRouter implements this shape. Documented here
 // as a reference; tRPC infers the live types from the server implementation.

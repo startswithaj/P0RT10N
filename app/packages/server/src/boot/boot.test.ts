@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { runBoot } from "./boot.ts";
 
 describe("runBoot", () => {
-  it("runs migrate → recover → reconcile → sweep, and only then serves", async () => {
+  it("runs migrate → recover → reconcile → sweep → preflight, then serves", async () => {
     const order: string[] = [];
 
     const step = (name: string) => () => {
@@ -18,6 +18,7 @@ describe("runBoot", () => {
       recoverStaleProvisioning: step("recover"),
       reconcile: step("reconcile"),
       sweep: step("sweep"),
+      preflight: step("preflight"),
       serve: () => {
         order.push("serve");
       },
@@ -28,6 +29,7 @@ describe("runBoot", () => {
       "recover",
       "reconcile",
       "sweep",
+      "preflight",
       "serve",
     ]);
   });
@@ -46,6 +48,7 @@ describe("runBoot", () => {
           }, 10)
         ),
       sweep: () => Promise.resolve(),
+      preflight: () => Promise.resolve(),
       serve: () => {
         order.push("serve");
       },

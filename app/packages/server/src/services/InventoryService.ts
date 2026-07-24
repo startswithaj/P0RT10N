@@ -52,7 +52,6 @@ export class RuntimeInventoryService implements InventoryService {
   constructor(
     private readonly queries: StatusInstances,
     private readonly runtime: InstanceRuntime,
-    private readonly tailnetDomain: string,
     private readonly logger: Logger,
   ) {}
 
@@ -105,10 +104,11 @@ export class RuntimeInventoryService implements InventoryService {
       },
       tailscale: {
         // Same container as the MinIO row; diagnostics live on that row only
-        // (no `instance` → not expandable). Show the tag + the serve URL.
+        // (no `instance` → not expandable). Show the serve tag (the row name
+        // already carries the hostname; the friend's full serve URL lives on
+        // the friend detail, resolved live from the node).
         name: `${inst.tsHostname} (serve)`,
-        detail:
-          `${inst.tsTag} · https://${inst.tsHostname}.${this.tailnetDomain}`,
+        detail: inst.tsTag,
         state,
       },
     };

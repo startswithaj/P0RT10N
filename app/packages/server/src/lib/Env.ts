@@ -30,16 +30,15 @@ export enum EnvVar {
   SharedInstanceName = "P0RT1ON_SHARED_INSTANCE_NAME",
   TailscaleOauthClientSecret = "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET",
   TailscaleTagOwner = "P0RT1ON_TAILSCALE_TAG_OWNER",
-  TailscaleTailnetDomain = "P0RT1ON_TAILSCALE_TAILNET_DOMAIN",
   TailscaleServeNodeTag = "P0RT1ON_TAILSCALE_SERVE_NODE_TAG",
   TailscaleAclMode = "P0RT1ON_TAILSCALE_ACL_MODE",
   TailscaleBackend = "P0RT1ON_TAILSCALE_BACKEND",
-  TailscaleLoginServer = "P0RT1ON_TAILSCALE_LOGIN_SERVER",
   TailscaleServeMode = "P0RT1ON_TAILSCALE_SERVE_MODE",
   TailscaleApiToken = "P0RT1ON_TAILSCALE_API_TOKEN",
   HeadscaleUrl = "P0RT1ON_HEADSCALE_URL",
   HeadscaleApiKey = "P0RT1ON_HEADSCALE_API_KEY",
   HeadscaleUser = "P0RT1ON_HEADSCALE_USER",
+  HeadscaleBaseDomain = "P0RT1ON_HEADSCALE_BASE_DOMAIN",
   K8sNamespace = "P0RT1ON_K8S_NAMESPACE",
   K8sApi = "P0RT1ON_K8S_API",
   K8sToken = "P0RT1ON_K8S_TOKEN",
@@ -85,25 +84,30 @@ const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
 /**
  * Vars the app cannot run without, validated at construction. Master key:
- * every instance root credential (and the audit token) derives from it. Tailnet
- * domain: every friend endpoint is built from it, so a wrong value fails only
- * later, on the friend's machine. The control-plane credential is
- * backend-dependent (checked in the constructor): every add/suspend/offboard
- * calls the API — no stub, no fallback; a manager without it could only fail
- * later and worse.
+ * every instance root credential (and the audit token) derives from it. The
+ * control-plane credential is backend-dependent (checked in the constructor):
+ * every add/suspend/offboard calls the API — no stub, no fallback; a manager
+ * without it could only fail later and worse.
  */
 const REQUIRED_VARS: readonly EnvVar[] = [
   EnvVar.MasterKey,
-  EnvVar.TailscaleTailnetDomain,
   // The pantry is the one storage location for portion data — a host path on
   // docker, a StorageClass name on k8s. Required in both (the only mode).
   EnvVar.Pantry,
 ] as const;
 
+/** Required only when the backend is headscale (base_domain can't be read from
+ * headscale's API, so the manager must be told it). */
+const HEADSCALE_REQUIRED_VARS: readonly EnvVar[] = [
+  EnvVar.HeadscaleUrl,
+  EnvVar.HeadscaleApiKey,
+  EnvVar.HeadscaleBaseDomain,
+] as const;
+
 export class Env {
   constructor(private readonly src: EnvSource = denoSource) {
     const perBackend: readonly EnvVar[] = this.tailscaleBackend === "headscale"
-      ? [EnvVar.HeadscaleUrl, EnvVar.HeadscaleApiKey]
+      ? HEADSCALE_REQUIRED_VARS
       : [EnvVar.TailscaleOauthClientSecret];
     const missing = [...REQUIRED_VARS, ...perBackend]
       .filter((k) => this.#opt(k) === undefined);
@@ -327,19 +331,30 @@ export class Env {
       ? "headscale"
       : "tailscale";
   }
-  headscaleSettings(): { baseUrl: string; apiKey: string; user: string } {
+  headscaleSettings(): {
+    baseUrl: string;
+    apiKey: string;
+    user: string;
+    baseDomain: string;
+  } {
     return {
       baseUrl: this.#required(EnvVar.HeadscaleUrl),
       apiKey: this.#required(EnvVar.HeadscaleApiKey),
       user: this.#str(EnvVar.HeadscaleUser, "p0rt1on"),
+      // Headscale's API can't report its `base_domain`, so the manager is told.
+      baseDomain: this.#required(EnvVar.HeadscaleBaseDomain),
     };
   }
-  /** Instance enrollment extras: headscale needs an explicit login server, and
-   * without cert issuance `tailscale serve` must fall back to plain HTTP
-   * (WireGuard still encrypts the path). Empty loginServer = SaaS default. */
+  /** Instance enrollment extras. Headscale needs an explicit login server —
+   * its own URL, the same base the manager's API talks to, so it's derived
+   * rather than configured twice. The SaaS backend uses Tailscale's default
+   * login server (undefined here). Without cert issuance `tailscale serve` must
+   * fall back to plain HTTP (WireGuard still encrypts the path). */
   instanceTailscale(): { loginServer?: string; serveMode: "https" | "http" } {
     return {
-      loginServer: this.#opt(EnvVar.TailscaleLoginServer),
+      loginServer: this.tailscaleBackend === "headscale"
+        ? this.headscaleSettings().baseUrl
+        : undefined,
       serveMode: this.#str(EnvVar.TailscaleServeMode, "https") === "http"
         ? "http"
         : "https",
@@ -376,7 +391,6 @@ export class Env {
           : "host",
       portRange: PORT_RANGE,
       sharedInstanceName: this.#str(EnvVar.SharedInstanceName, "pool"),
-      tailnetDomain: this.#required(EnvVar.TailscaleTailnetDomain),
       // Same source as the instance's TAILSCALE_SERVE_MODE — the friend
       // endpoint scheme + ACL grant port must match how instances serve.
       serveMode: this.instanceTailscale().serveMode,

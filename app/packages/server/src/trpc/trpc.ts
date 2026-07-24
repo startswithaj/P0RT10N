@@ -9,6 +9,7 @@ import type {
   InventoryService,
   Logger,
   ProvisioningService,
+  SystemHealthService,
   UsageService,
 } from "../services/types.ts";
 import type { JobService } from "../jobs/JobService.ts";
@@ -21,6 +22,7 @@ export interface TrpcContext {
   activityService: ActivityService;
   auditService: AuditService;
   inventoryService: InventoryService;
+  systemHealthService: SystemHealthService;
   jobService: JobService;
   /** Static manager capabilities the client reads to shape the UI. */
   capabilities: ManagerCapabilities;

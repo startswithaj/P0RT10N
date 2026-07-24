@@ -27,8 +27,8 @@ import type {
   ProvisioningRepo,
 } from "../provisioning/deps.ts";
 import { ProvisioningService } from "../provisioning/ProvisioningService.ts";
-import type { Logger } from "../services/types.ts";
-import type { AddFriendInput } from "@p0rt1on/shared/domain";
+import type { Logger, SystemHealthService } from "../services/types.ts";
+import type { AddFriendInput, SystemHealth } from "@p0rt1on/shared/domain";
 
 // ============================================================================
 // Central test mocks. Every mock records into a shared `Calls` log so tests can
@@ -65,7 +65,6 @@ export const TEST_CONFIG: ProvisioningConfig = {
   instanceAddressing: "host",
   portRange: { min: 9000, max: 9100 },
   sharedInstanceName: "pool",
-  tailnetDomain: "tailnet.ts.net",
   serveMode: "https",
   serveNodeTag: "tag:p0rt1on-serve",
   aclMode: "auto",
@@ -78,7 +77,6 @@ export function testEnv(overrides: Record<string, string> = {}): Env {
   const base: Record<string, string> = {
     P0RT1ON_MASTER_KEY: "test-master-key",
     P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "test-oauth-secret",
-    P0RT1ON_TAILSCALE_TAILNET_DOMAIN: "tailnet.ts.net",
     // Required on the default (tailscale) backend — see Env.tagOwner.
     P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
     // Required on the default (docker) runtime — the pantry host path.
@@ -291,6 +289,7 @@ export function mockTailscaleApi(
     isNodeOnline: () => Promise.resolve(true),
     hasJoined: () => Promise.resolve(false),
     nodeIpv4: () => Promise.resolve("100.64.0.1"),
+    nodeFqdn: (hostname) => Promise.resolve(`${hostname}.tailnet.ts.net`),
     deleteNode: (id) => {
       calls.push(`ts:deleteNode:${id}`);
       return Promise.resolve();
@@ -303,6 +302,31 @@ export function mockTailscaleApi(
       calls.push("ts:removeFriendAcl");
       return Promise.resolve();
     },
+    ensureTagOwner: (tag) => {
+      calls.push(`ts:ensureTagOwner:${tag}`);
+      return Promise.resolve();
+    },
+    magicDnsEnabled: () => Promise.resolve(true),
+    httpsCertsEnabled: () => Promise.resolve(true),
+    isTagOwned: () => Promise.resolve(true),
+  };
+}
+
+/** SystemHealthService mock: a healthy latched report by default; override any
+ * field (e.g. `canProvision: false`) via `over`. */
+export function mockSystemHealthService(
+  over: Partial<SystemHealth> = {},
+): SystemHealthService {
+  const health: SystemHealth = {
+    checks: [],
+    canProvision: true,
+    probedAt: "2026-06-30T12:00:00Z",
+    ...over,
+  };
+  return {
+    probe: () => Promise.resolve(health),
+    current: () => health,
+    reportServeUnavailable: () => {},
   };
 }
 

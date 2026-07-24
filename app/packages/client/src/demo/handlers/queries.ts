@@ -112,4 +112,9 @@ export const queryHandlers: QueryHandlers = {
   "audit.list": (input, state) => pageAudit(state.audit, input),
   "status.get": (_input, state) => buildStatus(state),
   "status.diagnose": (input) => diagnose(input.instanceName),
+  "status.health": () => ({
+    checks: [],
+    canProvision: true,
+    probedAt: "2026-06-30T12:00:00Z",
+  }),
 };

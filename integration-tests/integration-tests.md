@@ -70,15 +70,15 @@ The test process never joins the tailnet — the friend container does, exactly
 like a friend's machine. So **no host Tailscale is needed**.
 
 **Needs:** a Docker daemon and a real tailnet:
-`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`, `P0RT1ON_TAILSCALE_TAILNET_DOMAIN`,
-`P0RT1ON_MASTER_KEY`, and `P0RT1ON_ADMIN_USERNAME`/`P0RT1ON_ADMIN_PASSWORD`
-(auth is mandatory — the test manager binds non-loopback so it can be driven
-from outside the container). Also `P0RT1ON_TAILSCALE_TAG_OWNER` — who owns each
-friend tag in the policy's `tagOwners`; set it to the tailnet's OAuth client tag
-(e.g. `tag:p0rt1on`). REQUIRED on the real Tailscale backend: the client can
-only mint keys for tags it owns, so the API's `autogroup:admin` default 400s at
-the authkey step (headscale keeps it optional). The driver reads `.env`, so
-locally there is nothing to set up.
+`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`, `P0RT1ON_MASTER_KEY`, and
+`P0RT1ON_ADMIN_USERNAME`/`P0RT1ON_ADMIN_PASSWORD` (auth is mandatory — the test
+manager binds non-loopback so it can be driven from outside the container). Also
+`P0RT1ON_TAILSCALE_TAG_OWNER` — who owns each friend tag in the policy's
+`tagOwners`; set it to the tailnet's OAuth client tag (e.g. `tag:p0rt1on`).
+REQUIRED on the real Tailscale backend: the client can only mint keys for tags
+it owns, so the API's `autogroup:admin` default 400s at the authkey step
+(headscale keeps it optional). The driver reads `.env`, so locally there is
+nothing to set up.
 
 **⚠ Use a throwaway CI tailnet in CI, never a personal one** — the job mints
 keys and creates nodes.
@@ -106,8 +106,8 @@ running container without starting a second", which needs no tailnet.)_
 ## 3 & 4. Kubernetes tiers — `run-integration.sh`
 
 Driven by **`integration-tests/run-integration.sh`**. The control plane is an
-**in-cluster headscale** (`integration-tests/headscale-it.yaml`), so **no
-Tailscale account or secrets are needed** — REAL images only.
+**in-cluster headscale** (`integration-tests/headscale-integrationtest.yaml`),
+so **no Tailscale account or secrets are needed** — REAL images only.
 
 - **tier1 — `KubernetesRuntime.integration.test.ts`** (host, as the manager
   ServiceAccount): apply → ready → scale → gated teardown, RBAC containment (the
@@ -131,7 +131,7 @@ Tailscale account or secrets are needed** — REAL images only.
 **Rebuild rule:** `app/`, `instance/`, or `backup-client/` changed → `build`;
 test-file-only edits → just rerun a tier (images are reused).
 
-**Cleanup:** `k3d cluster delete p0rt1on-it`.
+**Cleanup:** `k3d cluster delete p0rt1on-integrationtest`.
 
 ---
 

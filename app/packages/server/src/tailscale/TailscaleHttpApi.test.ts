@@ -43,6 +43,43 @@ describe("TailscaleHttpApi", () => {
     });
   });
 
+  it("magicDnsEnabled reads GET /dns/preferences", async () => {
+    const reqs: RecordedRequest[] = [];
+    const on = await api(reqs, () => ({ json: { magicDNS: true } }))
+      .magicDnsEnabled();
+    expect(reqs[0].method).toBe("GET");
+    expect(reqs[0].url).toBe("https://api.test/v2/tailnet/-/dns/preferences");
+    expect(on).toBe(true);
+    const off = await api([], () => ({ json: { magicDNS: false } }))
+      .magicDnsEnabled();
+    expect(off).toBe(false);
+  });
+
+  it("httpsCertsEnabled reads GET /tailnet/-/settings", async () => {
+    const reqs: RecordedRequest[] = [];
+    const on = await api(reqs, () => ({ json: { httpsEnabled: true } }))
+      .httpsCertsEnabled();
+    expect(reqs[0].method).toBe("GET");
+    expect(reqs[0].url).toBe("https://api.test/v2/tailnet/-/settings");
+    expect(on).toBe(true);
+    const off = await api([], () => ({ json: { httpsEnabled: false } }))
+      .httpsCertsEnabled();
+    expect(off).toBe(false);
+  });
+
+  it("isTagOwned checks tagOwners in the policy", async () => {
+    const owned = await api([], () => ({
+      json: { tagOwners: { "tag:p0rt1on-serve": ["autogroup:admin"] } },
+      headers: { ETag: "e1" },
+    })).isTagOwned("tag:p0rt1on-serve");
+    expect(owned).toBe(true);
+    const notOwned = await api([], () => ({
+      json: { tagOwners: {} },
+      headers: { ETag: "e1" },
+    })).isTagOwned("tag:p0rt1on-serve");
+    expect(notOwned).toBe(false);
+  });
+
   it("nodesByTag filters by tag and derives online from lastSeen", async () => {
     const reqs: RecordedRequest[] = [];
     const nodes = await api(reqs, () => ({
@@ -172,6 +209,20 @@ describe("TailscaleHttpApi", () => {
     expect(await client.nodeIpv4("nobody")).toBe(null);
   });
 
+  it("nodeFqdn returns the device name (FQDN) for a hostname, else null", async () => {
+    const devices = {
+      devices: [
+        { hostname: "p0rt1on-alice", name: "p0rt1on-alice.tail1a2b.ts.net" },
+        { hostname: "p0rt1on-bob", name: "p0rt1on-bob.tail1a2b.ts.net" },
+      ],
+    };
+    const client = api([], () => ({ json: devices }));
+    expect(await client.nodeFqdn("p0rt1on-alice")).toBe(
+      "p0rt1on-alice.tail1a2b.ts.net",
+    );
+    expect(await client.nodeFqdn("nobody")).toBe(null);
+  });
+
   it("exchanges an OAuth client secret for an access token, then uses it", async () => {
     const reqs: RecordedRequest[] = [];
     const client = new TailscaleHttpApi(
@@ -287,6 +338,36 @@ describe("TailscaleHttpApi", () => {
       "tag:p0rt1on-friend-alice",
       "alice.example.ts.net:443",
     );
+    expect(reqs.map((r) => r.method)).toEqual(["GET"]); // no POST
+  });
+
+  it("ensureTagOwner declares an absent tag under the configured owner", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, (req) => {
+      if (req.method === "GET") {
+        return { json: { grants: [], tagOwners: {} }, headers: { ETag: "v1" } };
+      }
+      return { status: 200 };
+    });
+
+    await client.ensureTagOwner("tag:p0rt1on-serve");
+
+    expect(reqs.map((r) => r.method)).toEqual(["GET", "POST"]);
+    const body = JSON.parse(reqs[1].body ?? "{}");
+    expect(body.tagOwners["tag:p0rt1on-serve"]).toEqual(["autogroup:admin"]);
+  });
+
+  it("ensureTagOwner is a no-op when the tag is already owned", async () => {
+    const reqs: RecordedRequest[] = [];
+    const client = api(reqs, () => ({
+      json: {
+        grants: [],
+        tagOwners: { "tag:p0rt1on-serve": ["autogroup:admin"] },
+      },
+      headers: { ETag: "v1" },
+    }));
+
+    await client.ensureTagOwner("tag:p0rt1on-serve");
     expect(reqs.map((r) => r.method)).toEqual(["GET"]); // no POST
   });
 

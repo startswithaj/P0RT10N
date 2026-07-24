@@ -11,6 +11,7 @@ import type {
   OffboardStepKey,
   ProvisionStepKey,
   StatusView,
+  SystemHealth,
   TsKeyBundle,
   UsageView,
 } from "@p0rt1on/shared/domain";
@@ -80,6 +81,19 @@ export interface InventoryService {
   snapshot(): Promise<StatusView>;
   /** Deep diagnostics for one instance (state + health reason + logs). */
   diagnose(instanceName: string): Promise<InstanceDiagnostics>;
+}
+
+/**
+ * Boot preflight: probes the tailnet prerequisites provisioning needs (API
+ * reachable, MagicDNS, serve tag) and latches the result so the client can
+ * banner + gate portion creation. `probe` runs the checks; `current` returns
+ * the latched report; `reportServeUnavailable` escalates the (API-unprovable)
+ * HTTPS-serve check to blocked when a real provision proves it off.
+ */
+export interface SystemHealthService {
+  probe(): Promise<SystemHealth>;
+  current(): SystemHealth;
+  reportServeUnavailable(reason: string): void;
 }
 
 /**

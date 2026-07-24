@@ -2,8 +2,11 @@
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # Runs the DEV image: Vite dev server (frontend, :5173) alongside the Deno API,
 # with the repo mounted live so both hot-reload on edits — no rebuild per change.
+# `name` sets the Compose project so it groups as "p0rt1on-dev" (e.g. in OrbStack).
+name: p0rt1on-dev
 services:
   manager:
+    container_name: p0rt1on-manager-dev # dev marker in the container name
     build:
       context: .
       dockerfile: Dockerfile.dev # dev image: also runs the Vite dev server

@@ -37,6 +37,8 @@ export interface TailscaleConfig {
 interface ApiDevice {
   id: string;
   hostname: string;
+  /** Full MagicDNS FQDN, e.g. `p0rt1on-alice.mouse-stairs.ts.net`. */
+  name?: string;
   tags?: string[];
   lastSeen?: string;
   addresses?: string[];
@@ -201,6 +203,12 @@ export class TailscaleHttpApi implements TailscaleApi {
     return (dev?.addresses ?? []).find((a) => a.startsWith("100.")) ?? null;
   }
 
+  async nodeFqdn(hostname: string): Promise<string | null> {
+    // `name` is the node's full MagicDNS FQDN — the serve URL host, verbatim.
+    const dev = (await this.listDevices()).find((d) => d.hostname === hostname);
+    return dev?.name ?? null;
+  }
+
   async deleteNode(nodeId: string): Promise<void> {
     await this.request("DELETE", `/device/${nodeId}`);
   }
@@ -243,6 +251,41 @@ export class TailscaleHttpApi implements TailscaleApi {
       }
       throw err;
     }
+  }
+
+  /** Declare `tag` in tagOwners (owned by the configured tagOwner) when absent.
+   * Idempotent — a no-op once present, so it's cheap on every provision. */
+  async ensureTagOwner(tag: string): Promise<void> {
+    await this.updatePolicy((policy) => {
+      if (policy.tagOwners?.[tag]) return null; // already declared
+      return {
+        ...policy,
+        tagOwners: { ...policy.tagOwners, [tag]: [this.tagOwner()] },
+      };
+    });
+  }
+
+  /** MagicDNS enablement from GET /dns/preferences — the only readable signal
+   * bearing on HTTPS-serve (MagicDNS is a prerequisite for cert issuance). */
+  async magicDnsEnabled(): Promise<boolean> {
+    const json = await this.request(
+      "GET",
+      `/tailnet/${this.tn()}/dns/preferences`,
+    );
+    return Boolean((json as { magicDNS?: boolean }).magicDNS);
+  }
+
+  /** HTTPS-certificate enablement — the definitive signal for serve --https.
+   * GET /tailnet/-/settings → `httpsEnabled` (needs networking_settings:read). */
+  async httpsCertsEnabled(): Promise<boolean> {
+    const json = await this.request("GET", `/tailnet/${this.tn()}/settings`);
+    return Boolean((json as { httpsEnabled?: boolean }).httpsEnabled);
+  }
+
+  /** Read-only check of tagOwners in the policy (reuses the ETag GET). */
+  async isTagOwned(tag: string): Promise<boolean> {
+    const { policy } = await this.getPolicy();
+    return Boolean(policy.tagOwners?.[tag]);
   }
 
   /** Drop the friend's grant (and tag ownership, if a tag). Idempotent. */

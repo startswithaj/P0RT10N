@@ -24,7 +24,6 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
     "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET",
-    "P0RT1ON_TAILSCALE_TAILNET_DOMAIN",
     // Required on the real Tailscale backend — the OAuth client can only mint
     // keys for tags it owns (see Env.tagOwner).
     "P0RT1ON_TAILSCALE_TAG_OWNER",
@@ -42,9 +41,9 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   });
 
   const id = crypto.randomUUID().slice(0, 6);
-  const managerName = `p0rt1on-it-manager-${id}`;
-  const friendName = `p0rt1on-it-friend-${id}`;
-  const portion = `dockerit${id}`;
+  const managerName = `p0rt1on-integrationtest-manager-${id}`;
+  const friendName = `p0rt1on-integrationtest-friend-${id}`;
+  const portion = `dockerintegrationtest${id}`;
   // The network instances join is fixed in the runtime (DOCKER_NETWORK); the
   // manager container has to be on it too, or it cannot reach them by name.
   const network = "p0rt1on-net";
@@ -54,14 +53,14 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   // manager bind requires auth on, so the test mints its own ephemeral creds
   // rather than pulling them from .env (which only needs the tailnet secrets).
   // The test owns both sides of this login.
-  const adminUser = "it-admin";
+  const adminUser = "integrationtest-admin";
   const adminPass = crypto.randomUUID();
   // The pantry is required manager config (a host dir the manager and the
   // instances it launches share), not a secret — the test supplies its own
   // throwaway path and bind-mounts it at the SAME absolute path inside the
   // manager, exactly like compose, so instance data dirs resolve identically.
-  const pantry = `${Deno.cwd()}/.p0rt1on-it-tmp/pantry-${id}`;
-  const tmp = new DenoTempFiles("./.p0rt1on-it-tmp");
+  const pantry = `${Deno.cwd()}/.p0rt1on-integrationtest-tmp/pantry-${id}`;
+  const tmp = new DenoTempFiles("./.p0rt1on-integrationtest-tmp");
   const env = (k: string) => Deno.env.get(k) ?? "";
 
   const docker = async (args: string[]) => {
@@ -111,7 +110,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           `\nP0RT1ON_PANTRY=${pantry}` +
           `\nP0RT1ON_DB_PATH=/tmp/p0rt1on.db` +
           `\nP0RT1ON_INSTANCE_IMAGE=${
-            Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ?? "p0rt1on-instance:it"
+            Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ??
+              "p0rt1on-instance:integrationtest"
           }\n`,
       );
       let cookie = "";
@@ -169,7 +169,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           network,
           "-p",
           `127.0.0.1:${port}:8080`,
-          Deno.env.get("MANAGER_IMAGE") ?? "p0rt1on-manager:it",
+          Deno.env.get("MANAGER_IMAGE") ?? "p0rt1on-manager:integrationtest",
         ]);
         expect(run.code).toBe(0);
 
@@ -214,10 +214,9 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         );
 
         // Real serve endpoint on the real tailnet — HTTPS with a real cert,
-        // the thing headscale structurally cannot prove.
-        expect(bundle.s3Endpoint).toContain(
-          env("P0RT1ON_TAILSCALE_TAILNET_DOMAIN"),
-        );
+        // the thing headscale structurally cannot prove. The endpoint is the
+        // node's live MagicDNS FQDN (always <host>.<tailnet>.ts.net).
+        expect(bundle.s3Endpoint).toContain(".ts.net");
         expect(bundle.s3Endpoint.startsWith("https://")).toBe(true);
         expect(bundle.tsAuthKey ?? "").not.toBe("");
 
@@ -242,7 +241,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           friendEnv,
           "--entrypoint",
           "sh",
-          Deno.env.get("CLIENT_IMAGE") ?? "p0rt1on-backup-client:it",
+          Deno.env.get("CLIENT_IMAGE") ??
+            "p0rt1on-backup-client:integrationtest",
           "-c",
           "mkdir -p /backup && echo p0rt1on-canary > /backup/canary.txt && " +
           "exec /entrypoint.sh",

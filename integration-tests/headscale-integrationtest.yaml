@@ -110,13 +110,13 @@ spec:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: p0rt1on-it-clients
+  name: p0rt1on-integrationtest-clients
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: p0rt1on-it-client-runner
-  namespace: p0rt1on-it-clients
+  name: p0rt1on-integrationtest-client-runner
+  namespace: p0rt1on-integrationtest-clients
 # TEST ONLY: the portion test launches the friend's backup-client pod here
 # (the only place the once-shown bundle exists). The PRODUCTION manager Role
 # (deploy/k8s/p0rt1on.yaml) has no pod-create and stays that way.
@@ -128,13 +128,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: p0rt1on-it-client-runner
-  namespace: p0rt1on-it-clients
+  name: p0rt1on-integrationtest-client-runner
+  namespace: p0rt1on-integrationtest-clients
 subjects:
   - kind: ServiceAccount
     name: p0rt1on-manager
     namespace: p0rt1on
 roleRef:
   kind: Role
-  name: p0rt1on-it-client-runner
+  name: p0rt1on-integrationtest-client-runner
   apiGroup: rbac.authorization.k8s.io

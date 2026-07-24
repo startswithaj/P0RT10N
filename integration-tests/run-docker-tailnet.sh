@@ -13,9 +13,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MODE="${1:-all}"
-MANAGER_IMAGE="${MANAGER_IMAGE:-p0rt1on-manager:it}"
-INSTANCE_IMAGE="${P0RT1ON_INSTANCE_IMAGE:-p0rt1on-instance:it}"
-CLIENT_IMAGE="${CLIENT_IMAGE:-p0rt1on-backup-client:it}"
+MANAGER_IMAGE="${MANAGER_IMAGE:-p0rt1on-manager:integrationtest}"
+INSTANCE_IMAGE="${P0RT1ON_INSTANCE_IMAGE:-p0rt1on-instance:integrationtest}"
+CLIENT_IMAGE="${CLIENT_IMAGE:-p0rt1on-backup-client:integrationtest}"
 # Fixed in the runtime (DOCKER_NETWORK) — instances always join this one.
 NETWORK="p0rt1on-net"
 

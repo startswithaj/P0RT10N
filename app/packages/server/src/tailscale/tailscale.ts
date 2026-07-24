@@ -77,6 +77,16 @@ export interface TailscaleApi {
    */
   nodeIpv4(hostname: string): Promise<string | null>;
 
+  /**
+   * The node's full MagicDNS FQDN (e.g. `p0rt1on-alice.mouse-stairs.ts.net`) by
+   * hostname, or null if it hasn't enrolled. This IS the friend's serve URL host
+   * — read live from the node rather than composed, so it reflects any hostname
+   * Tailscale actually assigned (e.g. a `-1` collision suffix). On Tailscale it's
+   * the device `name`; headscale has no FQDN field, so that backend composes
+   * `<hostname>.<baseDomain>`.
+   */
+  nodeFqdn(hostname: string): Promise<string | null>;
+
   /** Remove a node from the tailnet (offboard). */
   deleteNode(nodeId: string): Promise<void>;
 
@@ -89,4 +99,29 @@ export interface TailscaleApi {
    */
   ensureFriendAcl(src: string, endpointHostPort: string): Promise<void>;
   removeFriendAcl(src: string): Promise<void>;
+
+  /**
+   * Ensure `tag` is declared in tagOwners (owned by the configured tagOwner),
+   * writing the entry only when absent. The serve-node tag needs this: unlike a
+   * friend tag it never appears as an ACL src, so ensureFriendAcl never declares
+   * it, yet Tailscale rejects minting its auth key until it's owned.
+   */
+  ensureTagOwner(tag: string): Promise<void>;
+
+  /**
+   * MagicDNS enablement (GET /dns/preferences → `magicDNS`). A prerequisite for
+   * HTTPS certs. Needs the `dns:read` scope. Headscale mints no certs → false.
+   */
+  magicDnsEnabled(): Promise<boolean>;
+
+  /**
+   * HTTPS-certificate enablement (GET /tailnet/-/settings → `httpsEnabled`).
+   * This is the DEFINITIVE signal for whether `tailscale serve --https` works.
+   * Needs the `networking_settings:read` scope. Headscale mints no certs → false.
+   */
+  httpsCertsEnabled(): Promise<boolean>;
+
+  /** Whether `tag` is already declared in tagOwners — read-only (no policy
+   * write). Lets a preflight report the serve tag's state without mutating. */
+  isTagOwned(tag: string): Promise<boolean>;
 }

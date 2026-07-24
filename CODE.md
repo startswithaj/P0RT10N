@@ -125,9 +125,9 @@ test bans docker literals outside `runtime/`). Selected by
     tag and snapshots with Kopia through the instance's serve (WireGuard) using
     only bundle contents — proving the ACL grant, MagicDNS, serve, and an actual
     write to the bucket. That pod runs as ROOT in the non-restricted
-    `p0rt1on-it-clients` namespace (like a friend's docker host); a test-only
-    Role there lets the manager SA launch it — the production Role has no
-    pod-create. Subcommands: `build` (rerun after image-source changes) /
+    `p0rt1on-integrationtest-clients` namespace (like a friend's docker host); a
+    test-only Role there lets the manager SA launch it — the production Role has
+    no pod-create. Subcommands: `build` (rerun after image-source changes) /
     `tier1` / `tier2` — test iterations reuse the fixed images. Still pending
     the nightly real-Tailscale tier: serve over HTTPS (headscale issues no
     certs).
@@ -177,8 +177,9 @@ is required; its shape depends on the runtime.
   `policy.mode: database`), first-ever policy GET is a 500 "not found" (=
   empty), tags deduped across forced/valid lists.
 - No HTTPS cert issuance → instances run `tailscale serve` in HTTP mode: set
-  `P0RT1ON_TAILSCALE_LOGIN_SERVER` + `P0RT1ON_TAILSCALE_SERVE_MODE=http`
-  (plumbed to instance env via `Env.instanceTailscale()` → both runtimes).
+  `P0RT1ON_TAILSCALE_SERVE_MODE=http` (the instance login server is derived from
+  `P0RT1ON_HEADSCALE_URL`, plumbed to instance env via `Env.instanceTailscale()`
+  → both runtimes).
 
 ### Instances — `instance/Dockerfile`, `entrypoint.sh`
 
@@ -324,8 +325,9 @@ pass an overlay:
 - **Dev** — `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`
   builds `Dockerfile.dev`: Vite dev server (UI on `:5173`) + Deno API, repo
   mounted live for hot-reload.
-- **Prod** — `docker compose -f docker-compose.yml -f docker-compose.prod.yml up`
-  builds `Dockerfile`: Deno serves the pre-built SPA on `:8080`, no Vite.
+- **Prod** —
+  `docker compose -f docker-compose.yml -f docker-compose.prod.yml up` builds
+  `Dockerfile`: Deno serves the pre-built SPA on `:8080`, no Vite.
 
 ### Notes
 
@@ -350,7 +352,8 @@ comment documents its own details; this is the map.
 - `ci.yml` — triggers (`push` to main, `pull_request`, `workflow_dispatch`),
   `concurrency` guard, and the job wiring below.
 - `test.yml` — read-only `deno task verify` (fmt/lint/typecheck/unit/coverage).
-- `integration.yml` — the three tiers (`mc ↔ MinIO`, `k8s e2e`, `docker-tailnet`).
+- `integration.yml` — the three tiers (`mc ↔ MinIO`, `k8s e2e`,
+  `docker-tailnet`).
 - `build.yml` — 3-image matrix → GHCR, plus a PR-image comment.
 - `release.yml` — date-based `vYYYY.MM.DD` tag, re-tags the `:main` images, cuts
   a GitHub Release.
@@ -360,15 +363,15 @@ comment documents its own details; this is the map.
 
 ### What runs when
 
-| Event | test | integration | build | release | demo |
-|---|---|---|---|---|---|
-| Same-repo PR | ✅ | — | push `pr-<n>` + comment | — | — |
-| Fork PR | ✅ | — | skipped → use `/build` | — | — |
-| Push to `main` | ✅ | ✅ (gates build) | push `main`/`latest`/`sha-<short>` | ✅ | ✅ |
-| `workflow_dispatch` | ✅ | ✅ | push `branch-*`/`sha` | — | — |
+| Event               | test | integration      | build                              | release | demo |
+| ------------------- | ---- | ---------------- | ---------------------------------- | ------- | ---- |
+| Same-repo PR        | ✅   | —                | push `pr-<n>` + comment            | —       | —    |
+| Fork PR             | ✅   | —                | skipped → use `/build`             | —       | —    |
+| Push to `main`      | ✅   | ✅ (gates build) | push `main`/`latest`/`sha-<short>` | ✅      | ✅   |
+| `workflow_dispatch` | ✅   | ✅               | push `branch-*`/`sha`              | —       | —    |
 
-- Integration runs on main/manual only; its skip on PRs still satisfies `build`'s
-  `needs`. On main a red tier blocks the image push.
+- Integration runs on main/manual only; its skip on PRs still satisfies
+  `build`'s `needs`. On main a red tier blocks the image push.
 - Fork PRs skip `build` entirely — `/build` is their only image path.
 - Images: `ghcr.io/<repo>/p0rt1on-{manager,instance,backup-client}`.
 
@@ -376,7 +379,7 @@ comment documents its own details; this is the map.
 
 - **Actions secret:** `TAILSCALE_OAUTH_CLIENT_SECRET` — a **dedicated throwaway
   CI tailnet**, never a personal one (the tier mints keys + creates nodes).
-- **Actions variables:** `TAILNET_DOMAIN`, `TAILSCALE_TAG_OWNER` (public policy
-  identifiers, so vars not secrets).
+- **Actions variable:** `TAILSCALE_TAG_OWNER` (a public policy identifier, so a
+  var not a secret).
 - **Settings → Pages → Source = "GitHub Actions"** (for `demo.yml`).
 - GHCR push uses the built-in `GITHUB_TOKEN` — no extra secret.

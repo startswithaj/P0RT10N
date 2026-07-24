@@ -32,6 +32,10 @@ export interface HeadscaleConfig {
   user: string;
   /** Owner for friend tags in tagOwners (default `<user>@`). */
   tagOwner?: string;
+  /** MagicDNS base domain (headscale's `base_domain`), e.g. `p0rt1on.test`.
+   * Headscale's API doesn't expose it — unlike Tailscale, where it's read from
+   * a node's FQDN — so the test harness supplies it via config. */
+  baseDomain: string;
 }
 
 /** Node shape (subset) from GET /api/v1/node. */
@@ -139,6 +143,13 @@ export class HeadscaleHttpApi implements TailscaleApi {
     return (node?.ipAddresses ?? []).find((a) => a.startsWith("100.")) ?? null;
   }
 
+  /** Headscale has no FQDN field on nodes, so compose it from the node's
+   * givenName and the configured base domain. Null if the node isn't enrolled. */
+  async nodeFqdn(hostname: string): Promise<string | null> {
+    const node = (await this.listNodes()).find((n) => n.givenName === hostname);
+    return node ? `${node.givenName}.${this.config.baseDomain}` : null;
+  }
+
   async deleteNode(nodeId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/node/${nodeId}`);
   }
@@ -175,6 +186,18 @@ export class HeadscaleHttpApi implements TailscaleApi {
     });
   }
 
+  /** Declare `tag` in tagOwners (owned by the configured tagOwner) when absent.
+   * Idempotent — a no-op once present, so it's cheap on every provision. */
+  async ensureTagOwner(tag: string): Promise<void> {
+    await this.updatePolicy((policy) => {
+      if (policy.tagOwners?.[tag]) return null; // already declared
+      return {
+        ...policy,
+        tagOwners: { ...policy.tagOwners, [tag]: [this.tagOwner()] },
+      };
+    });
+  }
+
   /** Drop the friend's rule (and tag ownership, if a tag). Idempotent. */
   async removeFriendAcl(src: string): Promise<void> {
     await this.updatePolicy((policy) => {
@@ -183,6 +206,32 @@ export class HeadscaleHttpApi implements TailscaleApi {
       if (src.startsWith("tag:")) delete tagOwners[src];
       return { ...policy, acls, tagOwners };
     });
+  }
+
+  /** Headscale mints no HTTPS certs, so serve runs HTTP-only and MagicDNS cert
+   * provisioning is moot — report false (the preflight only gates on this when
+   * serveMode is https, which headscale never uses). */
+  magicDnsEnabled(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  /** Headscale mints no HTTPS certs — serve runs HTTP-only against it. */
+  httpsCertsEnabled(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  /** Whether `tag` is declared in the policy's tagOwners — read-only. */
+  async isTagOwned(tag: string): Promise<boolean> {
+    // A never-written policy GETs a 500 "acl policy not found" → treat as empty.
+    const json = await this.request("GET", "/api/v1/policy").catch((err) => {
+      if (err instanceof Error && /acl policy not found/.test(err.message)) {
+        return { policy: "" };
+      }
+      throw err;
+    });
+    const raw = (json as { policy?: string }).policy ?? "";
+    const policy = raw === "" ? {} : JSON.parse(raw) as AclPolicy;
+    return Boolean(policy.tagOwners?.[tag]);
   }
 
   // ---- helpers ----

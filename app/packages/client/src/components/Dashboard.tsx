@@ -14,6 +14,9 @@ export function Dashboard(
     view: () => "portions" | "status";
     setView: (v: "portions" | "status") => void;
     onAdd: () => void;
+    /** False when a blocked preflight check forbids new portions. */
+    canAdd: () => boolean;
+    addBlockReason: () => string | undefined;
     friends: { isPending: boolean; isError: boolean; error: unknown };
     rows: () => FriendRow[];
     totalQuota: () => number;
@@ -31,6 +34,8 @@ export function Dashboard(
           view={props.view}
           setView={props.setView}
           onAdd={props.onAdd}
+          canAdd={props.canAdd}
+          addBlockReason={props.addBlockReason}
         />
 
         <Show

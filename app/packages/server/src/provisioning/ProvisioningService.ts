@@ -14,6 +14,7 @@ import type { Logger } from "../services/types.ts";
 import type { McClient, McClientFactory, S3Credential } from "../minio/mc.ts";
 import type { InstanceRuntime, InstanceSpec } from "../runtime/runtime.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
+import { serveEndpoint } from "../tailscale/serveEndpoint.ts";
 import type { UserInviteApi } from "../tailscale/userInvite.ts";
 import {
   manualAclInstructions,
@@ -409,9 +410,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     // Free the hostname first: a stale serve node still holding it would force
     // the re-enrolled instance onto a renamed hostname and break MagicDNS.
     await this.deleteServeNodes(instance.tsHostname, log);
-    const serveKey = await this.tailscale.mintAuthKey({
-      tag: this.config.serveNodeTag,
-    });
+    const serveKey = await this.mintServeKey();
     await this.runtime.ensureInstance(
       this.specForInstance(
         instance.tsHostname,
@@ -462,6 +461,16 @@ export class ProvisioningService implements ProvisioningServiceContract {
         )
       ),
     );
+  }
+
+  /** Mint the serve node's auth key, first ensuring its tag is owned (auto mode
+   * only — manual mode's admin declares it by hand). The serve tag never appears
+   * as an ACL src, so nothing else declares it in tagOwners. */
+  private async mintServeKey() {
+    if (this.config.aclMode !== "manual") {
+      await this.tailscale.ensureTagOwner(this.config.serveNodeTag);
+    }
+    return this.tailscale.mintAuthKey({ tag: this.config.serveNodeTag });
   }
 
   /**
@@ -756,9 +765,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     // env-file; k8s: Secret). Admin access needs no further setup: every mc
     // call derives the same root cred and carries it in its own MC_HOST env
     // var.
-    const serveKey = await this.tailscale.mintAuthKey({
-      tag: this.config.serveNodeTag,
-    });
+    const serveKey = await this.mintServeKey();
     const spec = this.specFor(reservation, serveKey.key);
     log.debug("starting instance", {
       instance: spec.name,
@@ -1354,8 +1361,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
-  private endpointFor(tsHostname: string): string {
-    return `${this.config.serveMode}://${tsHostname}.${this.config.tailnetDomain}`;
+  private endpointFor(tsHostname: string): Promise<string> {
+    return serveEndpoint(this.tailscale, this.config.serveMode, tsHostname);
   }
 
   private specFor(
@@ -1386,15 +1393,15 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
-  private buildAddBundle(
+  private async buildAddBundle(
     input: AddFriendInput,
     naming: FriendNaming,
     reservation: InstanceReservation,
     cred: S3Credential,
     enroll: EnrollmentResult,
     manualAclInstructions?: string,
-  ): FriendBundle {
-    const endpoint = this.endpointFor(reservation.tsHostname);
+  ): Promise<FriendBundle> {
+    const endpoint = await this.endpointFor(reservation.tsHostname);
     const base: FriendBundle = {
       name: input.name,
       s3Endpoint: endpoint,
@@ -1433,12 +1440,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
-  private buildRotateBundle(
+  private async buildRotateBundle(
     ctx: FriendProvisionContext,
     cred: S3Credential,
     warnings: string[],
-  ): FriendBundle {
-    const endpoint = this.endpointFor(ctx.tsHostname);
+  ): Promise<FriendBundle> {
+    const endpoint = await this.endpointFor(ctx.tsHostname);
     return {
       warnings: warnings.length > 0 ? warnings : undefined,
       name: ctx.name,

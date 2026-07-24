@@ -23,13 +23,14 @@ import type { InstanceRuntime } from "./runtime/runtime.ts";
 import { DenoCommandRunner, DenoTempFiles } from "./lib/CommandRunner.ts";
 import { denoPortProbe } from "./lib/net.ts";
 import type { Env } from "./lib/Env.ts";
+import { FriendServiceImpl } from "./services/FriendService.ts";
 import {
   ActivityServiceImpl,
   AuditServiceImpl,
-  FriendServiceImpl,
   UsageServiceImpl,
-} from "./services/DbServices.ts";
+} from "./services/queryServices.ts";
 import { RuntimeInventoryService } from "./services/InventoryService.ts";
+import { TailnetSystemHealthService } from "./services/SystemHealthService.ts";
 import { JobService } from "./jobs/JobService.ts";
 import { BootReconciler } from "./boot/BootReconciler.ts";
 import { AdminAuth } from "./auth/AdminAuth.ts";
@@ -169,7 +170,6 @@ export async function buildApp(
       repo,
       mcFactory,
       tailscale,
-      config.tailnetDomain,
       config.serveMode,
       logger,
     ),
@@ -180,7 +180,15 @@ export async function buildApp(
     inventoryService: new RuntimeInventoryService(
       queries,
       instanceRuntime,
-      config.tailnetDomain,
+      logger,
+    ),
+    systemHealthService: new TailnetSystemHealthService(
+      tailscale,
+      {
+        serveMode: config.serveMode,
+        serveNodeTag: config.serveNodeTag,
+        aclMode: config.aclMode,
+      },
       logger,
     ),
     jobService: new JobService(logger),

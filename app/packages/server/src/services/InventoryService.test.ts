@@ -47,7 +47,6 @@ describe("RuntimeInventoryService", () => {
         requestSeriesByInstance: () => Promise.resolve(series),
       },
       runtimeWith(() => health, hasData),
-      "tail1a2b.ts.net",
       noopLogger(),
     );
 
@@ -60,9 +59,7 @@ describe("RuntimeInventoryService", () => {
     expect(snap.minio[0].spark).toEqual([]);
     expect(snap.tailscale[0].spark).toBeUndefined();
     expect(snap.tailscale[0].state).toBe("up"); // same container
-    expect(snap.tailscale[0].detail).toBe(
-      "tag:p0rt1on-serve · https://alice.tail1a2b.ts.net",
-    );
+    expect(snap.tailscale[0].detail).toBe("tag:p0rt1on-serve");
     expect(snap.host[0].state).toBe("up");
   });
 
@@ -113,7 +110,6 @@ describe("RuntimeInventoryService", () => {
         requestSeriesByInstance: () => Promise.resolve(new Map()),
       },
       runtimeWith(() => "unhealthy"),
-      "tail1a2b.ts.net",
       noopLogger(),
     );
     const d = await svc.diagnose("alice");
@@ -128,7 +124,6 @@ describe("RuntimeInventoryService", () => {
         requestSeriesByInstance: () => Promise.resolve(new Map()),
       },
       runtimeWith(() => "unknown"),
-      "tail1a2b.ts.net",
       noopLogger(),
     );
     const snap = await svc.snapshot();

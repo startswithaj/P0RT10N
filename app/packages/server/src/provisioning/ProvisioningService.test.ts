@@ -107,11 +107,22 @@ describe("ProvisioningService.addFriend", () => {
       config: { serveMode: "http", aclMode: "manual" },
     }).addFriend(ADD_INPUT);
 
-    // Friend endpoint is http, not https.
-    expect(bundle.s3Endpoint).toBe("http://p0rt1on-alice.tailnet.ts.net");
+    // Friend endpoint is http, and http mode addresses the node by its tailnet
+    // IP (no MagicDNS-bound cert), not the MagicDNS FQDN.
+    expect(bundle.s3Endpoint).toBe("http://100.64.0.1");
     // ...and the grant targets port 80, not 443.
     expect(bundle.manualAclInstructions).toContain("tcp:80");
     expect(bundle.manualAclInstructions).not.toContain("tcp:443");
+  });
+
+  it("throws when the serve node has no MagicDNS name yet (no domain fallback)", async () => {
+    const calls: Calls = [];
+    await expect(
+      buildProvisioningService(calls, DEDICATED_RES, {
+        // Node not on the tailnet yet → nodeFqdn null → surface it, no guess.
+        tailscale: { nodeFqdn: () => Promise.resolve(null) },
+      }).addFriend(ADD_INPUT),
+    ).rejects.toThrow("has no MagicDNS name yet");
   });
 
   it("adopting the existing shared pool verifies it instead of assuming", async () => {

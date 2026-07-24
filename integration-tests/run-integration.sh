@@ -22,16 +22,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MODE="${1:-all}"
-CLUSTER="${K8S_IT_CLUSTER:-p0rt1on-it}"
+CLUSTER="${K8S_INTEGRATIONTEST_CLUSTER:-p0rt1on-integrationtest}"
 CTX="k3d-$CLUSTER"
 # Every kubectl call is PINNED to the k3d context — never the user's current
 # context (which may be a real cluster this script must not touch).
 kc() { kubectl --context "$CTX" "$@"; }
 # NOT :latest — that would default imagePullPolicy to Always and kubelet
 # would try Docker Hub instead of the imported images.
-INSTANCE_IMAGE="p0rt1on-instance:it"
-MANAGER_IMAGE="p0rt1on-manager:it"
-CLIENT_IMAGE="p0rt1on-backup-client:it"
+INSTANCE_IMAGE="p0rt1on-instance:integrationtest"
+MANAGER_IMAGE="p0rt1on-manager:integrationtest"
+CLIENT_IMAGE="p0rt1on-backup-client:integrationtest"
 HEADSCALE_URL="http://headscale.p0rt1on.svc:8080"
 
 build_images() {
@@ -52,7 +52,7 @@ setup() {
     k3d cluster create "$CLUSTER" --wait --timeout 120s \
       --kubeconfig-switch-context=false
   kc apply -f deploy/k8s/p0rt1on.yaml
-  kc apply -f integration-tests/headscale-it.yaml
+  kc apply -f integration-tests/headscale-integrationtest.yaml
   # The manager Deployment isn't exercised by these tiers (the runner pod
   # plays the manager) and its unimported :latest image would just
   # crash-loop and waste node disk — keep it at 0 during tests.
@@ -84,12 +84,12 @@ tier1() {
 
   # A tier-1-only tag: its node must never satisfy tier 2's
   # tag:p0rt1on-serve assertions.
-  K8S_IT_SERVER="$SERVER" \
-    K8S_IT_TOKEN="$TOKEN" \
-    K8S_IT_CA="$CA_FILE" \
-    K8S_IT_IMAGE="$INSTANCE_IMAGE" \
-    K8S_IT_AUTHKEY="$(mint_key tag:p0rt1on-it-tier1)" \
-    K8S_IT_LOGIN_SERVER="$HEADSCALE_URL" \
+  K8S_INTEGRATIONTEST_SERVER="$SERVER" \
+    K8S_INTEGRATIONTEST_TOKEN="$TOKEN" \
+    K8S_INTEGRATIONTEST_CA="$CA_FILE" \
+    K8S_INTEGRATIONTEST_IMAGE="$INSTANCE_IMAGE" \
+    K8S_INTEGRATIONTEST_AUTHKEY="$(mint_key tag:p0rt1on-integrationtest-tier1)" \
+    K8S_INTEGRATIONTEST_LOGIN_SERVER="$HEADSCALE_URL" \
     deno test --allow-read --allow-write --allow-env --allow-net \
     --unstable-net \
     integration-tests/KubernetesRuntime.integration.test.ts
@@ -107,8 +107,8 @@ tier2() {
   HEADSCALE_API_KEY="$(kc exec deploy/headscale -n p0rt1on -- \
     headscale apikeys create --expiration 1h 2>/dev/null | tail -1)"
 
-  kc delete pod p0rt1on-it-runner -n p0rt1on --ignore-not-found >/dev/null
-  kc run p0rt1on-it-runner -n p0rt1on \
+  kc delete pod p0rt1on-integrationtest-runner -n p0rt1on --ignore-not-found >/dev/null
+  kc run p0rt1on-integrationtest-runner -n p0rt1on \
     --image="$MANAGER_IMAGE" --restart=Never --attach --rm \
     --overrides="$(cat <<JSON
 {
@@ -119,7 +119,7 @@ tier2() {
       "seccompProfile": {"type": "RuntimeDefault"}
     },
     "containers": [{
-      "name": "p0rt1on-it-runner",
+      "name": "p0rt1on-integrationtest-runner",
       "image": "$MANAGER_IMAGE",
       "command": ["deno", "test",
         "--allow-read", "--allow-write", "--allow-env", "--allow-ffi",

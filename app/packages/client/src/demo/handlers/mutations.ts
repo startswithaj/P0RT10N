@@ -226,6 +226,11 @@ const friendFromInput = (id: number, input: AddInput): DemoFriend => {
 export const mutationHandlers: MutationHandlers = {
   "auth.login": () => ({ ok: true }),
   "auth.logout": () => ({ ok: true }),
+  "status.recheckHealth": () => ({
+    checks: [],
+    canProvision: true,
+    probedAt: "2026-06-30T12:00:00Z",
+  }),
 
   "friends.add": (input) => {
     const fid = getDemoState().seq + 1;

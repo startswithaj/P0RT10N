@@ -72,7 +72,7 @@ describe("app wiring (tRPC caller over a real DB)", () => {
   it("management mutations are wired (reject at the external boundary)", async () => {
     // With a real mc factory + stub Tailscale (no binary/tailnet in unit tests),
     // these reach their service and fail at the external call — proving routing.
-    // The service logic itself is covered in DbServices.test.ts with mocks.
+    // The service logic itself is covered in FriendService.test.ts with mocks.
     await expect(caller.friends.get({ friendId })).rejects.toThrow();
     await expect(
       caller.friends.add(makeAddInput("dave", "dedicated")),

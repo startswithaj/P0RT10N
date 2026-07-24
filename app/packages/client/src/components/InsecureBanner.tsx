@@ -50,7 +50,7 @@ export function InsecureBanner(props: { noPassword: () => boolean }) {
         </span>
         <IconButton
           size="sm"
-          variant="ghost"
+          variant="plain"
           aria-label="Dismiss"
           onClick={dismiss}
           class={css({ ml: "auto", flexShrink: 0 })}
