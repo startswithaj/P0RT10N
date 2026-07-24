@@ -1,13 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-// ============================================================================
 // Tripwire: docker vocabulary must not re-leak out of runtime/. The domain
 // layers (provisioning/, boot/, services/) describe instances in domain
 // language; container names, volume names, the docker network, and
 // host-gateway addressing are the docker runtime's business alone. A match
 // here means a docker-ism crossed the InstanceRuntime seam.
-// ============================================================================
 
 describe("runtime vocabulary tripwire", () => {
   const BANNED =

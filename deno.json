@@ -57,6 +57,7 @@
       "./devtools/lint/one-component-per-file.ts",
       "./devtools/lint/one-service-per-file.ts",
       "./devtools/lint/blank-line-around-multiline.ts",
+      "./devtools/lint/comment-style.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/expression-complexity.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/function-length.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/no-foreach-mutation.ts",

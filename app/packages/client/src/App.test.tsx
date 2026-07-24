@@ -261,7 +261,7 @@ describe("App dashboard", () => {
     });
   });
 
-  // AC#3: after the add flow finishes, the shown-once bundle secret must not
+  // After the add flow finishes, the shown-once bundle secret must not
   // linger in component state. Driving the state machine directly (createAddFlow)
   // asserts the clearing precisely — the DOM masks the secret, so DOM absence
   // alone wouldn't prove state was reset.
