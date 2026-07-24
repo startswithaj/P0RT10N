@@ -183,13 +183,29 @@ export class ProvisioningService implements ProvisioningServiceContract {
       if (diag?.recentLogs) {
         log.debug("instance logs", { logs: diag.recentLogs });
       }
-      // Immediately reap the partial resources; markFailed above is the fallback
-      // for the periodic sweep if this best-effort reap can't finish.
-      await this.attempt(
-        log,
-        "inline reap after failure",
-        () => this.reapFriend(reservation.friendId, log),
-      );
+      // Reap the partial resources, but DON'T block the throw on it: the failure
+      // reaches the client only when this generator throws, and the reap can take
+      // minutes on a failed provision (mc calls against a MinIO that never came
+      // up, Tailscale node/key revokes). Detach it so the error surfaces at once;
+      // markFailed above + the periodic sweep are the convergence fallback if
+      // this best-effort reap can't finish. Queued on the same mutex so it can't
+      // race a concurrent add/offboard/rotate.
+      void this.mutex
+        .run(() =>
+          this.attempt(
+            log,
+            "inline reap after failure",
+            () => this.reapFriend(reservation.friendId, log),
+          )
+        )
+        .catch((reapErr) =>
+          // attempt() already logs+swallows per-step; this only fires if the
+          // detached chain itself rejects (e.g. the mutex task). Never silent.
+          log.error("detached inline reap failed unexpectedly", {
+            friendId: reservation.friendId,
+            error: String(reapErr),
+          })
+        );
       throw err;
     }
   }

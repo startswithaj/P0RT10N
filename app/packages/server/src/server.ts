@@ -10,7 +10,6 @@ import { MINIO_EVENT_PATH } from "./lib/Env.ts";
 
 const TRPC_ENDPOINT = "/trpc";
 const MINIO_EVENT_ENDPOINT = MINIO_EVENT_PATH;
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
 
 /** Read one cookie value from a Cookie header (undefined if absent). */
 function readCookie(header: string | null, name: string): string | undefined {
@@ -30,7 +29,8 @@ export interface MinioEventSink {
 export interface ServerOptions {
   port: number;
   context: TrpcContext;
-  /** Admin listener bind. Default loopback; non-loopback requires auth on. */
+  /** Admin listener bind. Defaults to this machine (127.0.0.1); a wider bind is
+   * allowed without auth (main.ts warns). */
   bindHost?: string;
   /**
    * Built SPA assets dir to serve for non-API routes (production). Omit in dev —
@@ -121,9 +121,10 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
 }
 
 /**
- * Serve the tRPC router over HTTP. The admin surface binds loopback by default;
- * a non-loopback bind (`P0RT1ON_ADMIN_BIND_HOST`, behind a TLS proxy) is ONLY
- * with auth enabled. `/health` is a plain liveness check; `/trpc` routes to tRPC.
+ * Serve the tRPC router over HTTP. The admin surface binds this machine
+ * (127.0.0.1) by default; a wider bind (`P0RT1ON_ADMIN_BIND_HOST`, e.g. behind a
+ * TLS proxy) is allowed without auth — main.ts warns and the UI banners it.
+ * `/health` is a plain liveness check; `/trpc` routes to tRPC.
  * The audit webhook is deliberately NOT here (see startMinioEventServer): serving
  * it from this listener once forced `0.0.0.0` binds that exposed the whole
  * unauthenticated admin API to every container. When `staticDir` is set
@@ -131,14 +132,9 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
  * non-API requests fall through to tRPC (Vite serves the UI).
  */
 export function startServer(opts: ServerOptions): Deno.HttpServer {
+  // A wider bind without a password no longer refuses to boot — main.ts warns
+  // instead (and the UI banners it). `bind` is the listener address below.
   const bind = opts.bindHost ?? "127.0.0.1";
-  // A bare admin API must never face the network — non-loopback needs auth.
-  if (!LOOPBACK.has(bind) && !opts.context.auth.enabled) {
-    throw new Error(
-      `P0RT1ON_ADMIN_BIND_HOST=${bind} is non-loopback but auth is disabled ` +
-        `— set P0RT1ON_ADMIN_USERNAME/P0RT1ON_ADMIN_PASSWORD or bind 127.0.0.1`,
-    );
-  }
 
   const handleTrpc = (req: Request) =>
     fetchRequestHandler({

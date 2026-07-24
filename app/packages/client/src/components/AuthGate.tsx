@@ -15,6 +15,9 @@ export function createAuthGate() {
   return {
     ready: () => auth.data !== undefined,
     enabled: () => auth.data?.enabled ?? false,
+    // true only once loaded AND no password is configured (undefined while
+    // loading → false, so the insecure banner never flashes on first paint).
+    noPassword: () => auth.data?.enabled === false,
     locked: () => {
       const d = auth.data;
       return d !== undefined && d.enabled && !d.authenticated;

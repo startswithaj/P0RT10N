@@ -116,6 +116,20 @@ await runBoot({
     // Two listeners so the exposed surface is minimal: the admin API is
     // loopback-only by construction, and only the token-guarded audit
     // webhook faces the container network.
+    // Warn (don't block) when the admin API is bound wider than this machine
+    // with no password. We only know the bind address here — not the actual
+    // exposure (a container's host publish is invisible to it) — so the risk is
+    // stated conditionally; the UI banner, keyed on the request URL, is precise.
+    const localOnly = ["127.0.0.1", "localhost", "::1"];
+    if (!localOnly.includes(env.adminBindHost) && !env.adminAuth) {
+      logger.warn(
+        `admin API is bound to ${env.adminBindHost}:${env.port} with NO ` +
+          `password set. If this host makes it reachable beyond localhost, ` +
+          `anyone on your network can create or tear down backup instances. ` +
+          `Set P0RT1ON_ADMIN_USERNAME and P0RT1ON_ADMIN_PASSWORD to require a ` +
+          `login — or confirm it's only reachable from this machine.`,
+      );
+    }
     startServer({
       port: env.port,
       context,

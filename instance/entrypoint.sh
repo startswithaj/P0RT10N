@@ -73,9 +73,17 @@ if [ "$TAILSCALE_DISABLED" = "1" ]; then
   log "TAILSCALE_DISABLED=1 — skipping tailscaled/serve (integration tests only)"
 else
 log "starting tailscaled (userspace networking)"
+# --statedir (a var root), NOT just --state (a file): `tailscale serve --https`
+# stores its issued cert under the state dir's var root. tailscaled only derives
+# a var root from --statedir, or from --state at the WELL-KNOWN default path;
+# our non-default subdir (the non-root/fsGroup fix) left it with none, so cert
+# issuance failed ("no TailscaleVarRoot") and serve returned TLS "internal
+# error" to every friend. --statedir keeps the state file at
+# $TS_STATE_DIR/tailscaled.state (what the migration above produces) AND gives
+# serve a place for its cert.
 tailscaled \
   --tun=userspace-networking \
-  --state="$TS_STATE_DIR/tailscaled.state" \
+  --statedir="$TS_STATE_DIR" \
   --socket="$TS_SOCKET" \
   >/tmp/tailscaled.log 2>&1 &
 TAILSCALED_PID=$!

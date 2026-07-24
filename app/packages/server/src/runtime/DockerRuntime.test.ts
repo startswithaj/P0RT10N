@@ -42,8 +42,6 @@ describe("DockerRuntime.ensureInstance", () => {
       "unless-stopped",
       "--add-host",
       "host.docker.internal:host-gateway",
-      "-p",
-      "127.0.0.1:9100:9100",
       "-v",
       "p0rt1on-data-alice:/data",
       "-v",
@@ -58,10 +56,22 @@ describe("DockerRuntime.ensureInstance", () => {
       "MINIO_PORT=9100",
       "p0rt1on-instance:x",
     ]);
-    // MinIO is published to host loopback so the manager reaches it for admin.
-    expect(run?.args).toContain("127.0.0.1:9100:9100");
+    // Network addressing: the manager reaches MinIO by container name, so no
+    // host port is published (nothing to collide across managers/leftovers).
+    expect(run?.args).not.toContain("-p");
     // No resource flags when unconfigured (the exact array above proves it).
     expect(run?.args).not.toContain("--cpus");
+  });
+
+  it("host addressing: publishes MinIO to the host loopback", async () => {
+    const cmds: RecordedCommand[] = [];
+    await new DockerRuntime(fakeRunner(cmds, absentInspect))
+      .ensureInstance({ ...RUN_SPEC, publishHostPort: true });
+    const run = cmds.find((c) => c.args[0] === "run");
+    // A host-run manager isn't on the docker network, so it reaches MinIO over
+    // the published loopback port.
+    expect(run?.args).toContain("-p");
+    expect(run?.args).toContain("127.0.0.1:9100:9100");
   });
 
   it("emits resource flags before the image when configured", async () => {
@@ -393,6 +403,8 @@ describe("DockerInstanceRuntime", () => {
       stateSource: "p0rt1on-tsstate-alice",
       rootCredSecretRef: "/fake/policy.json",
       network: "p0rt1on-net",
+      // host addressing (the build default) → publish to the host loopback.
+      publishHostPort: true,
     });
   });
 

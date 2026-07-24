@@ -111,6 +111,13 @@ export interface ContainerRunSpec {
   stateSource: string;
   rootCredSecretRef: string;
   network: string;
+  /**
+   * Publish MinIO to the host loopback (`-p 127.0.0.1:<port>`). Only a host-run
+   * manager reaches instances that way; a containerized manager addresses them
+   * by container name over `network`, so a host publish there just binds ports
+   * that collide across managers/leftovers. Set from the `host` addressing mode.
+   */
+  publishHostPort: boolean;
   resources?: DockerResources;
 }
 
