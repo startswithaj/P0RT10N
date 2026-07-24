@@ -100,8 +100,8 @@ function stateDot(s: SvcState): string {
   return dotDown;
 }
 
-/** Hover label for the activity sparkline — spells out what the line means so a
- * dashed (idle) baseline reads as "no activity" rather than flatlined data. */
+/** Hover label for the activity sparkline — so a dashed (idle) baseline reads
+ * as "no activity" rather than flatlined data. */
 function sparkLabel(data: number[]): string {
   const total = data.reduce((sum, n) => sum + n, 0);
   if (total === 0) return "No activity · last 24h";

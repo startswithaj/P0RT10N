@@ -7,9 +7,8 @@ import { Button } from "./ui/button.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
 import { pollMs, relativeTime } from "./helpers.ts";
 
-// The audit trail on the Status page: every lifecycle event (add, suspend,
-// rotate, offboard, plus the boot-time instance_recovered / instance_data_lost),
-// newest first. Live health lives in the sections above; this is what HAPPENED.
+// Audit trail on the Status page: every lifecycle event (add, suspend, rotate,
+// offboard, boot-time instance_recovered/instance_data_lost), newest first.
 
 const section = css({ mb: "8" });
 
@@ -110,8 +109,8 @@ function whenExact(when: string): string {
 }
 
 export function RecentEvents() {
-  // Grow the window rather than cursor-page: a "recent events" panel tops out
-  // at the newest 100 — a full history browser is a separate future view.
+  // Grow the window rather than cursor-page: this panel tops out at the
+  // newest 100.
   const [limit, setLimit] = createSignal(20);
   const events = createQuery(() => ({
     queryKey: ["audit", limit()],

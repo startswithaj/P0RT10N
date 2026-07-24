@@ -40,7 +40,7 @@ describe("AddPortion", () => {
 
       // Default (empty) name: the CTA is disabled and the form guard refuses.
       expect(createBtn()).toBeDisabled();
-      // CODE.md rule: a disabled button must state its reason.
+      // A disabled button must state its reason.
       expect(screen.getByText("Enter a friend name to continue"))
         .toBeInTheDocument();
       fireEvent.submit(form());

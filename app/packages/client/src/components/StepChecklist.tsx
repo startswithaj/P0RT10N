@@ -2,9 +2,7 @@ import { For, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { CircleCheck, LoaderCircle, XCircle } from "lucide-solid";
 
-// The per-step progress checklist shared by the provisioning screen and the
-// offboard dialog. Purely presentational: the caller derives each step's status
-// from the live stream and passes it via `status(i)`.
+// Per-step checklist shared by provisioning + offboard. Presentational: caller passes each step's status via `status(i)`.
 
 export type StepStatus = "done" | "active" | "failed" | "pending";
 
@@ -20,8 +18,7 @@ const row = css({
   fontSize: "sm",
 });
 
-// Light mode's bg.muted highlight is fine; in dark, slate reads muddy/green on
-// the indigo surface, so use a faint spark (magenta) tint — the brand highlight.
+// Dark mode: slate reads muddy on indigo, so use a faint spark (magenta) tint instead of bg.muted.
 const rowActive = css({ bg: "bg.muted", _dark: { bg: "spark/12" } });
 
 const iconWrap = css({
@@ -93,10 +90,7 @@ export function StepChecklist(
 }
 
 /**
- * Map a stream's active/failed step index into a per-index status function for
- * StepChecklist. `activeIndex` is the in-progress step (all lower are done);
- * pass `failed` to mark that index failed instead of spinning; `activeIndex >=
- * steps.length` means every step is done.
+ * Map active/failed step index to a per-index status fn. Lower than activeIndex = done; failed marks that index failed; activeIndex >= length = all done.
  */
 export function stepStatusFor(
   activeIndex: number,

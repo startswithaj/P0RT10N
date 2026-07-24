@@ -1,6 +1,6 @@
 import { css } from "styled-system/css";
 
-// ---- styles (brand tokens: cyan accent, spark magenta, indigo canvas) ----
+// Brand tokens: cyan accent, spark magenta, indigo canvas.
 export const page = css({
   minH: "100dvh",
   bg: "bg.canvas",
@@ -18,12 +18,10 @@ export const nav = css({
 });
 
 export const lockup = css({ display: "flex", alignItems: "center", gap: "3" });
-// Plain text tabs (website-style nav links). Active state via [data-active] so it
-// reliably overrides the base colour (two atomic classes have no cascade winner).
+// Plain text nav tabs. Active state via [data-active] to reliably override base colour.
 export const tabs = css({ display: "flex", gap: "5" });
 
-// Sizing/background come from the button recipe's `link` variant (our local
-// re-addition of the 0.43 variant) — this class only sets the nav colours.
+// Sizing/bg from the button recipe's `link` variant; this class only sets nav colours.
 export const tabLink = css({
   fontFamily: "body",
   fontSize: "sm",
@@ -43,11 +41,7 @@ export const segWrap = css({
   p: "0.5",
 });
 
-// Rendered on Park's Button (variant plain — needs px padding, so it can't use
-// the zero-padding `link` variant). The compact pill look overrides the
-// recipe's md height (h:auto) and neutralises plain's gray washes in EVERY
-// state (hover/active/on), while the active pill re-pins the cyan fill in
-// those same states so no wash ever leaks over it.
+// On Park Button (plain variant, needs px padding). Compact pill: overrides md height, neutralises plain's gray washes in all states; active pill re-pins cyan fill.
 export const segBtn = css({
   fontFamily: "body",
   fontSize: "xs",
@@ -70,9 +64,7 @@ export const segBtn = css({
   },
 });
 
-// Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan) and the
-// nav's rounded-full pill + hover lift; the Button recipe supplies sizing, gap and
-// typography. _hover pins bg:spark so the recipe's cyan hover fill can't show.
+// Primary CTA: brand magenta spark + rounded-full pill + hover lift. _hover pins bg:spark so the recipe's cyan hover can't show.
 export const sparkBtn = css({
   rounded: "full",
   bg: "spark",
@@ -111,8 +103,7 @@ export const statTop = css({
   mb: "3",
 });
 
-// Deliberately the light cut of Space Mono — big numerals in regular weight
-// (the bold reads too heavy at 2xl).
+// Space Mono regular weight — bold reads too heavy at 2xl.
 export const statValue = css({
   fontSize: "2xl",
   fontWeight: "normal",
@@ -261,7 +252,7 @@ export const badgeFailed = css({
 
 export const badgeNeutral = css({ color: "fg.muted" });
 
-// ---- shared by AddPortion's ModePicker and EnrollPicker (radio-card grids) ----
+// Shared by AddPortion's ModePicker and EnrollPicker (radio-card grids).
 export const hint = css({ fontSize: "xs", color: "fg.muted" });
 
 export const modeGrid = css({
@@ -270,8 +261,7 @@ export const modeGrid = css({
   gap: "3",
 });
 
-// Each RadioGroup.Item rendered as a selectable card; `_checked` marks the
-// currently-selected option (border + surface, no separate visible dot needed).
+// Each RadioGroup.Item as a selectable card; `_checked` marks the selected option (border + surface).
 export const modeCard = css({
   textAlign: "left",
   p: "4",

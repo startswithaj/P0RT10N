@@ -1,8 +1,7 @@
 import { createSignal } from "solid-js";
 
-// Light/dark theme. Park UI's semantic tokens flip on the `.dark` class on
-// <html>, so toggling that class is all it takes. Preference persists; initial
-// value follows the saved choice or the OS preference.
+// Park UI semantic tokens flip on the `.dark` class on <html>; toggling it is
+// all it takes. Preference persists (saved choice, else OS preference).
 export type Theme = "light" | "dark";
 
 const STORAGE_KEY = "p0rt1on-theme";

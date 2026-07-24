@@ -30,7 +30,7 @@ describe("Bundle", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
 
-      // The reveal signal flips the Show; the raw secret is now on screen.
+      // Reveal flips the Show; raw secret now on screen.
       expect(await screen.findByText(bundle.s3SecretKey)).toBeInTheDocument();
     });
   });
@@ -100,7 +100,7 @@ describe("Bundle", () => {
     it("renders the up-command when an auth key is present (key enroll)", () => {
       const bundle = renderBundle({}, "key");
 
-      // The tailscale eyebrow + the up-command code block both render.
+      // Tailscale eyebrow + up-command block both render.
       expect(screen.getByText("Tailscale")).toBeInTheDocument();
       expect(
         screen.getByText(bundle.tailscaleUpCommand as string),

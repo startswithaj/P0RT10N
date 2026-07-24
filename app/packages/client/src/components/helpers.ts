@@ -7,9 +7,8 @@ export const gb = (bytes: number) => `${(bytes / GB).toFixed(1)} GB`;
 export const pct = (fraction: number) =>
   Math.min(100, Math.round(fraction * 100));
 
-// Staleness nudge (PLAN wireframe): a friend whose backups quietly stopped is
-// the product's core early-warning signal. Nudge after 48h of silence; friends
-// who never connected get a neutral note instead of a false alarm.
+// Staleness nudge: a friend whose backups quietly stopped is the core
+// early-warning signal. Nudge after 48h of silence; never-connected gets a neutral note.
 const STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 
 export function relativeTime(ms: number): string {
@@ -43,17 +42,15 @@ export const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
 
 /**
- * Refetch interval that respects demo mode. The demo mocks a static backend, so
- * polling only churns the UI; live builds keep the given interval. Inline
- * literal so it folds to `ms` in the real bundle.
+ * Refetch interval that respects demo mode: demo mocks a static backend so
+ * polling only churns the UI; live builds keep the interval.
  */
 export const pollMs = (ms: number): number | false =>
   import.meta.env.VITE_DEMO_MODE === "1" ? false : ms;
 
 /**
- * Aggregate system health for the footer, from the same `status.get` snapshot
- * the Status page renders: backend unreachable or any service `down` ⇒
- * unhealthy. `provisioning` is transitional, not unhealthy.
+ * Aggregate footer health from the `status.get` snapshot: backend unreachable
+ * or any service `down` ⇒ unhealthy; transitional states aren't unhealthy.
  */
 /** Footer/aggregate health states. `offboarding` = a teardown in progress. */
 export type SystemHealth = "healthy" | "unhealthy" | "offboarding" | "checking";

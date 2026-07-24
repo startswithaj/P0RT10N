@@ -10,9 +10,8 @@ import type {
 
 const GB = 1_000_000_000;
 
-// Timestamps are relative to load time so the demo always looks live (backups /
-// activity "minutes ago", not a fixed date that drifts stale). Persisted with
-// the state, so a reload keeps them; a new tab re-seeds fresh.
+// Timestamps relative to load time so the demo always looks live ("minutes ago",
+// not a fixed date that drifts stale). Persisted with state; a new tab re-seeds fresh.
 const minsAgo = (m: number): string =>
   new Date(Date.now() - m * 60_000).toISOString();
 
@@ -99,7 +98,7 @@ export const seedFriends = (): DemoFriend[] => [
 ];
 
 // Recent-events log, relative to load time (hours→days ago) so it reads as a
-// live trail rather than a fixed date that ages.
+// live trail, not a fixed date that ages.
 const hoursAgo = (h: number): string =>
   new Date(Date.now() - h * 3_600_000).toISOString();
 

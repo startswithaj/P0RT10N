@@ -3,8 +3,8 @@ import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { makeFriend } from "../test-helpers/fixtures.ts";
 import { PortionMenu } from "./PortionMenu.tsx";
 
-// The burger menu's enrollment-aware items: auth-key friends can re-issue their
-// tag key; invite friends can't (no tagged node) but can resend a pending invite.
+// Enrollment-aware menu items: auth-key friends re-issue their tag key; invite
+// friends can't (no tagged node) but can resend a pending invite.
 describe("PortionMenu", () => {
   const open = (friend: ReturnType<typeof makeFriend>) => {
     render(() => <PortionMenu friend={friend} onAction={vi.fn()} />);

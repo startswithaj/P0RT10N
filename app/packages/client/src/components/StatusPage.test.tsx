@@ -3,9 +3,7 @@ import { render, screen } from "@solidjs/testing-library";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { makeService, makeStatusView } from "../test-helpers/fixtures.ts";
 
-// Mock trpc/query so `status.get` resolves from a fixture. `queryClient` must
-// stay a REAL QueryClient (StatusPage's createQuery + the provider need it), so
-// only `trpc` is faked — mirroring App.test.tsx, not the dialog tests.
+// Mock `trpc` only; `queryClient` stays a real QueryClient (createQuery + provider need it).
 vi.mock("../trpc.ts", async () => {
   const { QueryClient } = await import("@tanstack/solid-query");
   return {
@@ -124,10 +122,7 @@ describe("StatusPage", () => {
 
       const { container } = renderPage();
 
-      // The provisioning status pill's text colour comes from `css({color:
-      // "warning"})` → the token-derived class `c_warning`, and its dot from
-      // `css({bg: "warning"})` → `bg_warning`. Assert the token classes are used
-      // and the raw amber hex (#E0A83E) never leaks into the rendered markup.
+      // Provisioning pill uses token classes (`c_warning` text, `bg_warning` dot); assert raw amber hex never leaks into markup.
       const pill = await screen.findByText("Provisioning");
       expect(pill.className).toContain("c_warning");
 

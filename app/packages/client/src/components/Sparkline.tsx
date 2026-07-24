@@ -1,8 +1,8 @@
 import { css } from "styled-system/css";
 
 // A tiny faint activity sparkline for a Status-page row: last-24h hourly request
-// counts. Idle (all-zero) rows draw a dashed baseline — a solid flat line reads
-// as real flatlined data, a dash reads as "nothing to plot".
+// counts. Idle (all-zero) rows draw a dashed baseline so it reads as "nothing to
+// plot", not flatlined data.
 
 const wrap = css({
   color: "fg.muted",

@@ -38,7 +38,7 @@ export function QuotaField(
         onValueChange={(d) => props.setQuota(d.valueAsNumber)}
       >
         {
-          /* v1 markup: Input is a sibling of Control; Control is only the
+          /* Input is a sibling of Control; Control is only the
             absolutely-positioned stepper column (triggers). */
         }
         <NumberInput.Input />

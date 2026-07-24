@@ -48,8 +48,8 @@ export function createAddFlow() {
     setPhase("form");
     // Zero-knowledge: the bundle is shown once. Drop the completed add's state so
     // the S3 secret / Tailscale key held in `addState` isn't retained in memory
-    // after the hand-off screen closes (until now it lingered until the next add
-    // overwrote it). `pending` (name/quota — no secret) is cleared alongside it.
+    // after the hand-off screen closes. `pending` (name/quota — no secret) is
+    // cleared alongside it.
     setAddState({ kind: "pending", step: null });
     setPending(null);
     invalidate();

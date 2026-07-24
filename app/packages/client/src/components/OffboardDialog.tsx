@@ -23,10 +23,9 @@ import { trpc } from "../trpc.ts";
 import type { FriendRow } from "./types.ts";
 
 /**
- * Start the teardown as a background job, then observe it: drive `setOffboard`
- * per step, close the dialog (refetching the list) on done, or freeze on the
- * step that failed. Failures arrive as `error` DATA events on jobs.progress —
- * the observer stream is replayable, so a reconnect can never re-run teardown.
+ * Start teardown as a background job, then observe: drive `setOffboard` per step, close
+ * (refetching) on done, or freeze on the failed step. Failures arrive as `error` data events
+ * on jobs.progress; the observer stream is replayable, so a reconnect never re-runs teardown.
  */
 function subscribeOffboard(
   friend: { id: number; name: string },
@@ -57,8 +56,7 @@ function subscribeOffboard(
             invalidate();
             // The teardown itself is complete either way, so confirm it now.
             toastSuccess(`Offboarded ${friend.name}`);
-            // Manual ACL mode: keep the dialog open with the cleanup advice
-            // instead of closing — the offboard itself is already complete.
+            // Manual ACL mode: keep dialog open with cleanup advice; offboard is already complete.
             if (ev.manualAclCleanup) {
               setOffboard({ kind: "advice", cleanup: ev.manualAclCleanup });
             } else {
@@ -77,8 +75,8 @@ function subscribeOffboard(
 }
 
 /**
- * Manual ACL mode: the offboard already completed; advise which policy entries
- * the admin should remove by hand. Dismiss just closes — no side effects.
+ * Manual ACL mode: offboard done; advise which policy entries to remove by hand.
+ * Dismiss just closes — no side effects.
  */
 function AclCleanupBody(props: {
   name: string;

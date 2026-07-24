@@ -1,6 +1,4 @@
-// Central client test fixtures. Shared across component tests (per the repo's
-// "mocks/fixtures live in test-helpers, never inline per test" rule) so future
-// stories building on the friends list reuse one canonical row shape.
+// Central client test fixtures — shared across component tests (mocks/fixtures live in test-helpers, never inline).
 import type {
   FriendBundle,
   FriendListItem,
@@ -35,9 +33,7 @@ export function makeFriend(
 }
 
 /**
- * A "shown once" credentials bundle as friends.add returns it; override any
- * field per test. Defaults include a Tailscale auth-key command (key enroll);
- * omit `tailscaleUpCommand` for the invite path.
+ * "Shown once" credentials bundle as friends.add returns it; override per test. Defaults include a Tailscale auth-key command (key enroll); omit `tailscaleUpCommand` for invite path.
  */
 export function makeBundle(
   overrides: Partial<FriendBundle> = {},

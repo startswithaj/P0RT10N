@@ -71,9 +71,9 @@ export const button = defineRecipe({
         },
       },
       outline: {
-        // BRAND OVERRIDE: pin gray like the 0.43 theme did — outline buttons
-        // are neutral chrome (Cancel, back arrow, unselected quota pills),
-        // not accent. Without the pin they inherit the global cyan palette.
+        // Pin gray: outline buttons are neutral chrome (Cancel, back arrow,
+        // unselected quota pills), not accent — without the pin they inherit
+        // the global cyan palette.
         colorPalette: "gray",
         borderWidth: "1px",
         borderColor: "colorPalette.outline.border",
@@ -89,7 +89,7 @@ export const button = defineRecipe({
         },
       },
       plain: {
-        // BRAND OVERRIDE: pin gray (the 0.43 ghost variant this replaces did).
+        // Pin gray (neutral, like the ghost variant this replaces).
         colorPalette: "gray",
         color: "colorPalette.plain.fg",
         _hover: {
@@ -103,10 +103,9 @@ export const button = defineRecipe({
         },
       },
       link: {
-        // LOCAL ADDITION (restores the 0.43 `link` variant that v1 dropped):
-        // text-link button. The `!` marks are how 0.43 beat the size
-        // variant's h/minW/px; no background in any state, so call sites
-        // don't need to neutralise a hover wash.
+        // Text-link button. The `!` marks override the size variant's
+        // h/minW/px; no background in any state, so call sites need not
+        // neutralise a hover wash.
         verticalAlign: "baseline",
         height: "auto!",
         minW: "0!",

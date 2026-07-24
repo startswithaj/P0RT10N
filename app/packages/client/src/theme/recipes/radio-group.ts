@@ -54,10 +54,9 @@ export const radioGroup = defineSlotRecipe({
             bg: "colorPalette.solid.bg",
             color: "colorPalette.solid.fg",
             boxShadowColor: "colorPalette.solid.bg",
-            // BRAND OVERRIDE: the 0.43 "donut" — an inset surface-coloured
-            // outline punches a ring into the accent fill (accent ring, gap,
-            // accent centre) instead of v1's ink dot. The widths/offsets are
-            // the 0.43 per-size values (see the size variants below).
+            // "Donut": an inset surface-coloured outline punches a ring into
+            // the accent fill (accent ring, gap, accent centre) instead of an
+            // ink dot. Widths/offsets are per-size (see size variants below).
             outlineStyle: "solid",
             outlineColor: "bg.default",
             _after: {

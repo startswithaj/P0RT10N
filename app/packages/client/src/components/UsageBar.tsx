@@ -3,9 +3,7 @@ import { pct } from "./helpers.ts";
 import { barOk, barRoot, barTrack, barWarn } from "./styles.ts";
 
 export function UsageBar(props: { fraction: number }) {
-  // Park UI Progress (Ark) drives the Range width and sets aria-valuenow from the
-  // value, so the old dynamic inline width style is gone. value is the usage % (max
-  // defaults to 100); the warn colour still trips at >=90%.
+  // Park UI Progress drives Range width + aria-valuenow from value (usage %, max 100). Warn colour trips at >=90%.
   return (
     <Progress.Root value={pct(props.fraction)} class={barRoot}>
       <Progress.Track class={barTrack}>

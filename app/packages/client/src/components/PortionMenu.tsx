@@ -15,7 +15,7 @@ import { dangerItem, iconBtn, menuItem } from "./styles.ts";
 import type { FriendRow } from "./types.ts";
 import type { ActionKind, Pending } from "./action-dialog-shared.ts";
 
-// ---- actions ---- the burger menu opens a proper Park UI dialog (below).
+// The burger menu opens a Park UI dialog.
 
 export function PortionMenu(
   props: { friend: FriendRow; onAction: (p: Pending) => void },
@@ -41,8 +41,7 @@ export function PortionMenu(
               <KeyRound size={15} /> Rotate S3 key
             </Menu.Item>
             {
-              /* Auth-key enrollment only — an invite friend has no tagged node
-                key to re-issue (they join with their own account). */
+              /* Auth-key only — invite friends have no tagged node key to re-issue (own account). */
             }
             <Show when={props.friend.enrollmentMode !== "invite"}>
               <Menu.Item value="rotate-ts" class={menuItem}>
@@ -60,8 +59,7 @@ export function PortionMenu(
             </Show>
             <Menu.Separator />
             {
-              /* State guards mirror the server: suspend only from active,
-                resume only from suspended; neither for provisioning/failed. */
+              /* Mirrors server: suspend only from active, resume only from suspended; neither for provisioning/failed. */
             }
             <Show when={props.friend.status === "active"}>
               <Menu.Item value="suspend" class={menuItem}>
