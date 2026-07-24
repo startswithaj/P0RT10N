@@ -5,7 +5,7 @@
 # Three stages: `base` does all the work, `integration` adds the test suites,
 # and `manager` (production) is LAST so a bare `docker build` — what the GHCR
 # publish job runs — resolves to it and can never ship test code.
-FROM denoland/deno:2.8.2 AS base
+FROM denoland/deno:2.9.4 AS base
 
 # Bundle the docker CLI the app shells out to (launch/inspect instance
 # containers). TARGETARCH is provided by buildkit (amd64 / arm64) so this builds
