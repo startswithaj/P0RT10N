@@ -10,6 +10,7 @@ import { AddPortion, type NewPortion } from "./components/AddPortion.tsx";
 import { Provisioning } from "./components/Provisioning.tsx";
 import { Bundle } from "./components/Bundle.tsx";
 import { ActionDialogs } from "./components/ActionDialogs.tsx";
+import { InsecureBanner } from "./components/InsecureBanner.tsx";
 import type { Pending } from "./components/action-dialog-shared.ts";
 import { Toaster } from "./components/ui/toast.tsx";
 
@@ -212,6 +213,7 @@ export function App() {
   const { totalUsed, totalQuota, overallPct } = createTotals(rows);
   return (
     <AuthGate gate={gate}>
+      <InsecureBanner noPassword={gate.noPassword} />
       <Toaster />
       <ActionDialogs
         pending={pendingAction()}
