@@ -31,10 +31,12 @@ export function InsecureBanner(props: { noPassword: () => boolean }) {
   const [dismissed, setDismissed] = createSignal(
     globalThis.localStorage.getItem(DISMISS_KEY) === "1",
   );
+
   const dismiss = () => {
     globalThis.localStorage.setItem(DISMISS_KEY, "1");
     setDismissed(true);
   };
+
   return (
     <Show when={props.noPassword() && fromNetwork && !dismissed()}>
       <div class={banner}>

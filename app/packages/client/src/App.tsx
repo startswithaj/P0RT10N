@@ -204,7 +204,6 @@ export function App() {
   const gate = createAuthGate();
   // Fetch dashboard data only once auth resolved and unlocked — no stray 401s.
   const unlocked = () => gate.ready() && !gate.locked();
-
   const friends = createFriendsQuery(unlocked);
   const capabilities = createCapabilitiesQuery(unlocked);
   const status = createStatusQuery(unlocked);
