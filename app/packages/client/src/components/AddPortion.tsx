@@ -76,10 +76,10 @@ const actions = css({
   mt: "2",
 });
 
-// Why the CTA is disabled (CODE.md: no disabled buttons without a reason).
+// Why the CTA is disabled — a disabled button always states its reason.
 const blockHint = css({ fontSize: "sm", color: "fg.muted", mr: "auto" });
 
-// Soft-isolation trade-off note, shown at the decision point (PLAN wireframe).
+// Soft-isolation trade-off note, shown at the decision point.
 const sharedBanner = css({
   fontSize: "sm",
   color: "fg.default",
@@ -128,7 +128,7 @@ function issueFor(issues: FormIssue[], field: string): string | null {
   return issues.find((i) => i.path[0] === field)?.message ?? null;
 }
 
-// CODE.md rule: a disabled button must say WHY. First blocking problem wins;
+// A disabled button must say WHY. First blocking problem wins;
 // the untouched-form case gets a friendlier prompt than a zod message.
 function blockReasonFor(name: string, issues: FormIssue[]): string | null {
   if (name.trim() === "") return "Enter a friend name to continue";
@@ -284,7 +284,7 @@ function RetentionField(
         formatOptions={{ maximumFractionDigits: 0 }}
         onValueChange={(d) => props.setRetention(d.valueAsNumber)}
       >
-        {/* v1 markup: Input is a sibling of Control (see QuotaField). */}
+        {/* Input is a sibling of Control (see QuotaField). */}
         <NumberInput.Input />
         <NumberInput.Control>
           <NumberInput.IncrementTrigger />

@@ -3,10 +3,9 @@ import { LoadingButton } from "./LoadingButton.tsx";
 import { actionsRow, sparkBtn } from "./action-dialog-shared.ts";
 
 /**
- * The Cancel + confirm button row shared by the action dialogs' confirm view.
- * `destructive` gives the confirm button the danger-red palette (offboard);
- * every other action takes the brand spark colour. The button shows the border
- * loader while `busy`.
+ * Cancel + confirm row shared by the action dialogs' confirm view.
+ * `destructive` → danger-red palette (offboard); otherwise brand spark.
+ * Shows the border loader while `busy`.
  */
 export function ConfirmActions(props: {
   confirmLabel: string;

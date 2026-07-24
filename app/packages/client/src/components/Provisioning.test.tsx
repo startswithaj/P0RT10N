@@ -3,10 +3,9 @@ import { render, screen } from "@solidjs/testing-library";
 import { PROVISION_STEPS } from "@p0rt1on/shared/steps";
 import { Provisioning, type ProvisionState } from "./Provisioning.tsx";
 
-// Covers the provisioning checklist: it renders one row per streamed step and,
-// on failure, marks the exact failing step errored (rather than spinning past
-// it). Icons are asserted via lucide's class names — circle-check = done,
-// loader-circle = active, circle-x = failed.
+// Covers the checklist: one row per streamed step; on failure the exact step is
+// marked errored. Icons asserted via lucide classes — circle-check=done,
+// loader-circle=active, circle-x=failed.
 describe("Provisioning", () => {
   // Per-test helpers stay INSIDE describe (the no-test-globals lint plugin
   // forbids module-level const/function in *.test.* files).

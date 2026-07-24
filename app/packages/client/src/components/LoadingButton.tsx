@@ -2,11 +2,9 @@ import { splitProps } from "solid-js";
 import { css } from "styled-system/css";
 import { Button, type ButtonProps } from "./ui/button.tsx";
 
-// A looping loader painted onto the button's border while `loading`: a
-// conic-gradient arc, masked to a 2px ring, whose start angle (--p0-angle,
-// registered in index.css) is animated by the `border-spin` keyframe so the
-// highlight travels around the perimeter. Unlike Park's built-in `loading`
-// (which swaps the label for a spinner), the label stays put underneath.
+// Loader on the button border while `loading`: conic-gradient arc masked to a 2px ring,
+// start angle (--p0-angle in index.css) spun by the `border-spin` keyframe. Unlike Park's
+// built-in `loading` (swaps label for spinner), the label stays put underneath.
 const loadingBorder = css({
   position: "relative",
   _before: {

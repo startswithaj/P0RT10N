@@ -33,7 +33,7 @@ const uid = (n: number): string => randomHex(n);
 
 const nowIso = (): string => new Date().toISOString();
 
-// ---- pure state helpers (each returns a fresh state) ----
+// pure state helpers (each returns a fresh state)
 
 const patchFriend = (
   s: DemoState,
@@ -73,12 +73,11 @@ const okAfter = (reducer: (s: DemoState) => DemoState): { ok: true } => {
   return { ok: true as const };
 };
 
-// ---- bundle / friend factories ----
+// bundle / friend factories
 
-// The kopia quickstart mirrors the server's: a join preamble, a client-side
-// password warning, then a `repository create`/`connect` block (create adds the
-// GOVERNANCE retention + a snapshot line). Kept byte-for-byte with the real one
-// so the demo bundle reads exactly like production.
+// Mirrors the server's kopia quickstart: join preamble, client-side password
+// warning, then a `repository create`/`connect` block (create adds GOVERNANCE
+// retention + snapshot line). Kept byte-for-byte so the demo reads like production.
 
 const kopiaCreateTail = (retentionDays: number): string[] => [
   `  --retention-mode=GOVERNANCE --retention-period=${retentionDays}d`,
@@ -221,7 +220,7 @@ const friendFromInput = (id: number, input: AddInput): DemoFriend => {
   };
 };
 
-// ---- the total mutation map ----
+// the total mutation map
 
 export const mutationHandlers: MutationHandlers = {
   "auth.login": () => ({ ok: true }),

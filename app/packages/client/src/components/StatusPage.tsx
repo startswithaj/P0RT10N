@@ -47,8 +47,7 @@ const statValue = css({
   lineHeight: "1.1",
 });
 
-// Deliberate weight drop: the muted suffix renders Space Mono Regular at 2xl
-// (reads much lighter/rounder than the bold value — that contrast is the look).
+// Muted suffix: Space Mono Regular at 2xl — lighter/rounder than the bold value is the look.
 const statValueMuted = css({ color: "fg.muted", fontWeight: "normal" });
 
 const section = css({ mb: "8" });
@@ -126,9 +125,7 @@ export function StatusPage() {
   const view = (): View =>
     status.data ?? { minio: [], tailscale: [], host: [] };
 
-  // The instance whose diagnostics accordion is open (one at a time). Held at
-  // page scope (not per-row) so the 5s status poll re-rendering the rows can't
-  // reset it and snap the accordion shut.
+  // Open diagnostics accordion (one at a time). Held at page scope so the 5s poll re-render can't snap it shut.
   const [expanded, setExpanded] = createSignal<string | null>(null);
 
   return (

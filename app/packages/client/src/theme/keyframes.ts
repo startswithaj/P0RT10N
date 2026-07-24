@@ -23,7 +23,7 @@ export const keyframes = defineKeyframes({
     "0%, 100%": { opacity: "1" },
     "50%": { opacity: "0.45" },
   },
-  // spinner rotation (the Park Spinner recipe references `animation: spin`)
+  // spinner rotation (Park Spinner recipe references `animation: spin`)
   "spin": {
     to: { transform: "rotate(360deg)" },
   },

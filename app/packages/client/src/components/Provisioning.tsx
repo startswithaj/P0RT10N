@@ -6,10 +6,9 @@ import { Wordmark } from "./Wordmark.tsx";
 import { Button } from "./ui/button.tsx";
 import { StepChecklist, stepStatusFor } from "./StepChecklist.tsx";
 
-// Provisioning view. friends.addStream streams a `step` event as each real step
-// begins (and a `done`/error terminus), so the checklist reflects actual server
-// progress — it advances only as far as the backend got and, on failure, marks
-// the exact step that broke instead of a timer running past it.
+// Provisioning view. addStream emits a `step` event per real step (plus
+// done/error), so the checklist tracks actual server progress and marks the
+// exact failing step.
 
 /** The add stream's state, as far as this screen cares. `step` is the live step. */
 export type ProvisionState =
@@ -18,9 +17,8 @@ export type ProvisionState =
   | { kind: "error"; message: string; step: ProvisionStepKey | null };
 
 /**
- * Step labels, swapping the auth-key wording for invite friends. With no API
- * token no invite is actually sent (it's recorded for the admin to send by
- * hand), so the label must not claim otherwise.
+ * Step labels, swapping auth-key wording for invites. Without an API token no
+ * invite is sent (admin sends by hand), so the label must not claim otherwise.
  */
 function stepLabels(
   enroll: "key" | "invite",
@@ -91,9 +89,8 @@ const actions = css({
   mt: "6",
 });
 
-// Primary CTA keeps the brand magenta spark + rounded-full pill + hover lift;
-// the Button recipe supplies sizing, gap and typography. _hover pins bg:spark so
-// the recipe's cyan solid hover fill can't show.
+// Primary CTA: brand spark pill + hover lift; _hover pins bg:spark so the
+// recipe's cyan hover fill can't show.
 const sparkBtn = css({
   rounded: "full",
   bg: "spark",

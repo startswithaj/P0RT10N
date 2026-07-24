@@ -33,8 +33,7 @@ export const badge = defineRecipe({
         color: "colorPalette.subtle.fg",
       },
       outline: {
-        // BRAND OVERRIDE: pin gray like the 0.43 theme (its outline badge was
-        // fg.default on border.default) — neutral by default; accent badges
+        // Pin gray so outline badges are neutral by default; accent badges
         // opt in via a class (see badgeActive in App.tsx).
         colorPalette: "gray",
         borderWidth: "1px",

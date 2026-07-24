@@ -15,8 +15,7 @@ import { trpc } from "../trpc.ts";
 
 type FriendBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
 
-// The header note, honest about what actually happened: emailed, created (link
-// to share), or nothing sent (no token — invite by hand below).
+// Header note: emailed, created (link to share), or nothing sent (invite by hand below).
 function noteText(b: FriendBundle): string {
   if (b.inviteEmailedAt) {
     return `An invite has been emailed to ${b.inviteEmail} — they join with their own identity.`;
@@ -27,9 +26,7 @@ function noteText(b: FriendBundle): string {
   return `No invite was sent automatically — invite ${b.inviteEmail} by hand below, then they join with their own identity.`;
 }
 
-// Invite-enrolled bundle's Tailscale block: the emailed/created note, the
-// acceptance link, how the friend connects with their own account, and the
-// no-token manual-invite console steps.
+// Invite bundle's Tailscale block: note, acceptance link, own-account connect, and manual-invite steps.
 export function InviteBundleSection(
   props: {
     bundle: FriendBundle;

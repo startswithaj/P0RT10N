@@ -12,9 +12,9 @@ export const dialog = defineSlotRecipe({
       position: "fixed",
       top: "0",
       width: "100dvw",
-      // LOCAL FIX: upstream says `var(--z-index)`, which nothing defines
-      // (computes to z-index auto, letting any positive-z page element paint
-      // over the dim). Use the same modal var the positioner/content use.
+      // Upstream `var(--z-index)` is undefined (computes to auto, letting
+      // positive-z elements paint over the dim). Use the same modal var as
+      // positioner/content.
       "--dialog-z-index": "zIndex.modal",
       zIndex: "calc(var(--dialog-z-index) + var(--layer-index, 0))",
       _open: {

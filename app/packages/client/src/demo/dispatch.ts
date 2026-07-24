@@ -19,8 +19,7 @@ export const resolveDemoQuery = (path: string, input: unknown): unknown => {
   return handler(input, getDemoState());
 };
 
-// Wire path is an untyped string; per-path typing lives in the total map. Widen
-// here at the dynamic-dispatch boundary.
+// Untyped wire path; per-path typing lives in the total map. Widen at the dispatch boundary.
 const mutationFns = mutationHandlers as unknown as Record<
   string,
   (input: unknown) => unknown

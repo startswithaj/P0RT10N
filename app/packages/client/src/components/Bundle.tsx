@@ -18,9 +18,9 @@ import {
 import { toastError } from "./action-dialog-shared.ts";
 import { trpc } from "../trpc.ts";
 
-// The "shown once" credentials hand-off, rendered from the real FriendBundle
-// that friends.add returned (s3 key/secret, endpoint, Tailscale up command,
-// Kopia quickstart). The secret + auth key are not retrievable again.
+// The shown-once credentials hand-off from friends.add (s3 key/secret,
+// endpoint, Tailscale up command, Kopia quickstart). Secret + auth key not
+// retrievable again.
 
 type FriendBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
 
@@ -61,9 +61,7 @@ const actions = css({
   mt: "8",
 });
 
-// Primary CTA keeps the brand magenta spark + rounded-full pill + hover lift;
-// the Button recipe supplies sizing, gap and typography. _hover pins bg:spark so
-// the recipe's cyan solid hover fill can't show.
+// Brand-spark pill CTA; _hover pins bg:spark so the recipe's cyan hover fill can't show.
 const sparkBtn = css({
   rounded: "full",
   bg: "spark",
@@ -72,7 +70,7 @@ const sparkBtn = css({
   _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
 
-// Secondary action: Park's outline variant, kept as a rounded-full pill to match.
+// Secondary action: Park outline variant as a rounded-full pill to match.
 const pillOutline = css({ rounded: "full" });
 
 /** Non-fatal degradations from the server (e.g. rotate couldn't remove the
@@ -158,12 +156,10 @@ function QuickstartSection(
 }
 
 /**
- * "Copy all" means ALL of it: every section rendered on the bundle screen, in
- * the same order — S3 credentials, Tailscale enrollment, manual ACL lines
- * (when shown), and the Kopia quickstart.
+ * Copy-all emits every section in screen order: S3 creds, Tailscale enrollment,
+ * manual ACL lines (when shown), Kopia quickstart.
  */
-/** The Tailscale lines for "copy all": the up-command (key) or the invite
- * link + connect/manual steps (invite). */
+/** Tailscale lines for copy-all: up-command (key) or invite link + steps (invite). */
 function tailscaleCopyLines(
   bundle: FriendBundle,
   enroll: "key" | "invite",

@@ -42,11 +42,9 @@ const minioState = (s: InstanceStatus): ServiceStatus["state"] =>
   MINIO_STATE[s];
 
 // Last-24h hourly request counts for the row sparkline. Only "up" instances plot
-// one (a down/provisioning instance isn't serving, so there's nothing to chart —
-// and keeping sparklines to same-width "Up" pills keeps the column aligned). An
-// up-but-idle friend returns all-zeros → Sparkline draws a dashed baseline;
-// active friends get deterministic per-friend, per-hour variation (stable across
-// reloads, non-zero newest bucket) so no two rows look alike.
+// one. Up-but-idle returns all-zeros (dashed baseline); active friends get
+// deterministic per-friend/per-hour variation (stable across reloads, non-zero
+// newest bucket) so no two rows look alike.
 const sparkFor = (f: DemoFriend): number[] | undefined => {
   if (f.instanceStatus !== "active") return undefined;
   const per = f.activity.requests24h;
