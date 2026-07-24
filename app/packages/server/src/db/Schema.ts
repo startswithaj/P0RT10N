@@ -18,12 +18,9 @@ import {
 } from "@p0rt1on/shared/domain";
 import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
 
-// ============================================================================
-// p0rt1on metadata DB (SQLite via Drizzle) — NO SECRETS.
-// Stores only: which instances/buckets exist, their config, and aggregated
-// activity/usage. Never an S3 secret, Tailscale auth key, or encryption key.
-// Migrations run as part of the boot sequence (chargeHA pattern).
-// ============================================================================
+// p0rt1on metadata DB (SQLite via Drizzle) — NO SECRETS. Stores only which
+// instances/buckets exist, their config, and aggregated activity/usage. Never
+// an S3 secret, Tailscale auth key, or encryption key. Migrations run at boot.
 
 // ---- Instances ----
 // One row per running MinIO + tailscaled pair (the unit the runtime layer
@@ -110,10 +107,8 @@ export const activity = sqliteTable("activity", {
     .primaryKey()
     .references(() => friends.id),
   requestsTotal: integer("requests_total").notNull().default(0),
-  // JSON object of raw MinIO op name -> count. `mode: "json"` makes drizzle parse/serialize
-  // automatically (reads return the object, not the raw text); the column is
-  // still `text`, so SQLite's JSON operators (-> / ->> / json_each) still apply
-  // and no migration changes. Raw SQL default for the text literal '{}'.
+  // JSON map of raw MinIO op name -> count. `mode: "json"` auto parses/serializes;
+  // column stays `text` so SQLite JSON operators still apply. Default literal '{}'.
   requestsByOp: text("requests_by_op", { mode: "json" }).$type<RequestsByOp>()
     .notNull().default(sql`'{}'`),
   // Rolling request count over the last 24h. Denormalized cache of the buckets

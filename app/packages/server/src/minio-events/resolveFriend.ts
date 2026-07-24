@@ -1,11 +1,8 @@
 import type { MinioEvent } from "./parseMinioEvent.ts";
 
-// ============================================================================
-// The ONE place bucket→friend resolution and the anti-self-trigger filter
-// live. A stream stage piped after parseMinioEvents (parse → resolve): metrics
-// consumers read FriendEvents; they never resolve buckets or re-check access
-// keys themselves.
-// ============================================================================
+// The one place bucket→friend resolution and the anti-self-trigger filter live.
+// Stream stage piped after parseMinioEvents; consumers read FriendEvents and
+// never resolve buckets or re-check access keys.
 
 /** A parsed MinIO event resolved to the friend that owns its bucket. */
 export interface FriendEvent {

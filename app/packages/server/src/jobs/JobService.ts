@@ -4,18 +4,14 @@ import type { ProgressEvent } from "../lib/progress.ts";
 import type { Logger } from "../services/types.ts";
 import { NotFoundError } from "../lib/ServiceError.ts";
 
-// ============================================================================
-// In-memory job registry: mutations START side-effectful work (provision /
-// teardown) here and return a jobId immediately; the work runs detached from
-// any connection. `progress` is a pure observer (replay + live), so SSE
-// reconnects are always safe — they re-attach, never re-run. Jobs do NOT
-// survive a manager restart: the friend row is left in `provisioning`/live
-// state and boot reconcile owns recovery.
+// In-memory job registry: mutations START detached work and return a jobId
+// immediately. `progress` is a pure observer (replay + live), so SSE
+// reconnects re-attach, never re-run. Jobs do NOT survive a manager restart —
+// boot reconcile owns recovery.
 //
-// Zero-knowledge note: an add job holds its once-shown FriendBundle in memory
-// only until claimed (single claim, wiped on handover) or until the job is
-// pruned — never in an event, the DB, or a log.
-// ============================================================================
+// Zero-knowledge: an add job holds its once-shown FriendBundle in memory only
+// until claimed (single claim, wiped on handover) or pruned — never in an
+// event, the DB, or a log.
 
 /** Finished jobs (and any unclaimed bundle) are dropped after this long. */
 const JOB_TTL_MS = 15 * 60 * 1000;

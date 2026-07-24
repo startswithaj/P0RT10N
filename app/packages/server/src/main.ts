@@ -17,11 +17,9 @@ import {
   resolveFriend,
 } from "./minio-events/resolveFriend.ts";
 
-// Server entrypoint: read env → open DB → wire services → run the boot
-// sequence (migrations → stale-provisioning flip → container reconcile →
-// sweep → serve; ordering lives in boot.ts where it's tested). Thin by
-// design — the Deno.serve glue isn't unit-tested; app.ts wiring and the HTTP
-// path have their own tests.
+// Server entrypoint: read env → open DB → wire services → run boot
+// (migrate → stale-provisioning flip → reconcile → sweep → serve; ordering
+// lives in boot.ts). Thin glue — not unit-tested; app.ts and HTTP path are.
 
 const env = new Env(); // validates required vars — refuses to boot without them
 // The production image builds the SPA next to the server; in dev it is absent

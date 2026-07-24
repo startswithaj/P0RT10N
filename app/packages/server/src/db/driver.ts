@@ -1,8 +1,5 @@
-// ============================================================================
-// Database driver interface — the contract between drizzle and the underlying
-// SQLite. Implemented by SqliteCompat.ts over @db/sqlite (native FFI). Ported
-// from chargeHA, trimmed to what p0rt1on uses (no browser/WASM target).
-// ============================================================================
+// Driver contract between drizzle and the underlying SQLite. Implemented by
+// SqliteCompat.ts over @db/sqlite (native FFI).
 
 export type BindValue =
   | number

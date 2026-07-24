@@ -9,11 +9,9 @@ import type {
 import type { S3Credential } from "../minio/mc.ts";
 import type { InstanceAddressing } from "../runtime/adminEndpoint.ts";
 
-// ============================================================================
-// Dependencies the ProvisioningService orchestrates. Each is an interface so
-// the state machine stays pure orchestration — testable with mocks, and the
-// concrete impls (Drizzle repo, real `mc`/runtime/tailscale) plug in later.
-// ============================================================================
+// Deps the ProvisioningService orchestrates. Each an interface so the state
+// machine stays pure orchestration — mockable, with concrete impls (Drizzle
+// repo, real `mc`/runtime/tailscale) injected.
 
 /** Static config supplied at boot (env / mounted). No secrets persisted to DB. */
 export interface ProvisioningConfig {
@@ -27,7 +25,7 @@ export interface ProvisioningConfig {
   instanceAddressing: InstanceAddressing;
   /** Inclusive host-port range dedicated instances are allocated from. */
   portRange: { min: number; max: number };
-  /** The single shared pool's instance name (PLAN: one shared pool for v1). */
+  /** The single shared pool's instance name (one shared pool). */
   sharedInstanceName: string;
   /**
    * How instances publish MinIO on the tailnet: `https` (tailscale serve with
@@ -46,7 +44,7 @@ export interface ProvisioningConfig {
   /**
    * ACL management: `auto` edits the tailnet policy via the API (needs
    * policy_file write); `manual` skips it and surfaces the grant lines for the
-   * admin to paste (for tokens without that scope). See [[manual-acl-mode]].
+   * admin to paste (for tokens without that scope).
    */
   aclMode: "auto" | "manual";
   /** Internal audit-webhook receiver URL + guard token (not on any tailnet). */
@@ -61,7 +59,7 @@ export interface FriendNaming {
   tsHostname: string; // dedicated: the friend; shared: the pool's hostname
 }
 
-/** Outcome of the atomic "reserve first" step (PLAN provisioning step 1). */
+/** Outcome of the atomic "reserve first" step. */
 export interface InstanceReservation {
   friendId: number;
   instanceId: number;

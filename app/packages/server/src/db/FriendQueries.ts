@@ -21,11 +21,8 @@ export type FriendDetailRow =
   & Omit<FriendDetail, "nodeOnline" | "s3Endpoint">
   & { tsHostname: string };
 
-// ============================================================================
-// Read-side queries for the dashboard + usage screens. Pure DB — no external
-// deps. The friend-detail screen also needs Tailscale's node-online state, so
-// it's assembled a layer up (FriendService), not here.
-// ============================================================================
+// Read-side queries for the dashboard + usage screens. Pure DB. Friend-detail
+// also needs Tailscale node-online state, assembled a layer up (FriendService).
 
 /** One friend the usage sampler should measure. */
 export interface UsageSampleTarget {

@@ -3,15 +3,12 @@ import type { HealthCheck, SystemHealth } from "@p0rt1on/shared/domain";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// ============================================================================
 // Boot preflight over the tailnet prerequisites a portion needs before anyone
-// tries to create one. All of it is API-checkable, on boot, with no throwaway
-// machine: MagicDNS (GET /dns/preferences, needs dns:read) and HTTPS certs
-// (GET /tailnet/-/settings → httpsEnabled, needs networking_settings:read) are
-// both read directly. A missing SCOPE (403) is surfaced as a warn — the API is
-// reachable, we just can't verify — not a hard block. `reportServeUnavailable`
-// stays as a runtime backstop if a real provision proves serve is off anyway.
-// ============================================================================
+// creates one. All API-checkable on boot: MagicDNS (needs dns:read) and HTTPS
+// certs (needs networking_settings:read) read directly. A missing SCOPE (403)
+// is a warn (reachable, just unverifiable), not a hard block.
+// reportServeUnavailable is the runtime backstop if a real provision proves
+// serve is off.
 
 /** Tailscale admin DNS page — where MagicDNS + HTTPS certificates live. */
 const DNS_ADMIN_URL = "https://login.tailscale.com/admin/dns";

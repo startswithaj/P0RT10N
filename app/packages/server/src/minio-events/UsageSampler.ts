@@ -13,7 +13,6 @@ export interface UsageStore {
   ): Promise<void>;
 }
 
-// ============================================================================
 // Writes the usage samples the dashboard reads (`mc du` per active friend →
 // one `usage` row). Three triggers, wired in main.ts:
 //   1. boot          — the dashboard is never empty after a restart
@@ -21,7 +20,6 @@ export interface UsageStore {
 //   3. audit-driven  — 30s of quiet after a friend's last audit event, so a
 //      finished backup shows up in ~30s without running `mc du` mid-upload
 // Sampling is best-effort: a failure logs and skips; the next trigger retries.
-// ============================================================================
 
 /** Trailing debounce: sample this long after a friend's LAST audit event. */
 const ACTIVITY_DEBOUNCE_MS = 30_000;

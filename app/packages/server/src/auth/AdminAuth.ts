@@ -1,11 +1,7 @@
-// ============================================================================
-// Optional single-admin auth for the admin surface. Credentials come from env
-// (P0RT1ON_ADMIN_USERNAME/_PASSWORD); the password is hashed ONCE at boot (PBKDF2
-// via Web Crypto — zero deps) and the plaintext is never retained. Sessions are
-// random opaque tokens held in-memory (a manager restart = re-login, fine for a
-// single admin). When disabled every request is allowed — the boot guard
-// forbids a non-loopback bind in that case.
-// ============================================================================
+// Optional single-admin auth. Creds come from env (P0RT1ON_ADMIN_USERNAME/
+// _PASSWORD); password is hashed once at boot (SHA-256 via Web Crypto), plaintext
+// never retained. Sessions are random opaque tokens held in memory (restart =
+// re-login). Disabled → every request allowed; boot guard forbids non-loopback bind then.
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 

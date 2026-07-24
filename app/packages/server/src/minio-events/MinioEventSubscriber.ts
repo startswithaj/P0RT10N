@@ -1,10 +1,8 @@
 import type { Logger } from "../services/types.ts";
 
-// ============================================================================
-// One MinIO-event-bus subscription: a bounded ring buffer feeding a parked-
-// until-pushed async generator. Overflow drops the OLDEST event so a slow/
-// stalled consumer never back-pressures the publisher — it only loses its tail.
-// ============================================================================
+// One bus subscription: a bounded ring buffer feeding a parked-until-pushed
+// async generator. Overflow drops the OLDEST event so a slow consumer never
+// back-pressures the publisher — it only loses its tail.
 
 /** Rate-limit overflow warnings: log the 1st drop, then every Nth. */
 const DROP_LOG_EVERY = 1000;
@@ -51,10 +49,9 @@ export class MinioEventSubscriber {
     w?.();
   }
 
-  // Producer generator: yield each buffered event; hasNext() parks when the
-  // queue is empty and returns false once closed-and-drained. The subscription
-  // IS a live, unbounded stream — no collection to map over (same sanctioned
-  // case as JobService's consumer).
+  // Producer generator: yield each buffered event; hasNext() parks when empty,
+  // returns false once closed-and-drained. A live unbounded stream — no
+  // collection to map over.
   async *stream(): AsyncGenerator<unknown> {
     // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
     while (await this.hasNext()) {

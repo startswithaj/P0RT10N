@@ -11,13 +11,10 @@ const MIGRATIONS_FOLDER = fileURLToPath(
   new URL("../../../../../drizzle", import.meta.url),
 );
 
-/**
- * Apply generated Drizzle migrations directly via @db/sqlite. Tracks applied
+/** Apply generated Drizzle migrations directly via @db/sqlite. Tracks applied
  * migrations by hash (not timestamp — @db/sqlite v0.12 truncates integers
- * > 2^31, which historically re-populated the journal every boot). Both the app
- * boot path and the tests call this, so there is one source of truth. (Ported
- * from chargeHA.)
- */
+ * > 2^31, re-populating the journal every boot). One source of truth for boot
+ * and tests. */
 export function runMigrations(sqlite: DatabaseDriver, logger?: Logger): void {
   applyMigrations(
     sqlite,

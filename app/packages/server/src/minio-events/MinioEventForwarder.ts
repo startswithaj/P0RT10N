@@ -1,15 +1,10 @@
 import type { Logger } from "../services/types.ts";
 import type { MinioEventSubscription } from "./MinioEventSubscription.ts";
 
-// ============================================================================
 // Forwards every raw MinIO event to the operator's webhook, byte-compatible
-// with what MinIO delivers: one event per POST, `application/json`, the
-// configured auth header verbatim. Best-effort — a failed delivery is retried
-// (bounded) then logged, never blocks the bus (its own bounded queue drops the
-// oldest under sustained back-pressure). Mirrors MinIO's own webhook client
-// defaults (max_retry=5, retry_interval=1s, http_timeout=5s) so the forward
-// leg behaves like the one feeding us.
-// ============================================================================
+// with MinIO: one event per POST, `application/json`, auth header verbatim.
+// Best-effort — bounded retry then log, never blocks the bus. Mirrors MinIO's
+// webhook client defaults (max_retry=5, retry_interval=1s, http_timeout=5s).
 
 const DEFAULTS = { maxRetry: 5, retryIntervalMs: 1000, timeoutMs: 5000 };
 

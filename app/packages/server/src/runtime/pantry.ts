@@ -1,13 +1,11 @@
 import { isAbsolute, join, relative, SEPARATOR } from "@std/path";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// ============================================================================
-// The pantry: the one admin-chosen host directory that holds every friend's
-// MinIO data, one subdirectory per instance ($PANTRY/<instance>). Tailscale
-// node state deliberately lives elsewhere (a docker named volume) — the pantry
-// is friend backup data only, so `du -sh $PANTRY/*` is true per-friend usage.
-// Docker-runtime only; nothing above the InstanceRuntime seam knows it exists.
-// ============================================================================
+// The pantry: one admin-chosen host directory holding every friend's MinIO
+// data, one subdir per instance ($PANTRY/<instance>). Tailscale node state
+// lives elsewhere (docker named volume), so `du -sh $PANTRY/*` is true
+// per-friend usage. Docker-runtime only; nothing above the InstanceRuntime
+// seam knows it exists.
 
 export interface Pantry {
   /** Absolute host path bind-mounted at /data for this instance. */

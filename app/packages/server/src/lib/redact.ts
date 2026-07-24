@@ -1,11 +1,7 @@
-// ============================================================================
 // Secret redaction for error messages built from shell commands. Two layers:
-// callers DECLARE known secret values (masked wherever they occur, including
-// inside key=value args and tool stderr), and argv after `--` (the
-// conventional position for trailing credentials) is structurally omitted so
-// even an undeclared future secret can't leak. Shared by McShellClient;
-// PRD 1.3 reuses it for docker/TS_AUTHKEY handling.
-// ============================================================================
+// callers DECLARE known secret values (masked wherever they occur), and argv
+// after `--` is structurally omitted so even an undeclared secret can't leak.
+// Shared by McShellClient and docker/TS_AUTHKEY handling.
 
 /** Replace every occurrence of each declared secret in `text`. */
 export function maskSecrets(text: string, secrets: string[]): string {

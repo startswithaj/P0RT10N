@@ -30,10 +30,8 @@ import { ProvisioningService } from "../provisioning/ProvisioningService.ts";
 import type { Logger, SystemHealthService } from "../services/types.ts";
 import type { AddFriendInput, SystemHealth } from "@p0rt1on/shared/domain";
 
-// ============================================================================
-// Central test mocks. Every mock records into a shared `Calls` log so tests can
-// assert ordering across deps. Import these; do not redefine mocks inline.
-// ============================================================================
+// Central test mocks. Each records into a shared `Calls` log so tests can
+// assert ordering across deps. Import these; never redefine mocks inline.
 
 /** Ordered log of operations performed across all mocked deps. */
 export type Calls = string[];

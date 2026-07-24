@@ -2,11 +2,8 @@ import { isAbsolute, relative, resolve } from "@std/path";
 import type { LogLevel } from "../services/types.ts";
 import type { ProvisioningConfig } from "../provisioning/deps.ts";
 
-// ============================================================================
-// The single place every environment variable is read. Construct once at boot
-// (`new Env()`); pass it where config is needed. Tests inject a fake source, so
-// nothing else in the app touches `Deno.env` directly.
-// ============================================================================
+// The single place every env var is read. Construct once at boot; pass where needed.
+// Tests inject a fake source, so nothing else touches `Deno.env` directly.
 
 /**
  * Every setting p0rt1on can be configured with. A name that is not here is not

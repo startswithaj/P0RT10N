@@ -1,10 +1,8 @@
-// ============================================================================
-// Tailscale API wrapper — the manager owns friend enrollment programmatically:
-// mint a pre-authorized, single-use, pre-tagged auth key; revoke the node and
-// key on offboard; keep ACLs scoping each friend's tag to only its endpoint.
-// The API access token is supplied via env / mounted secret, never persisted.
-// Friends never get a user seat — only a tagged node (see PLAN §Connectivity).
-// ============================================================================
+// Tailscale API wrapper — the manager owns friend enrollment: mint a
+// pre-authorized, single-use, pre-tagged auth key; revoke node + key on
+// offboard; keep ACLs scoping each friend's tag to only its endpoint. Access
+// token via env/mounted secret, never persisted. Friends get a tagged node,
+// not a user seat.
 
 /** A minted auth key. `key` is the secret, returned ONCE for the friend bundle. */
 export interface MintedAuthKey {

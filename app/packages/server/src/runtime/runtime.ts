@@ -1,13 +1,10 @@
 import type { S3Credential } from "../minio/mc.ts";
 
-// ============================================================================
-// Container lifecycle — start/stop/remove the per-instance container. Each
-// instance is ONE container running MinIO + tailscaled together (see
+// Container lifecycle for the per-instance container (MinIO + tailscaled, see
 // `instance/`). Runtime-agnostic (Docker/Podman/etc.) behind one interface. All
 // "ensure" methods are IDEMPOTENT and keyed on container name: re-running adopts
 // the existing container rather than starting a second, so a crash mid-provision
 // is safe to retry and the shared pool is started at most once.
-// ============================================================================
 
 /** Lifecycle state of a container, as the runtime reports it. */
 export type ContainerState = "running" | "stopped" | "absent";

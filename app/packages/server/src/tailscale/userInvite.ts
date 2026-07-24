@@ -1,11 +1,8 @@
-// ============================================================================
-// User-invite onboarding — the OPTIONAL half of friend enrollment. Unlike the
-// TailscaleApi (auth keys, ACL, nodes) this needs a USER-OWNED personal API
-// token: OAuth clients are tailnet-owned and Tailscale refuses invite creation
-// for them ("operation only permitted for user-owned keys"). So this is a
-// separate interface with its own credential, injected only when the token is
-// configured — absent, the manager falls back to manual console instructions.
-// ============================================================================
+// User-invite onboarding — the OPTIONAL half of friend enrollment. Needs a
+// USER-OWNED personal API token (OAuth clients are tailnet-owned and Tailscale
+// refuses invite creation for them: "operation only permitted for user-owned
+// keys"). Separate interface + credential, injected only when the token is
+// configured; absent → manual console-instruction fallback.
 
 /** A tailnet user-invite (subset we act on). `inviteUrl` is not a secret. */
 export interface UserInvite {

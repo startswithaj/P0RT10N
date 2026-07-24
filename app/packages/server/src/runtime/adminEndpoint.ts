@@ -1,14 +1,11 @@
 import { containerNames } from "./names.ts";
 import type { McTarget } from "../minio/mc.ts";
 
-// ============================================================================
-// SINGLE source of the admin-plane MinIO endpoint (mc: provisioning, smoke
-// test, du, webhook config). Two addressing modes, because published host
-// ports and `host.docker.internal` cannot coexist on Linux: a container
-// publishing to `127.0.0.1:<port>` is unreachable from another container via
-// the host gateway — so a containerized manager must address instances by
-// container NAME over the shared docker network instead.
-// ============================================================================
+// Single source of the admin-plane MinIO endpoint (mc: provisioning, smoke
+// test, du, webhook config). Two addressing modes: a container publishing
+// `127.0.0.1:<port>` is unreachable from another container via the host
+// gateway, so a containerized manager must address instances by container NAME
+// over the shared docker network.
 
 /**
  * `host` — the manager runs on the host and reaches the loopback-published

@@ -1,9 +1,6 @@
-// ============================================================================
-// Host-port probing for allocation. The DB only knows which ports IT handed
-// out — a foreign process squatting on an in-range port would otherwise make
-// allocation re-pick the same busy port forever. Injectable so repo tests
-// drive "busy" without real sockets.
-// ============================================================================
+// Host-port probing for allocation. The DB only knows ports IT handed out — a
+// foreign process squatting in-range would make allocation re-pick it forever.
+// Injectable so repo tests drive "busy" without real sockets.
 
 /** True when `port` can be bound (free) on the publish interface. */
 export type PortProbe = (port: number) => boolean;

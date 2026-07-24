@@ -5,14 +5,10 @@ import {
   subscription,
 } from "./MinioEventSubscription.ts";
 
-// ============================================================================
-// In-memory fan-out bus. One publisher (the webhook sink), N independent
-// subscribers (aggregator, sampler, forwarder). Publish is synchronous and
-// non-blocking: a slow/stalled subscriber can never back-pressure ingestion or
-// starve the others (see MinioEventSubscriber). The bus carries the RAW MinIO
-// payload untouched — the forwarder ships it through as-is; metrics consumers
-// parse on read.
-// ============================================================================
+// In-memory fan-out bus: one publisher (webhook sink), N subscribers
+// (aggregator, sampler, forwarder). Publish is sync + non-blocking — a stalled
+// subscriber never back-pressures ingest. Carries the RAW payload untouched;
+// consumers parse on read.
 
 /** Per-subscriber queue depth; overflow drops the oldest event. */
 const DEFAULT_CAPACITY = 1000;

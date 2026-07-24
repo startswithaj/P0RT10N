@@ -2,14 +2,10 @@ import { createHmac } from "node:crypto";
 import type { S3Credential } from "../minio/mc.ts";
 import type { KeyGen } from "./deps.ts";
 
-// ============================================================================
-// Credential generator. Friend S3 keys are random (CSPRNG); MinIO root creds are
-// DERIVED from a master key + instance host (HMAC-SHA256), so the same instance
-// always yields the same root credential — stable across container recreations
-// and recoverable after a manager wipe, without storing any per-instance secret.
-// The master key is the one secret to protect (env → K8s secret / mounted file).
-// Both alphabets divide 256 evenly (32, 64), so the byte→char map is unbiased.
-// ============================================================================
+// Friend S3 keys are random (CSPRNG); root creds are HMAC-SHA256-derived from
+// master key + instance host, so an instance always yields the same root cred —
+// stable across recreation, recoverable after a wipe, nothing per-instance stored.
+// Alphabets (32/64) divide 256 evenly → unbiased byte→char map.
 
 /** Access key ID: base32-ish, MinIO/AWS-style (uppercase, no ambiguous 0/1/8/9). */
 const ACCESS_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // 32 chars

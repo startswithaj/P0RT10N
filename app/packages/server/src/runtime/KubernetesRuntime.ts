@@ -20,15 +20,11 @@ import type { Pod } from "@cloudydeno/kubernetes-apis/core/v1";
 import type { StatefulSet } from "@cloudydeno/kubernetes-apis/apps/v1";
 import { toQuantity } from "@cloudydeno/kubernetes-apis/common.ts";
 
-// ============================================================================
-// InstanceRuntime over the Kubernetes API via the typed @cloudydeno client.
-// One instance = StatefulSet(1 replica) + Service + Secret + 2 PVCs, all in
-// ONE namespace, all labelled `p0rt1on=1`. Least privilege by construction:
-// tailscaled runs userspace (TS_USERSPACE=true, no capabilities/devices) so
-// the namespace can enforce PSA `restricted`; instance pods never get an API
-// token. Manager RBAC is a single namespace-scoped Role. Suspend = scale to 0
-// (kubelet owns restarts, so there is no docker-style `stop`).
-// ============================================================================
+// InstanceRuntime over the k8s API via the typed @cloudydeno client. One
+// instance = StatefulSet(1) + Service + Secret + 2 PVCs, one namespace, all
+// labelled `p0rt1on=1`. Least privilege: tailscaled runs userspace (no
+// caps/devices) so the ns enforces PSA `restricted`; instance pods get no API
+// token; manager RBAC is one ns-scoped Role. Suspend = scale to 0.
 
 export interface KubeConfig {
   namespace: string;

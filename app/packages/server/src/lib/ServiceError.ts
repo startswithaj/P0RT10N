@@ -3,7 +3,7 @@ import type { TRPC_ERROR_CODE_KEY } from "@trpc/server/rpc";
 /**
  * Transport-agnostic domain error. Services throw these; the tRPC
  * errorMiddleware maps `.code` straight onto a TRPCError so routers carry no
- * try/catch and services never import anything tRPC-specific. (chargeHA pattern.)
+ * try/catch and services never import anything tRPC-specific.
  */
 export class ServiceError extends Error {
   readonly code: TRPC_ERROR_CODE_KEY;

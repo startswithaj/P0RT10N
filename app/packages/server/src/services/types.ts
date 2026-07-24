@@ -18,12 +18,9 @@ import type {
 import type { InstanceDiagnostics } from "../runtime/runtime.ts";
 import type { ProgressEvent } from "../lib/progress.ts";
 
-// ============================================================================
-// Service contracts the tRPC routers depend on. Routers stay thin: they
-// validate input (zod) and delegate to one of these. Implementations live
-// elsewhere (FriendService, ProvisioningService, …) and are injected via
-// TrpcContext, so routers carry no business logic and tests can mock them.
-// ============================================================================
+// Service contracts the tRPC routers depend on. Routers stay thin: validate
+// input (zod) and delegate. Implementations are injected via TrpcContext, so
+// routers carry no business logic and tests can mock them.
 
 /** Read + lightweight mutate over existing friends. */
 export interface FriendService {

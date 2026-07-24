@@ -8,12 +8,9 @@ import type { Logger } from "../services/types.ts";
 import type { MinioEventSubscription } from "./MinioEventSubscription.ts";
 import type { FriendEvent } from "./resolveFriend.ts";
 
-// ============================================================================
 // Folds resolved MinIO events into the per-friend `activity` row (1:1, friendId
-// PK). Reads the friend-resolved stream — bucket→friend resolution and the
-// anti-poll filter already happened upstream (resolveFriend, piped in at the
-// call site). Local-only, single-writer, so a read-modify-write upsert is fine.
-// ============================================================================
+// PK). Upstream resolveFriend already did bucket→friend + anti-poll filtering.
+// Local-only single-writer, so read-modify-write upsert is fine.
 
 export class MinioEventAggregator {
   /** Resolves when the event stream ends (shutdown). The consumer starts

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ActivityServiceImpl } from "./queryServices.ts";
+import { ActivityServiceImpl } from "./ActivityService.ts";
 import { FriendQueries } from "../db/FriendQueries.ts";
 import { createTestDatabase } from "../test-helpers/testDb.ts";
 

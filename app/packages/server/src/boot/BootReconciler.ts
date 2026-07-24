@@ -2,15 +2,10 @@ import type { ContainerState, InstanceRuntime } from "../runtime/runtime.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import type { Logger } from "../services/types.ts";
 
-// ============================================================================
-// Boot-time container reconcile: the DB records which instances SHOULD exist;
-// the runtime is reality; this compares them once per boot (after the stale-
-// provisioning flip, before the listeners) so "restart the box" is a
-// non-event. It never DELETES containers, volumes, or data. It DOES recreate a
-// missing instance over its surviving data (delegated to the provisioning
-// layer) — an instance whose data is ALSO gone is marked failed, never
-// fabricated empty.
-// ============================================================================
+// Boot-time reconcile: DB says which instances SHOULD exist, runtime is
+// reality; compared once per boot. Never DELETES containers/volumes/data.
+// Recreates a missing instance over surviving data; if data is ALSO gone,
+// marks it failed rather than fabricating an empty instance.
 
 /** What happened to one instance during the reconcile. */
 type Outcome =

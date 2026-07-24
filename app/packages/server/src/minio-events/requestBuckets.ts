@@ -1,11 +1,7 @@
-// ============================================================================
-// Rolling 24h request counting via hourly buckets. The `activity` row keeps a
-// compact map of hour-epoch -> request count (at most ~25 entries per friend).
-// Writes bump the current hour and prune anything past the window; reads sum
-// the buckets still inside the window. Keeping the window on the *read* means
-// the count decays to zero as a friend goes idle, instead of freezing at its
-// last value (which is what a plain running counter did).
-// ============================================================================
+// Rolling 24h request counting via hourly buckets: a compact hour-epoch → count
+// map (~25 entries/friend). Writes bump the current hour + prune past the
+// window; reads sum in-window buckets. Windowing on read means the count decays
+// to zero as a friend idles, rather than freezing.
 
 /** hour-epoch (floor(ms / 1h), as a string key) -> request count in that hour. */
 export type RequestBuckets = Record<string, number>;

@@ -7,13 +7,9 @@ import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
 import type { FriendService, Logger } from "./types.ts";
 
-// ============================================================================
-// The friend-lifecycle orchestrator: reads friend detail through FriendQueries
-// but drives the external boundaries (`mc` for S3/quota, Tailscale for node
-// state + revocation) and persists status/quota/audit through the repo. Unlike
-// the thin query services in queryServices.ts, this one owns real side effects
-// and compensation logic, so it lives on its own.
-// ============================================================================
+// Friend-lifecycle orchestrator: reads detail via FriendQueries, drives the
+// external boundaries (mc, Tailscale), persists status/quota/audit via the repo.
+// Owns side effects + compensation (unlike the thin query services).
 
 export class FriendServiceImpl implements FriendService {
   constructor(
@@ -21,7 +17,7 @@ export class FriendServiceImpl implements FriendService {
     private readonly friendRepo: ProvisioningRepo,
     private readonly mc: McClientFactory,
     private readonly tailscale: TailscaleApi,
-    /** Endpoint scheme — must match how instances serve (see ProvisioningConfig). */
+    /** Endpoint scheme — must match how instances serve. */
     private readonly serveMode: "https" | "http",
     private readonly logger: Logger,
   ) {}
@@ -69,9 +65,8 @@ export class FriendServiceImpl implements FriendService {
     try {
       await this.revokeNodes(ctx.nodeTag, log);
     } catch (err) {
-      // The displayed status must match actual access: the revoke failed, so
-      // compensate by re-enabling the S3 user and stay `active`, surfacing
-      // the error. A retry re-runs both steps (each idempotent) and converges.
+      // Revoke failed: re-enable the S3 user and stay active so status matches real
+      // access; surface the error. Retry re-runs both idempotent steps and converges.
       log.error("node revoke failed; re-enabling S3 user to stay consistent", {
         error: String(err),
       });

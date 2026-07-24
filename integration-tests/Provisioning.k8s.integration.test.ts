@@ -21,11 +21,9 @@ import {
   DenoTempFiles,
 } from "../app/packages/server/src/lib/CommandRunner.ts";
 import { FriendServiceImpl } from "../app/packages/server/src/services/FriendService.ts";
-import {
-  ActivityServiceImpl,
-  AuditServiceImpl,
-  UsageServiceImpl,
-} from "../app/packages/server/src/services/queryServices.ts";
+import { ActivityServiceImpl } from "../app/packages/server/src/services/ActivityService.ts";
+import { AuditServiceImpl } from "../app/packages/server/src/services/AuditService.ts";
+import { UsageServiceImpl } from "../app/packages/server/src/services/UsageService.ts";
 import { RuntimeInventoryService } from "../app/packages/server/src/services/InventoryService.ts";
 import { JobService } from "../app/packages/server/src/jobs/JobService.ts";
 import { HeadscaleHttpApi } from "../app/packages/server/src/tailscale/HeadscaleHttpApi.ts";

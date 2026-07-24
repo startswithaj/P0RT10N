@@ -55,6 +55,7 @@
     "plugins": [
       "./devtools/lint/park-ui-idioms.ts",
       "./devtools/lint/one-component-per-file.ts",
+      "./devtools/lint/one-service-per-file.ts",
       "./devtools/lint/blank-line-around-multiline.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/expression-complexity.ts",
       "https://raw.githubusercontent.com/startswithaj/deno-lint-plugins/main/src/function-length.ts",

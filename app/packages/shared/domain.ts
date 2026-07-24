@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-// ============================================================================
-// p0rt1on shared domain — enums, primitives, and tRPC input schemas.
-// Single source of truth for both the Drizzle schema (server/src/db/Schema.ts,
-// which reuses the *_VALUES tuples for its text() enum columns) and the API.
-// ============================================================================
+// p0rt1on shared domain — enums, primitives, tRPC input schemas. Single source
+// of truth for the Drizzle schema (Schema.ts reuses the *_VALUES tuples for its
+// text() enum columns) and the API.
 
 // ---- Enums (as const tuples so Drizzle + zod share one definition) ----
 
@@ -120,9 +118,7 @@ const byteCountSchema: z.ZodNumber = z.number().int().positive();
 
 const retentionDaysSchema: z.ZodNumber = z.number().int().min(1).max(36500);
 
-// ============================================================================
 // tRPC input schemas (validated at the API boundary)
-// ============================================================================
 
 /** "Add friend" — drives the provisioning state machine. */
 export const addFriendInput: z.ZodObject<{
@@ -222,9 +218,7 @@ export const auditListInput: z.ZodObject<{
 
 export type AuditListInput = z.infer<typeof auditListInput>;
 
-// ============================================================================
 // API output shapes that are NOT 1:1 with a table
-// ============================================================================
 
 /**
  * The friend bundle — assembled in memory, returned ONCE, never persisted.
@@ -452,10 +446,8 @@ export type SystemHealth = {
   probedAt: string;
 };
 
-// ============================================================================
-// Router contract — the tRPC AppRouter implements this shape. Documented here
-// as a reference; tRPC infers the live types from the server implementation.
-// ============================================================================
+// Router contract — the tRPC AppRouter implements this shape. Documented as
+// reference; tRPC infers live types from the server impl.
 //
 //   friends.list      ()                         -> FriendListItem[]
 //   friends.get       (getFriendInput)           -> FriendDetail

@@ -1,11 +1,8 @@
 import { z } from "zod";
 
-// ============================================================================
-// Parse+validate a raw MinIO audit-webhook payload into the typed view OUR
-// consumers use (the aggregator's counting, the sampler's friend resolution).
-// THE single parse in the system. The forwarder never calls this — it ships
-// the raw payload untouched.
-// ============================================================================
+// Parse+validate a raw MinIO audit-webhook payload into the typed view
+// consumers use (aggregator counting, sampler friend resolution). The single
+// parse in the system; the forwarder ships raw, untouched.
 
 /** The fields we fold from a MinIO audit entry. */
 export interface MinioEvent {

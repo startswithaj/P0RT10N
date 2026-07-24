@@ -24,11 +24,9 @@ import { DenoCommandRunner, DenoTempFiles } from "./lib/CommandRunner.ts";
 import { denoPortProbe } from "./lib/net.ts";
 import type { Env } from "./lib/Env.ts";
 import { FriendServiceImpl } from "./services/FriendService.ts";
-import {
-  ActivityServiceImpl,
-  AuditServiceImpl,
-  UsageServiceImpl,
-} from "./services/queryServices.ts";
+import { ActivityServiceImpl } from "./services/ActivityService.ts";
+import { AuditServiceImpl } from "./services/AuditService.ts";
+import { UsageServiceImpl } from "./services/UsageService.ts";
 import { RuntimeInventoryService } from "./services/InventoryService.ts";
 import { TailnetSystemHealthService } from "./services/SystemHealthService.ts";
 import { JobService } from "./jobs/JobService.ts";
@@ -37,10 +35,8 @@ import { AdminAuth } from "./auth/AdminAuth.ts";
 import type { Logger } from "./services/types.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
 
-// ============================================================================
-// Dependency wiring. buildApp assembles the concrete services from a DB +
-// Env + logger. All env reads live on Env; nothing here touches Deno.env.
-// ============================================================================
+// Dependency wiring: buildApp assembles services from DB + Env + logger.
+// All env reads go through Env; nothing here touches Deno.env.
 
 /** Everything main.ts needs: the request context + the boot-only pieces. */
 export interface App {

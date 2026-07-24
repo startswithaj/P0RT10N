@@ -21,13 +21,9 @@ import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
-// ============================================================================
 // ContainerRuntime over the `docker` (or compatible) CLI. Each instance is ONE
-// container (MinIO + tailscaled, see `instance/`). Arg-building + idempotency are
-// unit-tested with a fake runner; real container lifecycle is verified by the
-// integration suite against a real engine. Every p0rt1on container carries a
-// `p0rt1on=1` label so `list()` (the reconcile sweep) and teardown can find them.
-// ============================================================================
+// container (MinIO + tailscaled). Every container carries a `p0rt1on=1` label
+// so `list()` (reconcile sweep) and teardown can find them.
 
 const LABEL = "p0rt1on=1";
 

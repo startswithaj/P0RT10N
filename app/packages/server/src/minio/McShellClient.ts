@@ -12,14 +12,11 @@ import type { LockMode } from "@p0rt1on/shared/domain";
 import { NotImplementedError, ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
-// ============================================================================
 // Real McClient: shells out to `mc` for one instance. Root creds ride a
 // per-call `MC_HOST_<alias>` env var (invisible in host `ps`, no `~/.mc`
-// state) — the factory derives them from the master key, so nothing here is
-// persisted. Arg-building + parsing are unit-tested with a fake runner; the
-// actual `mc` behaviour is verified by the integration suite against a real
-// MinIO container.
-// ============================================================================
+// state), factory-derived from the master key — nothing here persisted.
+// Arg-building + parsing unit-tested with a fake runner; real `mc` behaviour
+// verified by the integration suite.
 
 /** Least-privilege IAM policy: bucket-scoped CRUD, deny lock bypass. */
 function bucketScopedPolicy(bucket: string): string {
@@ -365,7 +362,7 @@ export class McShellClient implements McClient {
     return this.awaitReady(attemptsLeft - 1);
   }
 
-  /** Live tail — streaming; implemented in the integration phase. */
+  // TODO: implement the live tail (streaming trace).
   trace(_signal: AbortSignal): AsyncIterable<TraceEvent> {
     return {
       [Symbol.asyncIterator]() {

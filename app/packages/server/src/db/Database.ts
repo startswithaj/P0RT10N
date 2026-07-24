@@ -5,12 +5,9 @@ import {
 import { CompatDatabase } from "./SqliteCompat.ts";
 import type { DatabaseDriver } from "./driver.ts";
 
-// ============================================================================
-// Drizzle handle over @db/sqlite (via the better-sqlite3-compatible adapter).
-// `Db` is the typed query interface repositories use; `driver` is the low-level
-// handle for migrations / DDL bootstrap. Migrations run at boot (separate,
-// permissioned step); tests bootstrap the schema directly.
-// ============================================================================
+// Drizzle handle over @db/sqlite (better-sqlite3-compatible adapter). `Db` is
+// the typed query interface for repos; `driver` the low-level handle for
+// migrations/DDL. Migrations run at boot; tests bootstrap the schema directly.
 
 export type Db = BetterSQLite3Database;
 

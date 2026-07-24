@@ -4,12 +4,10 @@ import { ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets } from "../lib/redact.ts";
 import { mcHostEnv } from "../minio/McShellClient.ts";
 
-// ============================================================================
-// SmokeTester via `mc`, exercising the FRIEND's freshly-issued key end-to-end
-// (PutObject → GetObject → DeleteObject) against their bucket. Reuses the bundled
-// `mc` + the CommandRunner/TempFiles seams (no S3 SDK). MUST run before default
-// retention is armed, so the test object's delete isn't blocked by Object Lock.
-// ============================================================================
+// SmokeTester via `mc`: exercises the friend's new key end-to-end
+// (Put→Get→Delete) against their bucket, reusing bundled `mc` +
+// CommandRunner/TempFiles (no S3 SDK). MUST run before default retention is
+// armed, else the test object's delete is blocked by Object Lock.
 
 export class McSmokeTester implements SmokeTester {
   constructor(

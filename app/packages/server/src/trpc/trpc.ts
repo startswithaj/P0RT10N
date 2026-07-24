@@ -49,7 +49,6 @@ const t = initTRPC.context<TrpcContext>().create({
  * Maps domain errors to TRPCErrors so routers need no try/catch and services
  * stay transport-agnostic. In tRPC v11 next() returns a result rather than
  * throwing; when result.ok is false the original error is in result.error.cause.
- * (chargeHA pattern.)
  */
 const errorMiddleware = t.middleware(async ({ next }) => {
   const result = await next();

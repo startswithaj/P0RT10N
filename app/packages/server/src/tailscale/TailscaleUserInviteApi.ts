@@ -1,14 +1,10 @@
 import type { TailnetUser, UserInvite, UserInviteApi } from "./userInvite.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// ============================================================================
-// UserInviteApi over the Tailscale REST API v2. TailscaleApi's twin for
-// user-owned operations — same REST base, but the token is a PERSONAL API
-// token (`tskey-api-…`) used VERBATIM as Bearer, with no OAuth client-
-// credentials exchange (that exchange is exactly what the invite endpoint
-// rejects: "operation only permitted for user-owned keys"). fetch is injected
-// so requests are unit-testable.
-// ============================================================================
+// UserInviteApi over the Tailscale REST API v2 — TailscaleApi's twin for
+// user-owned ops. Token is a PERSONAL API token (`tskey-api-…`) used VERBATIM
+// as Bearer; no OAuth exchange (the invite endpoint rejects OAuth keys:
+// "operation only permitted for user-owned keys"). fetch injected for unit tests.
 
 const DEFAULT_BASE = "https://api.tailscale.com/api/v2";
 /** Least-privilege invite role; never an admin role. */

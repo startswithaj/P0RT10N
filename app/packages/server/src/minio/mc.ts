@@ -1,12 +1,10 @@
 import type { LockMode } from "@p0rt1on/shared/domain";
 
-// ============================================================================
-// `mc` (MinIO Client) admin wrapper — the only place that shells out to mc.
-// Every method targets one instance by `alias`. Root creds are derived from
-// the master key per call and ride a `MC_HOST_<alias>` env var (never argv,
-// never `~/.mc` state, never persisted) — keeping the no-secrets-in-DB /
-// zero-knowledge invariants and hiding secrets from host `ps`.
-// ============================================================================
+// `mc` admin wrapper — the only place that shells out to mc; every method
+// targets one instance by `alias`. Root creds are derived from the master key
+// per call and ride a `MC_HOST_<alias>` env var — never argv, `~/.mc` state, or
+// persisted — keeping no-secrets-in-DB / zero-knowledge invariants and hiding
+// secrets from host `ps`.
 
 /** One MinIO instance as an mc target (root creds derived per call). */
 export interface McTarget {

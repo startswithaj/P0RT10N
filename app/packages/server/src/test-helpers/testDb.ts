@@ -5,10 +5,8 @@ import type { RepoConfig } from "../db/ProvisioningRepo.ts";
 import type { FriendNaming } from "../provisioning/deps.ts";
 import type { AddFriendInput, IsolationMode } from "@p0rt1on/shared/domain";
 
-// ============================================================================
 // In-memory test database. Applies the SAME generated Drizzle migrations the
 // app runs at boot (no hand-written DDL) — one source of truth, no drift.
-// ============================================================================
 
 /** Open an in-memory DB with all migrations applied. Caller closes via `driver`. */
 export function createTestDatabase(): Database {

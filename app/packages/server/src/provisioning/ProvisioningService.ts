@@ -93,7 +93,7 @@ function kopiaCreateTail(retentionDays: number): string[] {
 
 /**
  * The "Add friend" state machine plus its destructive siblings. Pure
- * orchestration over injected deps — each PLAN provisioning step is one small
+ * orchestration over injected deps — each provisioning step is one small
  * helper, sequenced by `provision`. On any failure the friend row is flipped to
  * `failed` (recoverable by the cleanup sweep) and the error is rethrown.
  */
@@ -551,7 +551,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     yield { type: "done", result };
   }
 
-  // ---- provisioning steps (PLAN "Add friend" flow) ----
+  // ---- provisioning steps (add-friend flow) ----
 
   // Each helper yields its own step events (see PROVISION_STEPS) and, via yield*,
   // returns its result to the caller. Keys are explicit, so the order can change

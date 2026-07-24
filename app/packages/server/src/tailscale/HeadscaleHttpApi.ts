@@ -8,20 +8,11 @@ import type { FetchLike } from "./TailscaleHttpApi.ts";
 import { splitHostPort } from "./TailscaleHttpApi.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// ============================================================================
-// TailscaleApi over the HEADSCALE v1 REST API (self-hosted control server) —
-// the test-tier backend: a local headscale gives real tailscaled enrollment
-// and WireGuard transport with no Tailscale account. Differences from the
-// Tailscale API that shape this file:
-//   - plain API-key bearer (headscale apikeys create), no OAuth exchange;
-//   - preauth keys are USER-scoped and expire by key STRING, not id — revoke
-//     lists the user's keys and matches ours by id;
-//   - nodes report a real `online` boolean (no lastSeen heuristic);
-//   - the policy is a JSON string in the classic `acls` rule shape (headscale
-//     has no `grants` model) with no ETag — requires `policy.mode: database`.
-// NOT for production: headscale can't issue HTTPS certs, so `tailscale serve`
-// runs HTTP-only against it (WireGuard is the encryption on this path).
-// ============================================================================
+// TailscaleApi over the headscale v1 REST API — the test-tier backend (real
+// tailscaled + WireGuard, no Tailscale account). Diffs from Tailscale: plain
+// API-key bearer; USER-scoped preauth keys expired by string not id; real
+// online boolean; classic acls policy (no grants) requiring policy.mode:database,
+// no ETag. No HTTPS certs → serve is HTTP-only.
 
 export interface HeadscaleConfig {
   /** Headscale base URL, e.g. `http://headscale.p0rt1on.svc:8080`. */

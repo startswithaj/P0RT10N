@@ -1,9 +1,6 @@
-// ============================================================================
 // In-process FIFO mutex. Provisioning-mutating ops (add/offboard/rotate/sweep)
-// are serialized through one instance — intentional for a single-admin app:
-// it closes interleavings like reap-vs-add without distributed locking.
-// Read-only queries never go through it.
-// ============================================================================
+// serialize through one instance — single-admin app; closes interleavings like
+// reap-vs-add without distributed locking. Read-only queries bypass it.
 
 export class Mutex {
   private tail: Promise<void> = Promise.resolve();

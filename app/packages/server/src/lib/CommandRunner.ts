@@ -1,8 +1,5 @@
-// ============================================================================
 // Process + temp-file abstractions injected into shell-out wrappers (mc, docker)
-// so their argument-building and output-parsing are unit-testable with fakes (no
-// subprocess, no Docker). The Deno-backed impls are used in production / IT.
-// ============================================================================
+// so arg-building and output-parsing are unit-testable with fakes. Deno impls run in prod/IT.
 
 export interface CommandResult {
   code: number;

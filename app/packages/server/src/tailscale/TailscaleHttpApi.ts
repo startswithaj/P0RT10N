@@ -7,14 +7,11 @@ import type {
 import { ManualAclRequiredError, ServiceError } from "../lib/ServiceError.ts";
 import { manualAclInstructions } from "./manualAcl.ts";
 
-// ============================================================================
-// TailscaleApi over the Tailscale REST API v2 (no shell-out — uses fetch, which
-// is injected so requests are unit-testable). Covers the device + auth-key
-// lifecycle and per-friend ACL grants: each friend tag is granted access to
-// ONLY its endpoint (grant src=tag → dst=endpoint) and added to tagOwners so
-// its auth key can be minted. Policy edits use the ETag for optimistic
-// concurrency. The grant model is a sane default; tune to your policy shape.
-// ============================================================================
+// TailscaleApi over the Tailscale REST API v2 (fetch, injected for unit tests).
+// Device + auth-key lifecycle and per-friend ACL grants: each friend tag
+// granted access to ONLY its endpoint (grant src=tag → dst=endpoint) and added
+// to tagOwners so its auth key can be minted. Policy edits use the ETag for
+// optimistic concurrency.
 
 const DEFAULT_BASE = "https://api.tailscale.com/api/v2";
 /** A node seen within this window is treated as online (no realtime field). */
