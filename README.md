@@ -452,6 +452,25 @@ And two optional ones we've already covered:
 
 To run the manager locally for development, see [`DEV.md`](DEV.md).
 
+### Logging in
+
+No login by default. The admin API binds to `127.0.0.1`, so only this machine
+can reach it.
+
+To require a username and password, set both:
+
+```bash
+P0RT1ON_ADMIN_USERNAME=you
+P0RT1ON_ADMIN_PASSWORD=something-long
+```
+
+Set them if you move `P0RT1ON_ADMIN_BIND_HOST` off loopback or expose the port
+any other way. The manager warns at startup if it's bound wide with no password,
+though it can't see a container's host publish.
+
+The password is hashed at boot, plaintext dropped. Sessions are in-memory and
+last 7 days, so a restart logs you out.
+
 ## What your friends do
 
 Their end is just Tailscale and Kopia. They can run the commands directly, or
