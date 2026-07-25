@@ -1,345 +1,517 @@
 # P0RT1ON
 
-**An orchestrator + web UI for [MinIO](https://min.io) and
-[Tailscale](https://tailscale.com) that makes lending storage to your friends
-easy — and their backups immutable.**
+**Lend your mates a slice of your disk as an offsite S3 backup target they can't
+wreck.**
 
-> **Lend friends portions of your disk as ransomware-resistant, offsite S3
-> backup targets.** Self-hosted · Multi-tenant S3 · Over Tailscale ·
-> Zero-knowledge
+Self-hosted · Runs over Tailscale · Nothing on the public internet
 
 ## What it is
 
-Lend portions of your disk to friends as offsite backup targets, managed from a
-web UI. Each friend gets their **own S3 bucket** (their size cap, their access
-key) reachable **only** over their **own Tailscale endpoint** — and **Object
-Lock** keeps recent backups immutable even to whoever holds the friend's
-credentials.
+A web UI on top of [MinIO](https://min.io) and
+[Tailscale](https://tailscale.com). You add a friend in a form, and they get:
 
-Everything P0RT1ON does is doable by hand with `mc` and `tailscaled` — minting
-auth keys, provisioning MinIO, setting quotas and Object Lock, wiring up
-`tailscale serve`. P0RT1ON is the orchestration + UI on top, so adding a friend
-is a form instead of a runbook.
+- their own S3 bucket, with a size cap and their own access key
+- their own Tailscale endpoint — nobody else can reach it
+- Object Lock on recent backups, so even someone holding their key can't delete
+  or encrypt them
+
+You could do all of this by hand with `mc` and `tailscaled` — mint an auth key,
+provision MinIO, set the quota and Object Lock, wire up `tailscale serve`.
+P0RT1ON turns that into a GUI.
 
 ## Why it exists
 
-To run offsite backups for friends on a home server. Lend storage, hand over a
-credentials bundle, let each friend back up into a bucket only they can reach.
+I wanted to run offsite backups for friends off a home server. Lend them some
+disk, hand over a set of credentials, and let them get on with it.
 
-It's **zero-knowledge**: the server stores only the bytes a client uploads. If
-the friend encrypts client-side, you hold ciphertext you can't read — no
-encryption password ever exists server-side. The backup tool is the friend's
-choice (Kopia recommended; any S3 client works).
+You never see what they store. Your server only holds the bytes their client
+uploads — if they encrypt before sending (Kopia does by default), it's
+ciphertext you can't open. The password only ever exists on their machine.
+
+Kopia is the recommendation, but any S3 client works.
 
 ## How it works
 
-- **Per-friend isolation.** Each friend is a dedicated MinIO + tailscaled pair
-  (own endpoint, VPN-isolated), or shares one pool (buckets kept apart by MinIO
-  IAM + Tailscale ACLs). Both modes coexist in one install.
-- **Nothing exposed to the public internet.** Everything rides on Tailscale — no
-  open ports, no router forwarding, no exposed home IP. There's no public
-  endpoint to scan or attack.
-- **Enrollment, handled by the app — two ways.** _Auth key_ (default, headless):
-  the friend redeems a pre-authorized, single-use, pre-tagged key with
-  `tailscale up --authkey=…`, no Tailscale account needed. _Email invite_
-  (optional, needs a personal API token): P0RT1ON emails a Tailscale invite so
-  they join with their own account and devices. Either way, P0RT1ON mints,
-  scopes, and revokes access through the Tailscale API.
-- **Ransomware-resistant.** MinIO **Object Lock** (GOVERNANCE by default) keeps
-  recent objects immutable even to whoever holds the friend's credentials —
-  friend creds are explicitly denied lock bypass — so a compromised client can't
-  encrypt, tamper with, or wipe the backups. A **hard quota** caps each portion.
-  Host-disk cost is ~1:1 with the quota (MinIO single-drive mode, no erasure
-  parity) plus whatever locked-but-superseded object versions exist until their
-  retention expires — budget a little headroom above the quota.
-- **Zero-knowledge by construction.** Friend S3 secrets and Tailscale auth keys
-  exist only in request scope and are shown once in the UI — never written to
-  the DB, cache, or logs. The metadata DB (SQLite) holds no secrets; each
-  instance's MinIO root credential is **derived** from `P0RT1ON_MASTER_KEY`, not
-  stored.
-- **Full lifecycle from the dashboard.** Add · resize quota · rotate key ·
-  suspend / resume · offboard. Usage is sampled per bucket; activity comes from
-  MinIO audit webhooks POSTed back to the manager — no Prometheus, no agents on
-  the friend's side.
-- **Runs on any container runtime** — Docker, Podman, Kubernetes.
+**Each friend is isolated.** They get their own MinIO + tailscaled pair, on
+their own endpoint. Or they can share one pool, where MinIO credentials and
+Tailscale ACLs keep the buckets apart. Both work in the same install.
 
-## Requirements
+**Nothing is exposed to the internet.** It all runs over Tailscale — no open
+ports, no port forwarding, no home IP out in the open. There's nothing public to
+scan or attack.
 
-- A container runtime (Docker/Podman/k8s) — the manager launches the combined
-  MinIO + tailscaled instance image per friend.
-- A Tailscale account + API access (tailnet + OAuth client) to mint auth keys,
-  with **MagicDNS + HTTPS certificates enabled** on the tailnet — see
-  [Setup](#setup--tailscale-oauth-client).
-- Disk space for the sum of the portions you hand out — one filesystem is fine;
-  quotas keep friends apart.
-- A volume for the manager's SQLite DB (metadata only, no secrets).
+**Two ways to get them on.** By default they redeem a single-use auth key with
+`tailscale up --authkey=…` and don't need a Tailscale account at all. Or, if you
+set a personal API token, P0RT1ON emails them a Tailscale invite and they join
+with their own account. Either way P0RT1ON creates, scopes and revokes the
+access for you.
 
-### Details
+**Backups can't be wiped.** MinIO Object Lock (GOVERNANCE) keeps recent objects
+immutable, and friend credentials are explicitly denied the ability to bypass
+it. So if their machine gets ransomwared, the attacker can't encrypt, change or
+delete what's already backed up.
 
-- **No dedicated disk.** Each per-friend MinIO runs single-node single-drive
-  (`minio server /data`); `/data` is a **directory on a volume** (named volume,
-  host path, or PVC), not a raw device. Portions are sized by **hard quota**,
-  not partitioning, so friends share one filesystem.
-- **Metadata only.** The manager's SQLite DB holds no secrets — friend bundles
-  are shown once and never persisted.
-- **Back up the master key.** `P0RT1ON_MASTER_KEY` deterministically derives
-  every instance's root credential, so it must be **stable and backed up**: lose
-  or change it and you lose admin access to every instance. Keep it in a secret
-  manager; never commit it.
+**You can't read their data.** Their S3 secret and Tailscale auth key only exist
+while the request is running — shown once in the UI, never written to the
+database, cache or logs. The database holds metadata only. Each instance's MinIO
+root password is derived from `P0RT1ON_MASTER_KEY` rather than stored anywhere.
 
-## Quick start (manager)
+**Everything from the dashboard.** Add, resize, rotate a key, suspend, resume,
+offboard. Usage is sampled per bucket and activity comes from MinIO audit
+webhooks posted back to the manager — no Prometheus, and nothing to install on
+the friend's machine.
+
+**Runs anywhere.** Docker, Podman or Kubernetes.
+
+## What you need
+
+- **A container runtime** — Docker, Podman or Kubernetes. The manager launches
+  one MinIO + tailscaled container per friend.
+- **A Tailscale account with API access** (a tailnet and an OAuth client) — see
+  [Setting up Tailscale](#setting-up-tailscale).
+- **Disk space** for everything you hand out. One filesystem is fine. Each MinIO
+  runs single-drive against a directory on a volume (a named volume, host path
+  or PVC — not a raw device), and portions are capped by quota rather than
+  partitioning, so friends can share the same disk.
+- **A volume for the manager's database.** SQLite, metadata only, no secrets in
+  it.
+
+**Budget a bit more disk than you hand out.** Space used is roughly 1:1 with the
+quota — MinIO runs single-drive with no erasure parity — plus any locked
+versions of objects that have been superseded but haven't hit their retention
+expiry yet.
+
+**Back up your master key.** `P0RT1ON_MASTER_KEY` derives the root password for
+every instance, so it has to stay the same. Lose it or change it and you lose
+admin access to every instance you've created. Keep it in a password manager,
+and never commit it.
+
+## Quick start
 
 ```bash
-cp .env.example .env   # fill in the required values; everything else has a default
+cp .env.example .env   # fill in the required values, the rest have defaults
 docker compose up
 ```
 
-- Admin UI: `http://127.0.0.1:5173` (dev; the admin API binds loopback-only on
-  `:8080` — it is never exposed to friends or the tailnet).
-- The manager needs the Docker socket mounted (it launches instance containers)
-  and two volumes: the metadata DB and `mc` aliases. The provided
-  `docker-compose.yml` wires all of this, including the audit-webhook path from
-  instances back to the manager.
-- A handful of settings are required — the master key, the OAuth client secret,
-  the OAuth client's tag, and the pantry (where friend data is stored). The
-  manager refuses to start without them (no stubs, no degraded mode);
-  `.env.example` explains each one.
+The admin UI is at `http://127.0.0.1:5173`. The API binds to loopback only on
+`:8080` — friends never reach it, and neither does the tailnet.
 
-## Setup — Tailscale OAuth client
+The manager needs the Docker socket mounted, since it launches the instance
+containers, plus two volumes: one for the database and one for `mc` aliases. The
+included `docker-compose.yml` sets all that up, including the path audit
+webhooks take from the instances back to the manager.
 
-P0RT1ON calls the Tailscale API on **every** add / suspend / offboard (mint the
-friend's auth key, scope its ACL, delete its node). Give it a least-privilege,
-long-lived **OAuth client** rather than a personal API token (those are
-full-access and expire in ≤90 days). The Tailscale API **cannot** create OAuth
-clients, so this is a one-time manual step in the admin console.
+Four settings are required and the manager won't start without them — it won't
+fall back to defaults or run half-configured. They're the master key, the OAuth
+client secret, the OAuth client's tag, and the pantry (where friend data lives).
+`.env.example` explains each one.
 
-### Prerequisite: enable MagicDNS + HTTPS certificates
+## Running on Kubernetes
 
-Each instance publishes its MinIO over the tailnet via `tailscale serve` with
-HTTPS (`--https=443`), which needs your tailnet to issue TLS certificates. That
-feature is **off by default**, and the Tailscale API can neither turn it on nor
-even report whether it's on — so enable it once, by hand, in the admin console:
+The manager can run in-cluster and provision each portion as a StatefulSet
+instead of a Docker container. Everything lives in one namespace, and the
+manager only gets permissions inside it.
 
-1. Admin console → **DNS**.
-2. Enable **MagicDNS** (if it isn't already).
-3. Under **HTTPS Certificates**, click **Enable HTTPS**.
+Images are published to GHCR on release:
 
-These are two separate switches: MagicDNS is the prerequisite, HTTPS is a second
-toggle on top of it — turning on MagicDNS alone is **not** enough. Skip this and
-every provision fails its health check with _"Serve is not enabled on your
-tailnet."_
+```
+ghcr.io/startswithj/p0rt1on-manager
+ghcr.io/startswithj/p0rt1on-instance
+```
 
-> **No cert issuance? (e.g. headscale).** If your control plane can't mint
-> certs, set `P0RT1ON_TAILSCALE_SERVE_MODE=http`: MinIO is served as plain HTTP
-> over the (already encrypted) tailnet instead of HTTPS.
+### The pantry
 
-### Concepts
+The pantry is where friend data lands. On Kubernetes it's a StorageClass — each
+time you add a friend, the manager creates a PVC for their data from it. Set it
+with `P0RT1ON_PANTRY`.
 
-- **OAuth client** — a Tailscale credential (id + secret), created in step 2.
-  The manager reads its secret from `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET` to
-  authenticate API calls. The credential, not the manager.
-- **`tag:p0rt1on`** — the OAuth client's identity tag; owns and mints the
-  others. You create it (step 1).
-- **`tag:p0rt1on-serve`** — worn by each MinIO instance's tailscaled serve node.
-  Manager declares it (owned by `tag:p0rt1on`) at provision time.
-- **`tag:p0rt1on-friend-<name>`** — worn by each friend's node. Manager declares
-  one per friend at provision time.
+Any `ReadWriteOnce` class works, as long as it provisions dynamically. If it
+can't, every new friend sits Pending until you hand-write a PV for them. Worth
+knowing if you're using local disk: core Kubernetes can mount a directory on a
+node, but nothing in it creates those volumes for you. You need a provisioner —
+Rancher's local-path is the simplest, or TopoLVM if you want LVM-backed volumes
+with real size limits.
 
-The friend and serve tags namespace the connection: the ACL is written as
-`src: tag:p0rt1on-friend-alice → dst: alice's serve node`, so a friend's node
-can open a tailnet connection to only its own instance — not the manager, not
-other friends' instances. The tag is the identity the ACL matches on; without it
-a node is unscoped. Auth keys are minted pre-tagged, so a friend's node wears
-its tag from the moment it joins.
+Note `reclaimPolicy`: offboarding a friend deletes their volume, so with
+`Delete` the data goes too. Use `Retain` if you want that reversible.
 
-### 1. Create the tags
+Use a dedicated class, not your general-purpose one. The pantry is friend data
+only — the manager's own database sits on a separate PVC from the cluster
+default class.
 
-The OAuth client's identity tag must exist in the policy before the OAuth client
-can own or use it.
+### The manifest
 
-**Access Controls → `Tags` (right-hand panel) → Create Tag**, once:
+```yaml
+# The pantry: a directory-per-volume class using Rancher's local-path
+# provisioner. Install it first if your cluster doesn't have it. The directory
+# it writes to is set in the provisioner's own local-path-config ConfigMap.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: p0rt1on-pantry
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+# These volumes are node-local, so bind only once a pod needs one — it has to
+# land on whichever node runs that portion.
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: p0rt1on
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+---
+# The manager's entire permission surface. Nothing cluster-scoped, no RBAC
+# verbs, powerless outside this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets", "persistentvolumeclaims"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: p0rt1on-manager
+subjects:
+  - kind: ServiceAccount
+    name: p0rt1on-manager
+    namespace: p0rt1on
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: p0rt1on-manager-secrets
+  namespace: p0rt1on
+stringData:
+  P0RT1ON_MASTER_KEY: "..."
+  P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "..."
+  P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: p0rt1on-manager-data
+  namespace: p0rt1on
+spec:
+  # No storageClassName on purpose: the manager's database uses the cluster
+  # default, never the pantry. The pantry holds friend data only.
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: p0rt1on-manager }
+  template:
+    metadata:
+      labels: { app: p0rt1on-manager }
+    spec:
+      serviceAccountName: p0rt1on-manager
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: manager
+          image: ghcr.io/startswithj/p0rt1on-manager:latest
+          envFrom:
+            - secretRef: { name: p0rt1on-manager-secrets }
+          env:
+            - name: P0RT1ON_RUNTIME
+              value: kubernetes
+            - name: P0RT1ON_K8S_NAMESPACE
+              value: p0rt1on
+            - name: P0RT1ON_INSTANCE_IMAGE
+              value: ghcr.io/startswithj/p0rt1on-instance:latest
+            - name: P0RT1ON_PANTRY
+              value: p0rt1on-pantry
+            - name: P0RT1ON_DB_PATH
+              value: /data/p0rt1on.db
+            # Deno reads this PEM to trust the cluster CA on API calls.
+            - name: DENO_CERT
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          ports:
+            - containerPort: 8080 # admin UI and API
+            - containerPort: 8081 # audit webhooks from the instances
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: p0rt1on-manager-data }
+---
+# Instances post audit events here. The admin API on 8080 is deliberately not
+# in this Service — port-forward to reach it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: p0rt1on-manager
+  namespace: p0rt1on
+spec:
+  selector: { app: p0rt1on-manager }
+  ports:
+    - name: audit
+      port: 8081
+      targetPort: 8081
+```
 
-| Tag name  | Tag owner         | Purpose                                                            |
-| --------- | ----------------- | ------------------------------------------------------------------ |
-| `p0rt1on` | `autogroup:admin` | the OAuth client's identity tag (so it can own + mint friend tags) |
+The admin API isn't meant to be exposed — no Ingress, no LoadBalancer. Port
+forward to it:
 
-**Save.** The serve tag (`tag:p0rt1on-serve`, worn by each MinIO instance's
-tailscaled serve node) and the per-friend tags (`tag:p0rt1on-friend-<name>`) are
-**not** created by hand — the app declares them in `tagOwners` at provision time
-(owned by `tag:p0rt1on`). The one exception is manual ACL mode
-(`P0RT1ON_TAILSCALE_ACL_MODE=manual`, step 3): with no policy-write access the
-app can't declare the serve tag, so create `p0rt1on-serve` (owner `tag:p0rt1on`)
-here too.
+```bash
+kubectl -n p0rt1on port-forward deploy/p0rt1on-manager 8080:8080
+```
+
+## Setting up Tailscale
+
+P0RT1ON calls the Tailscale API every time you add, suspend or offboard a friend
+— minting their auth key, scoping their ACL, deleting their node. Give it an
+OAuth client rather than a personal API token: personal tokens are full-access
+and expire within 90 days. You have to create it by hand in the admin console,
+since the API can't create OAuth clients.
+
+### HTTPS (recommended)
+
+By default each instance is served over HTTPS, which needs your tailnet to issue
+certificates. MagicDNS is on by default, certificates aren't:
+
+1. Admin console → **DNS**
+2. Under **HTTPS Certificates**, click **Enable HTTPS**
+
+If you'd rather not, set `P0RT1ON_TAILSCALE_SERVE_MODE=http` and instances are
+served as plain HTTP at their tailnet IP. Traffic is still encrypted — that's
+Tailscale doing it rather than TLS.
+
+Leave it on HTTPS if you can. Adding a friend will fail with _"Serve is not
+enabled on your tailnet"_ if certificates are off and you haven't switched to
+http mode.
+
+### The tags
+
+Tailscale identifies machines by tag, and the ACL is written in terms of them.
+There are three:
+
+- **`tag:p0rt1on`** — the OAuth client itself. You create this one by hand; it
+  owns and mints the rest.
+- **`tag:p0rt1on-serve`** — worn by each MinIO instance.
+- **`tag:p0rt1on-friend-<name>`** — worn by each friend's machine.
+
+P0RT1ON declares the last two itself when it provisions.
+
+The friend and serve tags are what keep everyone apart. Each friend's ACL rule
+reads `tag:p0rt1on-friend-alice → alice's instance`, so their machine can reach
+their own instance and nothing else — not the manager, not anyone else's
+instance. Auth keys are minted with the tag already on them, so a friend's
+machine has its identity from the moment it joins.
+
+### 1. Create the tag
+
+The OAuth client's tag has to exist in the policy before the client can use it.
+Admin console → **Access Controls** → **Tags** panel → **Create Tag**:
+
+| Tag       | Owner             |
+| --------- | ----------------- |
+| `p0rt1on` | `autogroup:admin` |
+
+That's the only one you make by hand. P0RT1ON declares the serve tag and each
+friend tag itself, owned by this one.
+
+(The exception is manual ACL mode — see step 3. With no policy write access
+P0RT1ON can't declare the serve tag, so create `p0rt1on-serve` here too, owned
+by `tag:p0rt1on`.)
 
 ### 2. Generate the OAuth client
 
-**Settings → `+ Credential` → OAuth Client.** Set **Policy File**, **Devices →
-Core**, and **Keys → Auth Keys** to **Write** (Write includes Read); set **DNS**
-and **Settings → Networking Settings** to **Read**; **Users** is an optional
-**Read** (see the note below); leave every other permission at **No access**.
-The rows below follow the console's own order — its **General** section holds
-DNS, Policy File, then Users, while Devices, Keys, and Settings are their own
-sections:
+**Settings** → **+ Credential** → **OAuth Client**. Set these, and leave
+everything else on **No access**:
 
-| Permission                         | Access    | Tag           | Why                                                            |
-| ---------------------------------- | --------- | ------------- | -------------------------------------------------------------- |
-| **DNS**                            | **Read**  | _(none)_      | read tailnet DNS preferences — MagicDNS on/off (`magicDNS`)    |
-| **Policy File**                    | **Write** | _(none)_      | read + edit the ACL (per-friend grant + tagOwners)             |
-| **Users** _(optional)_             | **Read**  | _(none)_      | detect when an email-invited friend accepts (status reconcile) |
-| **Devices → Core**                 | **Write** | `tag:p0rt1on` | list friend nodes (online state) + delete on suspend/offboard  |
-| **Keys → Auth Keys**               | **Write** | `tag:p0rt1on` | mint + revoke each friend's auth key                           |
-| **Settings → Networking Settings** | **Read**  | _(none)_      | read tailnet settings — HTTPS certs on/off (`httpsEnabled`)    |
+| Permission                     | Access | Tag           | What for                                                              |
+| ------------------------------ | ------ | ------------- | --------------------------------------------------------------------- |
+| DNS                            | Read   | —             | check whether MagicDNS is on                                          |
+| Policy File                    | Write  | —             | write each friend's ACL rule and the tags                             |
+| Users (optional)               | Read   | —             | spot when an emailed invite is accepted                               |
+| Devices → Core                 | Write  | `tag:p0rt1on` | see if friend machines are online, delete them on suspend or offboard |
+| Keys → Auth Keys               | Write  | `tag:p0rt1on` | mint and revoke friend auth keys                                      |
+| Settings → Networking Settings | Read   | —             | check whether HTTPS certificates are on                               |
 
-Tailscale requires a tag on **Devices → Core** and **Keys → Auth Keys** — set
-both to **`tag:p0rt1on`**; **Policy File**, **Users**, **DNS**, and **Networking
-Settings** take no tag. Then **Generate** and copy the **client secret** (shown
-once) → this is `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
+Write includes Read. Tailscale insists on a tag for **Devices → Core** and
+**Keys → Auth Keys** — use `tag:p0rt1on` for both. The rest take no tag.
+
+Hit **Generate** and copy the client secret. You only see it once. That's
+`P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET`.
 
 #### Email invites (optional)
 
-OAuth clients can't create Tailscale invites — Tailscale restricts invites to
-user-owned tokens. To send invites, set a personal token
-`P0RT1ON_TAILSCALE_API_TOKEN` (`tskey-api-…`). These tokens expire within 90
-days, but you only need a valid one at the moment you create the portion —
-that's when the invite is sent. It doesn't matter if it expires afterward. The
-optional **Users → Read** scope above lets the OAuth client detect when a friend
-accepts their invite; without it, P0RT1ON checks devices instead. Auth-key
-onboarding needs neither.
+By default a friend joins with an auth key P0RT1ON generates for them —
+single-use, already tagged, and they don't need a Tailscale account at all. If
+you'd rather invite them to your tailnet properly, so they join with their own
+account, you can do that instead.
 
-#### Security limitation on a shared tailnet
+The catch: OAuth clients can't create Tailscale invites, only user-owned tokens
+can. So set `P0RT1ON_TAILSCALE_API_TOKEN` to a personal token (`tskey-api-…`).
 
-The **Policy File → Write** permission is broad: Tailscale does not let you
-restrict _which_ ACL rules an OAuth client may create, so an OAuth client with
-it can edit the **entire** tailnet policy. If this secret is compromised, an
-attacker can write an ACL rule granting a P0RT1ON-generated key access to
-**any** machine on your tailnet. P0RT1ON only ever writes narrow per-friend
-rules, but Tailscale can't enforce that limit on the credential itself — so a
-stolen secret can change anything in the policy.
+These expire within 90 days, but it only has to be valid at the moment you
+create the portion, since that's when the invite goes out. It expiring
+afterwards doesn't matter.
 
-**Recommendation:** if you have other machines on this tailnet, run P0RT1ON on a
-**separate tailnet** (a separate Tailscale account). A fully compromised OAuth
-client can then only affect the P0RT1ON tailnet — your personal machines aren't
-on it at all. To share one tailnet instead, drop the Policy File permission and
-manage the ACL by hand (see step 3).
+The optional **Users → Read** scope lets P0RT1ON notice when a friend accepts.
+Without it, it watches for their device appearing instead. Auth-key onboarding
+needs neither.
 
-### 3. Notes on Policy File permission
+#### A warning if you share this tailnet
 
-With the **Policy File** permission (step 2), P0RT1ON writes each friend's grant
-automatically — skip to step 4.
+**Policy File → Write** is broader than it looks. Tailscale gives you no way to
+limit which ACL rules a client may write, so this credential can edit your whole
+policy. P0RT1ON only ever writes narrow per-friend rules, but nothing stops it
+doing more — and if the secret leaks, an attacker can write a rule granting
+access to any machine on your tailnet.
 
-If you do not grant Policy File write permission when generating your OAuth key,
-you will be prompted to manually add the required ACLs to Tailscale when
-creating a portion. Set `P0RT1ON_TAILSCALE_ACL_MODE=manual`, and on each add
-P0RT1ON shows you the exact grant lines instead of writing them, for you to
-paste into your policy. Two options:
+So if you have other machines on this tailnet, run P0RT1ON on a separate one (a
+separate Tailscale account). Then a stolen secret only reaches the P0RT1ON
+tailnet, and your own machines aren't on it.
 
-**One rule for all friends** — they reach only the P0RT1ON serve nodes, and are
-kept apart from each other by their MinIO credentials rather than the network:
+If you'd rather share the one tailnet, drop the Policy File permission and
+manage the ACL yourself — step 3.
+
+### 3. If you skipped the Policy File permission
+
+With Policy File write access, P0RT1ON writes each friend's ACL rule as you add
+them. Nothing to do — skip to step 4.
+
+Without it, set `P0RT1ON_TAILSCALE_ACL_MODE=manual`. Adding a friend then shows
+you the lines to paste into your policy instead of writing them. Two ways to do
+it:
+
+**One rule for everyone.** Friends can reach the P0RT1ON instances and nothing
+else, and are kept apart by their MinIO credentials rather than by the network:
 
 ```jsonc
 { "src": ["tag:p0rt1on-friend"], "dst": ["tag:p0rt1on-serve:443"] }
 ```
 
-**One rule per friend** — full network isolation between friends too:
+**One rule each.** Friends are isolated from each other on the network too:
 
 ```jsonc
 { "src": ["tag:p0rt1on-friend-alice"], "dst": ["alice.<tailnet>:443"] }
 ```
 
-You edit the policy by hand whenever friends change. In return, a leaked OAuth
-client can only mint friend-tagged keys — it can never open new access on its
-own.
+You're editing the policy by hand every time a friend comes or goes. What you
+get for it: a leaked OAuth client can only mint friend-tagged keys, and can
+never open up access on its own.
 
 ### 4. Environment
 
-Copy `.env.example` to `.env` (it's gitignored). Four values are required:
+Copy `.env.example` to `.env` — it's gitignored, and documents the settings
+worth knowing about. Four are required:
 
-- `P0RT1ON_MASTER_KEY` — the master key.
-- `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET` — the OAuth client secret from step 2
-  (the client secret, not a personal token).
-- `P0RT1ON_TAILSCALE_TAG_OWNER` — the OAuth client's tag from step 1,
-  `tag:p0rt1on`. New per-friend tags are created under it.
-- `P0RT1ON_PANTRY` — the disk path where friend data is stored.
+- `P0RT1ON_MASTER_KEY` — your master key
+- `P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET` — the client secret from step 2
+- `P0RT1ON_TAILSCALE_TAG_OWNER` — `tag:p0rt1on`, from step 1. New friend tags
+  get created under it.
+- `P0RT1ON_PANTRY` — where friend data goes
 
-Your tailnet's MagicDNS name is no longer configured — each friend's serve URL
-is read live from its node's FQDN via the Tailscale API.
+And two optional ones we've already covered:
 
-Two settings are optional:
+- `P0RT1ON_TAILSCALE_ACL_MODE=manual` — if you skipped Policy File write
+- `P0RT1ON_TAILSCALE_API_TOKEN` — if you want email invites
 
-- `P0RT1ON_TAILSCALE_ACL_MODE=manual` — set this if you dropped the Policy File
-  permission in step 3, so P0RT1ON surfaces ACL grants for you to paste instead
-  of writing them itself.
-- `P0RT1ON_TAILSCALE_API_TOKEN` — a `tskey-api-…` personal token that enables
-  email invites.
+To run the manager locally for development, see [`DEV.md`](DEV.md).
 
-Every setting is documented in `.env.example` itself. To run the manager locally
-for development, see [`DEV.md`](DEV.md).
+## What your friends do
 
-## How to be a client
+Their end is just Tailscale and Kopia. They can run the commands directly, or
+use the [`backup-client`](backup-client/) image that wraps both.
 
-If a friend set up a portion for you, backing up is just Tailscale + Kopia. Run
-the commands yourself, or use the [`backup-client`](backup-client/) image that
-wraps them.
+The bundle you give them has the S3 endpoint, bucket, access key and secret, and
+a Tailscale auth key. The one thing they choose themselves is `KOPIA_PASSWORD` —
+their encryption key. It never leaves their machine, and if they lose it their
+backups are gone. You can't help them; you only ever hold ciphertext.
 
-**From the bundle:** S3 endpoint, bucket, access key ID + secret, Tailscale auth
-key. **You choose:** a `KOPIA_PASSWORD` — your client-side encryption key. It
-never leaves your machine. **Lose it and your backups are unrecoverable.**
+### By hand
 
-### Without Docker
-
-Install [Tailscale](https://tailscale.com/download) and
-[Kopia](https://kopia.io/docs/installation/), then:
+With [Tailscale](https://tailscale.com/download) and
+[Kopia](https://kopia.io/docs/installation/) installed:
 
 ```bash
-# join your friend's tailnet
+# join the tailnet
 tailscale up --authkey=tskey-auth-xxxxxxxxxxxx
 
-# create the repo (first time only; --endpoint is host[:port], no scheme)
-export KOPIA_PASSWORD='choose-a-strong-passphrase'
+# create the repo — first time only. --endpoint is host[:port], no https://
+export KOPIA_PASSWORD='something-strong'
 kopia repository create s3 \
-  --bucket=you \
-  --endpoint=you.tailnet-xxxx.ts.net \
+  --bucket=alice \
+  --endpoint=alice.tailnet-xxxx.ts.net \
   --access-key=AKIAxxxxxxxxxxxx \
   --secret-access-key=xxxxxxxxxxxxxxxxxxxxxxxx \
   --retention-mode=GOVERNANCE --retention-period=30d
 
-# back up (incremental; repeat anytime, schedule however you like)
+# back up — incremental, run it as often as you like
 kopia snapshot create /my/data
 ```
 
-Later runs: `kopia repository connect s3 …` (same flags minus retention), then
-`kopia snapshot create`.
+Every run after that is `kopia repository connect s3 …` with the same flags
+minus retention, then `kopia snapshot create`.
 
 ### With Docker
 
-The image joins the tailnet, connects to (or creates) your repo, snapshots the
-mounted directory, and exits.
+The image joins the tailnet, connects to the repo (creating it if needed),
+snapshots the mounted directory, and exits.
 
 ```bash
-docker build -t p0rt1on-backup-client backup-client/
-cp backup-client/.env.example backup.env   # fill in bundle values + KOPIA_PASSWORD
+cp backup-client/.env.example backup.env   # bundle values + KOPIA_PASSWORD
 docker run --rm \
   --env-file backup.env \
   -v /my/data:/data:ro \   # -> BACKUP_PATH=/data
-  p0rt1on-backup-client
+  ghcr.io/startswithj/p0rt1on-backup-client:latest
 ```
 
-Optional: `-v p0rt1on-ts:/var/lib/tailscale` persists the tailnet node across
-runs (the auth key is single-use); `-v p0rt1on-cache:/cache` with
-`KOPIA_CACHE_DIRECTORY=/cache` speeds up repeat runs. See
-[`backup-client/README.md`](backup-client/README.md) for all options.
+Two volumes worth adding: `-v p0rt1on-ts:/var/lib/tailscale` keeps the tailnet
+machine between runs, since the auth key is single-use, and
+`-v p0rt1on-cache:/cache` with `KOPIA_CACHE_DIRECTORY=/cache` speeds up repeat
+runs. [`backup-client/README.md`](backup-client/README.md) has the rest.
 
 ## Under the hood
 
-- **Manager:** Deno + tRPC API, SolidJS SPA dashboard, SQLite (Drizzle) metadata
-  DB. Shells out to `mc` and `docker` — stock upstream images, pinned.
-- **Instance image:** one container running **both** MinIO and tailscaled,
-  published at `https://<name>.<tailnet>.ts.net` via `tailscale serve`.
-- **Activity:** MinIO audit webhooks → manager (`/internal/minio-events`),
-  aggregated into per-friend stats. Usage sampled via `mc du`. Set
-  `P0RT1ON_MINIO_FORWARD_URL` to also forward every event, byte-identical, to
-  your own webhook.
-
----
-
-See [`PLAN.md`](PLAN.md) for the full architecture and design rationale.
+- **Manager** — Deno, tRPC API, SolidJS dashboard, SQLite via Drizzle for
+  metadata. Shells out to `mc` and `docker`, both stock upstream images, pinned.
+- **Instance** — one container running MinIO and tailscaled together, published
+  at `https://<name>.<tailnet>.ts.net` by `tailscale serve`.
+- **Activity** — MinIO audit webhooks post to the manager on
+  `/internal/minio-events` and get aggregated per friend. Usage comes from
+  `mc du`. Set `P0RT1ON_MINIO_FORWARD_URL` to forward every event on to your own
+  webhook, byte for byte.
