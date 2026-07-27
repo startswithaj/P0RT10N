@@ -106,8 +106,11 @@ running container without starting a second", which needs no tailnet.)_
 ## 3 & 4. Kubernetes tiers — `run-integration.sh`
 
 Driven by **`integration-tests/run-integration.sh`**. The control plane is an
-**in-cluster headscale** (`integration-tests/headscale-integrationtest.yaml`),
-so **no Tailscale account or secrets are needed** — REAL images only.
+**in-cluster headscale**, so **no Tailscale account or secrets are needed** —
+REAL images only. Every test-only k8s object (headscale, the friend-client
+namespace + RBAC, the `p0rt1on-pantry` StorageClass) lives in
+`integration-tests/k8s-integrationtest.yaml`; the namespace, ServiceAccount and
+manager Role come from the shipped `deploy/k8s/p0rt1on.yaml`.
 
 - **tier1 — `KubernetesRuntime.integration.test.ts`** (host, as the manager
   ServiceAccount): apply → ready → scale → gated teardown, RBAC containment (the

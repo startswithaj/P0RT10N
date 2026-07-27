@@ -41,7 +41,7 @@ import { createTestDatabase } from "../app/packages/server/src/test-helpers/test
 // materialises in the cluster as a side effect — real router, real services,
 // real SQLite, real `mc` (bundled in the manager image), the real instance
 // image (tailscaled ENABLED) and the real KubernetesRuntime. ZERO mocks: an
-// in-cluster HEADSCALE control plane (integration-tests/headscale-integrationtest.yaml) makes the
+// in-cluster HEADSCALE control plane (integration-tests/k8s-integrationtest.yaml) makes the
 // tailnet real too — the preauth key is actually minted, the pod's userspace
 // tailscaled actually enrolls, and offboard actually deletes the node. What
 // this still can't prove: `tailscale serve` over HTTPS (headscale issues no

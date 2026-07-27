@@ -1,7 +1,13 @@
-# Headscale control plane for the k8s integration tier ONLY — gives the
-# portion test a real tailnet (real tailscaled enrollment, WireGuard, node
-# lifecycle) with no Tailscale account. Not a production deployment: state is
-# an emptyDir, there is no TLS, and the API key is minted per run.
+# Every test-only k8s object for the integration tiers, in one file: the
+# headscale control plane, the friend-client namespace + its RBAC, and the
+# pantry StorageClass. The namespace, ServiceAccount and manager Role are NOT
+# here — those come from the SHIPPED deploy/k8s/p0rt1on.yaml, because proving
+# the real least-privilege Role suffices is the point of tier 1.
+#
+# Headscale gives the portion test a real tailnet (real tailscaled enrollment,
+# WireGuard, node lifecycle) with no Tailscale account. Not a production
+# deployment: state is an emptyDir, there is no TLS, and the API key is minted
+# per run.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -138,3 +144,18 @@ roleRef:
   kind: Role
   name: p0rt1on-integrationtest-client-runner
   apiGroup: rbac.authorization.k8s.io
+---
+# Portion DATA PVCs are provisioned from this class. deploy/k8s/pantry.yaml
+# can't be applied here: its ConfigMap targets the upstream provisioner's
+# local-path-storage namespace (k3s uses kube-system) and would repoint the
+# cluster's storage at /srv/p0rt1on. The class alone is what the tests need —
+# k3d's built-in rancher.io/local-path provisioner serves it from its default
+# path. Keep the fields below in step with deploy/k8s/pantry.yaml.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: p0rt1on-pantry
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+# Bind the PV only once a pod needs it — local-path volumes are node-local.
+volumeBindingMode: WaitForFirstConsumer
