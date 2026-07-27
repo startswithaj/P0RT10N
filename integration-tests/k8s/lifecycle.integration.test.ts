@@ -35,6 +35,16 @@ import {
 } from "../../app/packages/server/src/test-helpers/mocks.ts";
 import { AdminAuth } from "../../app/packages/server/src/auth/AdminAuth.ts";
 import { createTestDatabase } from "../../app/packages/server/src/test-helpers/testDb.ts";
+import {
+  type ClaimedBundle,
+  DEFAULT_CLIENT_IMAGE,
+  DEFAULT_HEADSCALE_URL,
+  DEFAULT_INSTANCE_IMAGE,
+  friendClientEnv,
+  requireConfig,
+  SEED_THEN_BACKUP,
+  until,
+} from "../helpers.ts";
 
 // Adds a friend through the real tRPC API; the instance pod materialises in
 // the cluster — zero mocks, real everything against the in-cluster headscale
@@ -42,17 +52,16 @@ import { createTestDatabase } from "../../app/packages/server/src/test-helpers/t
 // certs) — that's the docker tier's job. Must run in-cluster: k8s/run.sh
 // launches it as a pod. Missing config fails, never skips.
 describe("Portion lifecycle over tRPC on k8s (integration)", () => {
-  beforeAll(() => {
-    const missing: string[] = [];
-    if (!Deno.env.get("HEADSCALE_URL")) missing.push("HEADSCALE_URL");
-    if (!Deno.env.get("HEADSCALE_API_KEY")) missing.push("HEADSCALE_API_KEY");
-    if (missing.length) {
-      throw new Error(
-        `${missing.join(", ")} not set — run via ` +
-          `./integration-tests/k8s/run.sh tier2 (in-cluster).`,
-      );
-    }
-  });
+  const INSTANCE = "p0rt1on-k8sit";
+  const CLIENT_NS = "p0rt1on-integrationtest-clients";
+  const CLIENT_POD = "p0rt1on-integrationtest-client";
+
+  beforeAll(() =>
+    requireConfig({
+      env: ["HEADSCALE_URL", "HEADSCALE_API_KEY"],
+      hint: "run via ./integration-tests/k8s/run.sh tier2 (in-cluster).",
+    })
+  );
 
   // The test's own k8s API access via the mounted SA token (CA via
   // DENO_CERT) — separate from the app's InstanceRuntime.
@@ -86,68 +95,41 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     mc: McShellClientFactory,
     token: string,
     headscaleUrl: string,
-    bundle: {
-      s3Endpoint: string;
-      bucket: string;
-      s3AccessKeyId: string;
-      s3SecretKey: string;
-      tsAuthKey?: string;
-    },
+    bundle: ClaimedBundle,
   ): Promise<void> => {
-    const clientNs = "p0rt1on-integrationtest-clients";
-    const payload = crypto.randomUUID();
-    await k8s("POST", `/api/v1/namespaces/${clientNs}/pods`, {
+    await k8s("POST", `/api/v1/namespaces/${CLIENT_NS}/pods`, {
       apiVersion: "v1",
       kind: "Pod",
-      metadata: { name: "p0rt1on-integrationtest-client", namespace: clientNs },
+      metadata: { name: CLIENT_POD, namespace: CLIENT_NS },
       spec: {
         restartPolicy: "Never",
         containers: [{
           name: "client",
-          image: Deno.env.get("CLIENT_IMAGE") ??
-            "p0rt1on-backup-client:integrationtest",
-          // Seed a known file, then hand off to the real entrypoint; the
-          // pod's exit status is Kopia's.
-          command: [
-            "sh",
-            "-c",
-            'mkdir -p /backup && printf %s "$PAYLOAD" > ' +
-            "/backup/canary.txt && exec /entrypoint.sh",
-          ],
-          env: [
-            { name: "PAYLOAD", value: payload },
-            { name: "BACKUP_PATH", value: "/backup" },
-            { name: "S3_ENDPOINT", value: bundle.s3Endpoint },
-            { name: "S3_BUCKET", value: bundle.bucket },
-            { name: "S3_ACCESS_KEY_ID", value: bundle.s3AccessKeyId },
-            { name: "S3_SECRET_ACCESS_KEY", value: bundle.s3SecretKey },
-            { name: "KOPIA_PASSWORD", value: "it-kopia-pw" },
-            { name: "TAILSCALE_AUTHKEY", value: bundle.tsAuthKey ?? "" },
-            { name: "TAILSCALE_LOGIN_SERVER", value: headscaleUrl },
-          ],
+          image: Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE,
+          // The pod's exit status is Kopia's.
+          command: ["sh", "-c", SEED_THEN_BACKUP],
+          env: Object.entries(friendClientEnv(bundle, {
+            PAYLOAD: "p0rt1on-canary",
+            TAILSCALE_LOGIN_SERVER: headscaleUrl,
+          })).map(([name, value]) => ({ name, value })),
         }],
       },
     });
 
     // Kopia is one-shot: poll for the pod's terminal phase (~2min budget
     // covers enrollment + repo create + snapshot).
-    const podPhase = async (attemptsLeft: number): Promise<string> => {
+    const phase = await until("client pod terminal phase", async () => {
       const pod = await k8s(
         "GET",
-        `/api/v1/namespaces/${clientNs}/pods/p0rt1on-integrationtest-client`,
+        `/api/v1/namespaces/${CLIENT_NS}/pods/${CLIENT_POD}`,
       ) as { status?: { phase?: string } };
-      const phase = pod.status?.phase ?? "Unknown";
-      if (phase === "Succeeded" || phase === "Failed") return phase;
-      if (attemptsLeft <= 0) return phase;
-      await new Promise((r) => setTimeout(r, 2000));
-      return podPhase(attemptsLeft - 1);
-    };
-
-    const phase = await podPhase(60);
+      const p = pod.status?.phase;
+      return p === "Succeeded" || p === "Failed" ? p : null;
+    }, 60).catch(() => "Pending");
     if (phase !== "Succeeded") {
       const logRes = await fetch(
-        `https://kubernetes.default.svc/api/v1/namespaces/${clientNs}` +
-          "/pods/p0rt1on-integrationtest-client/log?tailLines=100",
+        `https://kubernetes.default.svc/api/v1/namespaces/${CLIENT_NS}` +
+          `/pods/${CLIENT_POD}/log?tailLines=100`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       console.error(
@@ -160,7 +142,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     // The friend's Kopia repo actually landed objects in the bucket —
     // written over the tailnet, through serve, with the bundle keys.
     const du = await mc
-      .forInstance({ alias: "p0rt1on-k8sit", minioPort: 9000 })
+      .forInstance({ alias: INSTANCE, minioPort: 9000 })
       .du(bundle.bucket);
     expect(du.objectCount).toBeGreaterThan(0);
   };
@@ -174,7 +156,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       ).trim();
       const k8s = k8sApi(token);
       const headscaleUrl = Deno.env.get("HEADSCALE_URL") ??
-        "http://headscale.p0rt1on.svc:8080";
+        DEFAULT_HEADSCALE_URL;
       const runtime = new KubernetesRuntime(
         {
           namespace,
@@ -221,7 +203,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       const config = {
         ...TEST_CONFIG,
         instanceImage: Deno.env.get("INSTANCE_IMAGE") ??
-          "p0rt1on-instance:integrationtest",
+          DEFAULT_INSTANCE_IMAGE,
         // Headscale serves over HTTP (no certs); the friend endpoint is the
         // node's live tailnet IP, so no MagicDNS base domain is configured.
         serveMode: "http" as const,
@@ -274,7 +256,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         return runner.run(
           "mc",
           args(alias),
-          mcHostEnv(alias, runtime.adminEndpoint("p0rt1on-k8sit", 9000), {
+          mcHostEnv(alias, runtime.adminEndpoint(INSTANCE, 9000), {
             accessKeyId: cred.s3AccessKeyId,
             secretKey: cred.s3SecretKey,
           }),
@@ -302,10 +284,10 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
 
         // The pod exists in the cluster BECAUSE of the API call.
         expect(await runtime.listInstances()).toContainEqual({
-          name: "p0rt1on-k8sit",
+          name: INSTANCE,
           state: "running",
         });
-        expect(await runtime.instanceHealth("p0rt1on-k8sit")).toBe("healthy");
+        expect(await runtime.instanceHealth(INSTANCE)).toBe("healthy");
 
         // ...and its tailscaled ACTUALLY enrolled on the headscale tailnet
         // (healthy already implies `tailscale status` = Running in-pod).
@@ -426,20 +408,19 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           return obj.metadata?.deletionTimestamp !== undefined;
         };
 
-        const instance = "p0rt1on-k8sit";
-        expect(await cleanedUp("persistentvolumeclaims", `${instance}-data`))
+        expect(await cleanedUp("persistentvolumeclaims", `${INSTANCE}-data`))
           .toBe(true);
-        expect(await cleanedUp("persistentvolumeclaims", `${instance}-state`))
+        expect(await cleanedUp("persistentvolumeclaims", `${INSTANCE}-state`))
           .toBe(true);
-        expect(await cleanedUp("secrets", `${instance}-creds`)).toBe(true);
-        expect(await cleanedUp("services", instance)).toBe(true);
+        expect(await cleanedUp("secrets", `${INSTANCE}-creds`)).toBe(true);
+        expect(await cleanedUp("services", INSTANCE)).toBe(true);
       } finally {
         // Best-effort teardown if any step failed mid-way.
         await k8s(
           "DELETE",
-          "/api/v1/namespaces/p0rt1on-integrationtest-clients/pods/p0rt1on-integrationtest-client",
+          `/api/v1/namespaces/${CLIENT_NS}/pods/${CLIENT_POD}`,
         ).catch(() => undefined);
-        await runtime.removeInstance("p0rt1on-k8sit", { removeData: true })
+        await runtime.removeInstance(INSTANCE, { removeData: true })
           .catch(() => undefined);
         database.driver.close();
       }

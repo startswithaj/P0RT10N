@@ -1,7 +1,19 @@
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DenoTempFiles } from "../../app/packages/server/src/lib/CommandRunner.ts";
-import { hasBinary } from "../../app/packages/server/src/lib/hasBinary.ts";
+import {
+  DenoCommandRunner,
+  DenoTempFiles,
+} from "../../app/packages/server/src/lib/CommandRunner.ts";
+import {
+  type ClaimedBundle,
+  DEFAULT_CLIENT_IMAGE,
+  DEFAULT_INSTANCE_IMAGE,
+  DEFAULT_MANAGER_IMAGE,
+  friendClientEnv,
+  requireConfig,
+  SEED_THEN_BACKUP,
+  until,
+} from "../helpers.ts";
 
 // Runs the real manager image as a container over a REAL tailnet: it mints a
 // key from the OAuth secret, the instance enrolls, and a friend container
@@ -17,16 +29,13 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
     "P0RT1ON_TAILSCALE_TAG_OWNER",
   ];
 
-  beforeAll(() => {
-    const missing = REQUIRED.filter((k) => !Deno.env.get(k));
-    if (!hasBinary("docker")) missing.push("`docker` on PATH");
-    if (missing.length) {
-      throw new Error(
-        `not configured: ${missing.join(", ")} — run via ` +
-          `./integration-tests/docker/run.sh (loads .env).`,
-      );
-    }
-  });
+  beforeAll(() =>
+    requireConfig({
+      env: REQUIRED,
+      binaries: ["docker"],
+      hint: "run via ./integration-tests/docker/run.sh (loads .env).",
+    })
+  );
 
   const id = crypto.randomUUID().slice(0, 6);
   const managerName = `p0rt1on-integrationtest-manager-${id}`;
@@ -47,32 +56,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const tmp = new DenoTempFiles("./.p0rt1on-integrationtest-tmp");
   const env = (k: string) => Deno.env.get(k) ?? "";
 
-  const docker = async (args: string[]) => {
-    const out = await new Deno.Command("docker", {
-      args,
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-    const dec = new TextDecoder();
-    return {
-      code: out.code,
-      stdout: dec.decode(out.stdout),
-      stderr: dec.decode(out.stderr),
-    };
-  };
-
-  // Poll `fn` until it returns a value (recursive — no imperative loops).
-  const until = async <T>(
-    what: string,
-    fn: () => Promise<T | null>,
-    left: number,
-  ): Promise<T> => {
-    const got = await fn().catch(() => null);
-    if (got !== null && got !== undefined) return got;
-    if (left <= 0) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 2000));
-    return until(what, fn, left - 1);
-  };
+  const runner = new DenoCommandRunner();
+  const docker = (args: string[]) => runner.run("docker", args);
 
   it(
     "creates a portion, and the friend backs up to it over the real tailnet",
@@ -89,8 +74,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           `\nP0RT1ON_PANTRY=${pantry}` +
           `\nP0RT1ON_DB_PATH=/tmp/p0rt1on.db` +
           `\nP0RT1ON_INSTANCE_IMAGE=${
-            Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ??
-              "p0rt1on-instance:integrationtest"
+            Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ?? DEFAULT_INSTANCE_IMAGE
           }\n`,
       );
       let cookie = "";
@@ -146,7 +130,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           network,
           "-p",
           `127.0.0.1:${port}:8080`,
-          Deno.env.get("MANAGER_IMAGE") ?? "p0rt1on-manager:integrationtest",
+          Deno.env.get("MANAGER_IMAGE") ?? DEFAULT_MANAGER_IMAGE,
         ]);
         expect(run.code).toBe(0);
 
@@ -178,15 +162,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         const bundle = await until(
           "provisioning to finish + bundle claim",
           () =>
-            trpc("jobs.claimBundle", { jobId }).catch(() => null) as Promise<
-              {
-                bucket: string;
-                s3Endpoint: string;
-                s3AccessKeyId: string;
-                s3SecretKey: string;
-                tsAuthKey?: string;
-              } | null
-            >,
+            trpc("jobs.claimBundle", { jobId })
+              .catch(() => null) as Promise<ClaimedBundle | null>,
           90,
         );
 
@@ -202,11 +179,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         // 4. The point: a friend container joins the tailnet with the minted
         //    key and writes a real Kopia backup through `tailscale serve`.
         friendEnv = await tmp.write(
-          `S3_ENDPOINT=${bundle.s3Endpoint}\nS3_BUCKET=${bundle.bucket}\n` +
-            `S3_ACCESS_KEY_ID=${bundle.s3AccessKeyId}\n` +
-            `S3_SECRET_ACCESS_KEY=${bundle.s3SecretKey}\n` +
-            `TAILSCALE_AUTHKEY=${bundle.tsAuthKey}\n` +
-            `KOPIA_PASSWORD=it-kopia-pw\nBACKUP_PATH=/backup\n`,
+          Object.entries(friendClientEnv(bundle, { PAYLOAD: "p0rt1on-canary" }))
+            .map(([k, v]) => `${k}=${v}`).join("\n") + "\n",
         );
         const backup = await docker([
           "run",
@@ -216,11 +190,9 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           friendEnv,
           "--entrypoint",
           "sh",
-          Deno.env.get("CLIENT_IMAGE") ??
-            "p0rt1on-backup-client:integrationtest",
+          Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE,
           "-c",
-          "mkdir -p /backup && echo p0rt1on-canary > /backup/canary.txt && " +
-          "exec /entrypoint.sh",
+          SEED_THEN_BACKUP,
         ]);
         if (backup.code !== 0) {
           console.error("friend backup log:\n", backup.stdout, backup.stderr);

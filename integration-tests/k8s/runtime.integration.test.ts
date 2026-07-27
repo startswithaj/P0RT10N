@@ -7,6 +7,12 @@ import {
 import { CoreV1Api } from "@cloudydeno/kubernetes-apis/core/v1";
 import type { FetchLike } from "../../app/packages/server/src/tailscale/TailscaleHttpApi.ts";
 import type { InstanceSpec } from "../../app/packages/server/src/runtime/runtime.ts";
+import {
+  DEFAULT_HEADSCALE_URL,
+  DEFAULT_INSTANCE_IMAGE,
+  requireConfig,
+  until,
+} from "../helpers.ts";
 
 // Drives a real k8s API server (k3d) as the p0rt1on-manager ServiceAccount:
 // server-side apply, scale, PSA admission, and proof the least-privilege Role
@@ -18,16 +24,18 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
   const token = Deno.env.get("K8S_INTEGRATIONTEST_TOKEN");
   const caFile = Deno.env.get("K8S_INTEGRATIONTEST_CA");
   const image = Deno.env.get("K8S_INTEGRATIONTEST_IMAGE") ??
-    "p0rt1on-instance:integrationtest";
-  beforeAll(() => {
-    if (!(server && token && caFile)) {
-      throw new Error(
-        "K8S_INTEGRATIONTEST_SERVER/K8S_INTEGRATIONTEST_TOKEN/K8S_INTEGRATIONTEST_CA not set — run via " +
-          "./integration-tests/k8s/run.sh tier1 (it derives them from " +
-          "the k3d cluster).",
-      );
-    }
-  });
+    DEFAULT_INSTANCE_IMAGE;
+  beforeAll(() =>
+    requireConfig({
+      env: [
+        "K8S_INTEGRATIONTEST_SERVER",
+        "K8S_INTEGRATIONTEST_TOKEN",
+        "K8S_INTEGRATIONTEST_CA",
+      ],
+      hint: "run via ./integration-tests/k8s/run.sh tier1 (it derives them " +
+        "from the k3d cluster).",
+    })
+  );
 
   // Deno's fetch trusts the cluster CA via an explicit HTTP client.
   const fetchWithCa = (): FetchLike => {
@@ -60,7 +68,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         // so serve runs in HTTP mode.
         tailscale: {
           loginServer: Deno.env.get("K8S_INTEGRATIONTEST_LOGIN_SERVER") ??
-            "http://headscale.p0rt1on.svc:8080",
+            DEFAULT_HEADSCALE_URL,
           serveMode: "http",
         },
         // Small requests + generous limits (won't OOM the real MinIO image).
@@ -220,23 +228,24 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
 
         // Positive evidence, not absence-after-a-sleep: the controller's
         // FailedCreate event names the PodSecurity violation.
-        const failedCreate = async (left: number): Promise<string> => {
-          const events = await raw(
-            `${server}/api/v1/namespaces/p0rt1on/events?fieldSelector=` +
-              "involvedObject.name=it-priv,reason=FailedCreate",
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          const body = await events.json() as {
-            items?: { message?: string }[];
-          };
-          const msg = body.items?.[0]?.message;
-          if (msg) return msg;
-          if (left <= 0) return "<no FailedCreate event>";
-          await new Promise((r) => setTimeout(r, 1000));
-          return failedCreate(left - 1);
-        };
+        const rejection = await until(
+          "PSA FailedCreate event",
+          async () => {
+            const events = await raw(
+              `${server}/api/v1/namespaces/p0rt1on/events?fieldSelector=` +
+                "involvedObject.name=it-priv,reason=FailedCreate",
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+            const body = await events.json() as {
+              items?: { message?: string }[];
+            };
+            return body.items?.[0]?.message ?? null;
+          },
+          30,
+          1000,
+        );
 
-        expect(await failedCreate(30)).toContain("violates PodSecurity");
+        expect(rejection).toContain("violates PodSecurity");
         // ...and the pod never materialised.
         const pod = await raw(
           `${server}/api/v1/namespaces/p0rt1on/pods/it-priv-0`,

@@ -4,23 +4,22 @@ import {
   DenoCommandRunner,
   DenoTempFiles,
 } from "../../app/packages/server/src/lib/CommandRunner.ts";
-import { hasBinary } from "../../app/packages/server/src/lib/hasBinary.ts";
 import {
   mcHostEnv,
   McShellClient,
 } from "../../app/packages/server/src/minio/McShellClient.ts";
+import { requireConfig } from "../helpers.ts";
 
 // Real `mc` against a real MinIO. Excluded from default test/coverage runs;
 // running it IS the opt-in, so a missing prerequisite FAILS rather than skips.
 describe("McShellClient (integration: real mc + MinIO)", () => {
-  beforeAll(() => {
-    if (!hasBinary("mc")) {
-      throw new Error(
-        "`mc` not on PATH — run this suite in the manager image (bundles the " +
-          "pinned mc) against a MinIO at MINIO_ENDPOINT; see integration-tests.md.",
-      );
-    }
-  });
+  beforeAll(() =>
+    requireConfig({
+      binaries: ["mc"],
+      hint: "run this suite in the manager image (bundles the pinned mc) " +
+        "against a MinIO at MINIO_ENDPOINT; see integration-tests.md.",
+    })
+  );
   const runner = new DenoCommandRunner();
   const alias = "p0rt1on-integrationtest";
 
