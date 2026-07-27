@@ -228,12 +228,22 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         // Exit 0 means Kopia connected over the tailnet and wrote a snapshot.
         expect(backup.code).toBe(0);
 
-        // 5. Start offboard; only the job start is asserted — the finally
-        //    block force-removes the containers.
+        // 5. Offboard, and WAIT for it: tearing down while the job runs can
+        //    leak a node on the REAL tailnet.
         const off = await trpc("friends.offboardStart", { friendId }) as {
           jobId: string;
         };
         expect(off.jobId.length).toBeGreaterThan(0);
+        await until("offboard to finish (friend list empty)", async () => {
+          const left = await trpc("friends.list") as unknown[];
+          return left.length === 0 || null;
+        }, 60);
+        // Gone from the host, not just the DB.
+        const inspect = await docker([
+          "inspect",
+          `p0rt1on-instance-p0rt1on-${portion}`,
+        ]);
+        expect(inspect.code).not.toBe(0);
       } catch (e) {
         // Failure artifact: the assertion alone never says WHICH step broke.
         const logs = await docker(["logs", "--tail", "400", managerName]);
@@ -242,9 +252,6 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
       } finally {
         // Never leave a node on the REAL tailnet or a container on the host.
         await docker(["rm", "-f", friendName]);
-        await docker(["logs", managerName]).then((l) =>
-          l.code === 0 ? undefined : undefined
-        );
         await docker(["rm", "-f", managerName]);
         await docker(["rm", "-f", `p0rt1on-instance-p0rt1on-${portion}`]);
         await tmp.remove(managerEnv).catch(() => undefined);

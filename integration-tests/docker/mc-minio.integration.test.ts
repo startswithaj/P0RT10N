@@ -48,8 +48,9 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
   const hostEnv = () => mcHostEnv(alias, endpoint(), rootCred());
 
   it("provisions a locked bucket + scoped user end-to-end", async () => {
-    // Wait until MinIO accepts requests (container startup race).
-    await runner.run("mc", ["ready", alias], hostEnv());
+    // Wait until MinIO accepts requests; fail HERE if it's down, not
+    // confusingly later.
+    expect((await runner.run("mc", ["ready", alias], hostEnv())).code).toBe(0);
 
     const bucket = `it-${crypto.randomUUID().slice(0, 8)}`;
     const client = buildClient();
@@ -83,30 +84,36 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
     async () => {
       // Regression guard: `rb --force` alone cannot delete versions under
       // retention — removeBucket must purge with --bypass first.
-      await runner.run("mc", ["ready", alias], hostEnv());
+      expect((await runner.run("mc", ["ready", alias], hostEnv())).code)
+        .toBe(0);
 
       const bucket = `it-lock-${crypto.randomUUID().slice(0, 8)}`;
       const client = buildClient();
 
       await client.makeBucketWithLock(bucket);
-      await client.setDefaultRetention(bucket, "GOVERNANCE", 1);
-      // Write an object AFTER retention is armed so it is genuinely locked.
-      const tmp = await new DenoTempFiles().write("locked-data");
       try {
-        const put = await runner.run(
-          "mc",
-          ["cp", tmp, `${alias}/${bucket}/x`],
-          hostEnv(),
-        );
-        expect(put.code).toBe(0);
+        await client.setDefaultRetention(bucket, "GOVERNANCE", 1);
+        // Write an object AFTER retention is armed so it is genuinely locked.
+        const tmp = await new DenoTempFiles().write("locked-data");
+        try {
+          const put = await runner.run(
+            "mc",
+            ["cp", tmp, `${alias}/${bucket}/x`],
+            hostEnv(),
+          );
+          expect(put.code).toBe(0);
+        } finally {
+          await new DenoTempFiles().remove(tmp);
+        }
+
+        await client.removeBucket(bucket); // fails without the --bypass purge
+
+        // Also idempotent: removing the now-absent bucket is success.
+        await client.removeBucket(bucket);
       } finally {
-        await new DenoTempFiles().remove(tmp);
+        // A retention-armed bucket must not outlive a failed test.
+        await client.removeBucket(bucket).catch(() => undefined);
       }
-
-      await client.removeBucket(bucket); // fails without the --bypass purge
-
-      // Also idempotent: removing the now-absent bucket is success.
-      await client.removeBucket(bucket);
     },
   );
 });

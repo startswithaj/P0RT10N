@@ -216,15 +216,33 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         },
       );
       try {
-        // STS admission may warn; what matters is the pod — give the
-        // controller a moment, then assert none exists.
         expect(res.status).toBeLessThan(500);
-        await new Promise((r) => setTimeout(r, 3000));
+
+        // Positive evidence, not absence-after-a-sleep: the controller's
+        // FailedCreate event names the PodSecurity violation.
+        const failedCreate = async (left: number): Promise<string> => {
+          const events = await raw(
+            `${server}/api/v1/namespaces/p0rt1on/events?fieldSelector=` +
+              "involvedObject.name=it-priv,reason=FailedCreate",
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          const body = await events.json() as {
+            items?: { message?: string }[];
+          };
+          const msg = body.items?.[0]?.message;
+          if (msg) return msg;
+          if (left <= 0) return "<no FailedCreate event>";
+          await new Promise((r) => setTimeout(r, 1000));
+          return failedCreate(left - 1);
+        };
+
+        expect(await failedCreate(30)).toContain("violates PodSecurity");
+        // ...and the pod never materialised.
         const pod = await raw(
           `${server}/api/v1/namespaces/p0rt1on/pods/it-priv-0`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
-        expect(pod.status).toBe(404); // PSA refused to admit the pod
+        expect(pod.status).toBe(404);
       } finally {
         await raw(
           `${server}/apis/apps/v1/namespaces/p0rt1on/statefulsets/it-priv`,
