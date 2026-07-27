@@ -26,7 +26,3 @@ export function setThemeValue(next: Theme): void {
   setTheme(next);
   apply(next);
 }
-
-export function toggleTheme(): void {
-  setThemeValue(theme() === "dark" ? "light" : "dark");
-}

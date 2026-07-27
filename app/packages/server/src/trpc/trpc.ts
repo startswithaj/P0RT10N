@@ -129,7 +129,6 @@ const authMiddleware = t.middleware(({ ctx, next }) => {
 });
 
 export const router = t.router;
-export const mergeRouters = t.mergeRouters;
 export const publicProcedure = t.procedure
   .use(loggingMiddleware)
   .use(errorMiddleware);

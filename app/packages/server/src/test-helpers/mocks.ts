@@ -9,8 +9,6 @@ import { McShellClient } from "../minio/McShellClient.ts";
 import { Env } from "../lib/Env.ts";
 import type { FetchLike } from "../tailscale/TailscaleHttpApi.ts";
 import type {
-  ContainerHandle,
-  ContainerRuntime,
   ContainerState,
   InstanceHealth,
   InstanceRuntime,
@@ -366,49 +364,6 @@ export function mockUserInviteApi(
       return Promise.resolve();
     },
     ...overrides,
-  };
-}
-
-/** ContainerRuntime mock for reconcile tests: canned list, health per name. */
-export function mockContainerRuntime(
-  calls: Calls,
-  opts: {
-    containers?: ContainerHandle[];
-    healthFor?: (name: string) => InstanceHealth;
-    listError?: Error;
-  } = {},
-): ContainerRuntime {
-  return {
-    ensureInstance: (spec) => {
-      calls.push(`docker:ensureInstance:${spec.name}`);
-      return Promise.resolve({ name: spec.name, id: "id", state: "running" });
-    },
-    ensureStarted: (name) => {
-      calls.push(`docker:start:${name}`);
-      return Promise.resolve();
-    },
-    status: () => Promise.resolve("running"),
-    health: (name) => Promise.resolve(opts.healthFor?.(name) ?? "healthy"),
-    diagnose: (name) =>
-      Promise.resolve({
-        name,
-        state: "running",
-        health: "healthy",
-        healthReason: null,
-        exitCode: null,
-        exitError: null,
-        recentLogs: "",
-      }),
-    stop: () => Promise.resolve(),
-    remove: (name) => {
-      calls.push(`docker:remove:${name}`);
-      return Promise.resolve();
-    },
-    removeVolumes: () => Promise.resolve(),
-    list: () =>
-      opts.listError
-        ? Promise.reject(opts.listError)
-        : Promise.resolve(opts.containers ?? []),
   };
 }
 
