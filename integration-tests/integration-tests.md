@@ -11,12 +11,12 @@ reads as a pass). So a bare `deno task test:integration` (glob
 `integration-tests/**/*.integration.test.ts`) only passes when everything below
 is set up; run an individual suite — or the k8s driver — for anything narrower.
 
-Imports reach the app via `../app/packages/server/src/…`; run everything from
+Imports reach the app via `../../app/packages/server/src/…`; run everything from
 the repo root so the `deno.json` import map resolves.
 
 ---
 
-## 1. `McShellClient.integration.test.ts` — real `mc` + MinIO
+## 1. `docker/mc-minio.integration.test.ts` — real `mc` + MinIO
 
 **Verifies:** provisions a lock-enabled bucket + a bucket-scoped user, measures
 usage (`mc du`), and deletes GOVERNANCE object-lock content via the root bypass
@@ -39,7 +39,7 @@ docker run --rm -v "$PWD:/app" -w /app \
   --entrypoint deno p0rt1on-manager:latest \
   test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
   --allow-run --unstable-ffi \
-  integration-tests/McShellClient.integration.test.ts
+  integration-tests/docker/mc-minio.integration.test.ts
 ```
 
 **Or on the host** if `mc` is installed:
@@ -49,12 +49,12 @@ docker compose -f deploy/docker-compose.yml up -d minio
 MINIO_ENDPOINT=http://127.0.0.1:9000 \
   MINIO_ROOT_USER=p0rtadmin MINIO_ROOT_PASSWORD=p0rtadmin123 \
   deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
-  --allow-run --unstable-ffi integration-tests/McShellClient.integration.test.ts
+  --allow-run --unstable-ffi integration-tests/docker/mc-minio.integration.test.ts
 ```
 
 ---
 
-## 2. `Provisioning.docker.integration.test.ts` — REAL tailnet portion e2e
+## 2. `docker/tailnet-lifecycle.integration.test.ts` — REAL tailnet portion e2e
 
 The only tier that touches a real tailnet, and the only one that can prove
 **`tailscale serve` over HTTPS with a real cert** — headscale issues none.
@@ -91,8 +91,8 @@ port reads as free) and gets started again mid-run.
 **Run:**
 
 ```sh
-./integration-tests/run-docker-tailnet.sh       # build images + run
-./integration-tests/run-docker-tailnet.sh run   # images already built
+./integration-tests/docker/run.sh       # build images + run
+./integration-tests/docker/run.sh run   # images already built
 ```
 
 _(Replaced `DockerRuntime.integration.test.ts`, deleted 2026-07-17: it burned a
@@ -103,32 +103,32 @@ running container without starting a second", which needs no tailnet.)_
 
 ---
 
-## 3 & 4. Kubernetes tiers — `run-integration.sh`
+## 3 & 4. Kubernetes tiers — `k8s/run.sh`
 
-Driven by **`integration-tests/run-integration.sh`**. The control plane is an
+Driven by **`integration-tests/k8s/run.sh`**. The control plane is an
 **in-cluster headscale**, so **no Tailscale account or secrets are needed** —
 REAL images only. Every test-only k8s object (headscale, the friend-client
 namespace + RBAC, the `p0rt1on-pantry` StorageClass) lives in
-`integration-tests/k8s-integrationtest.yaml`; the namespace, ServiceAccount and
+`integration-tests/k8s/manifests.yaml`; the namespace, ServiceAccount and
 manager Role come from the shipped `deploy/k8s/p0rt1on.yaml`.
 
-- **tier1 — `KubernetesRuntime.integration.test.ts`** (host, as the manager
+- **tier1 — `k8s/runtime.integration.test.ts`** (host, as the manager
   ServiceAccount): apply → ready → scale → gated teardown, RBAC containment (the
   SA can't exceed its Role), and PSA-`restricted` rejection of a privileged pod.
-- **tier2 — `Provisioning.k8s.integration.test.ts`** (in-cluster pod): a real
-  **add → rotate → offboard** through the tRPC API with real `mc`, the instance
-  image, and a real Kopia backup (a `backup-client` pod over the tailnet). Zero
-  mocks; **offboard self-cleans** the node.
+- **tier2 — `k8s/lifecycle.integration.test.ts`** (in-cluster pod): a real **add
+  → rotate → offboard** through the tRPC API with real `mc`, the instance image,
+  and a real Kopia backup (a `backup-client` pod over the tailnet). Zero mocks;
+  **offboard self-cleans** the node.
 
 **Needs:** a Docker daemon, `k3d`, `kubectl`.
 
 **Run:**
 
 ```sh
-./integration-tests/run-integration.sh          # build images + both tiers
-./integration-tests/run-integration.sh build    # (re)build + import images only
-./integration-tests/run-integration.sh tier1    # runtime tier (images built)
-./integration-tests/run-integration.sh tier2    # portion tier (images built)
+./integration-tests/k8s/run.sh          # build images + both tiers
+./integration-tests/k8s/run.sh build    # (re)build + import images only
+./integration-tests/k8s/run.sh tier1    # runtime tier (images built)
+./integration-tests/k8s/run.sh tier2    # portion tier (images built)
 ```
 
 **Rebuild rule:** `app/`, `instance/`, or `backup-client/` changed → `build`;

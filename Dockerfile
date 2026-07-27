@@ -62,7 +62,7 @@ COPY integration-tests ./integration-tests
 # 2.8 tolerated it. Caching here means no install happens at run time; the chown
 # hands the tree and the cache to the user the runner pod runs as, so a relink
 # would be permitted rather than fatal.
-RUN deno cache integration-tests/*.ts \
+RUN deno cache integration-tests/*/*.ts \
   && chown -R deno:deno /app /deno-dir
 
 # Production. Deliberately last and deliberately empty: the default build target

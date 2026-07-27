@@ -3,16 +3,15 @@ import { expect } from "@std/expect";
 import {
   DenoCommandRunner,
   DenoTempFiles,
-} from "../app/packages/server/src/lib/CommandRunner.ts";
-import { hasBinary } from "../app/packages/server/src/lib/hasBinary.ts";
+} from "../../app/packages/server/src/lib/CommandRunner.ts";
+import { hasBinary } from "../../app/packages/server/src/lib/hasBinary.ts";
 import {
   mcHostEnv,
   McShellClient,
-} from "../app/packages/server/src/minio/McShellClient.ts";
+} from "../../app/packages/server/src/minio/McShellClient.ts";
 
-// Real `mc` against a real MinIO. Excluded from the default test + coverage
-// runs; invoked via `deno task test:integration` — running the suite IS the
-// opt-in, so a missing prerequisite FAILS (never skips).
+// Real `mc` against a real MinIO. Excluded from default test/coverage runs;
+// running it IS the opt-in, so a missing prerequisite FAILS rather than skips.
 describe("McShellClient (integration: real mc + MinIO)", () => {
   beforeAll(() => {
     if (!hasBinary("mc")) {
@@ -25,8 +24,8 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
   const runner = new DenoCommandRunner();
   const alias = "p0rt1on-integrationtest";
 
-  // Root creds ride per-call MC_HOST env vars — no `mc alias set` bootstrap;
-  // this also grounds the env mechanism against the pinned mc release.
+  // Root creds go in per-call MC_HOST env vars — no `mc alias set` bootstrap —
+  // which also proves that mechanism against the pinned mc release.
   const endpoint = () =>
     Deno.env.get("MINIO_ENDPOINT") ?? "http://127.0.0.1:9000";
 
@@ -49,7 +48,7 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
   const hostEnv = () => mcHostEnv(alias, endpoint(), rootCred());
 
   it("provisions a locked bucket + scoped user end-to-end", async () => {
-    // Block until MinIO is accepting requests (handles container startup race).
+    // Wait until MinIO accepts requests (container startup race).
     await runner.run("mc", ["ready", alias], hostEnv());
 
     const bucket = `it-${crypto.randomUUID().slice(0, 8)}`;
@@ -68,8 +67,8 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
       await client.setDefaultRetention(bucket, "GOVERNANCE", 1);
       await client.setHardQuota(bucket, 1024 * 1024);
 
-      // Grounds the listUsers parsing against the pinned mc version: the user
-      // must be reported with its attached bucket policy.
+      // Proves listUsers parsing against the pinned mc: the user must appear
+      // with its attached bucket policy.
       const users = await client.listUsers();
       const itUser = users.find((u) => u.accessKeyId === "itkey");
       expect(itUser?.policies).toContain(bucket);
@@ -82,9 +81,8 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
   it(
     "removeBucket deletes GOVERNANCE-locked objects (root bypass)",
     async () => {
-      // The offboard-blocker regression: `rb --force` alone cannot delete
-      // versions still under retention; removeBucket must purge with --bypass
-      // first. Grounds the flag set against the pinned mc release.
+      // Regression guard: `rb --force` alone cannot delete versions under
+      // retention — removeBucket must purge with --bypass first.
       await runner.run("mc", ["ready", alias], hostEnv());
 
       const bucket = `it-lock-${crypto.randomUUID().slice(0, 8)}`;

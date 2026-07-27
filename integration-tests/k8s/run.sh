@@ -3,19 +3,19 @@
 # a local in-cluster headscale is the control plane, so no Tailscale account
 # or secrets are needed.
 #
-#   1. RUNTIME tier: KubernetesRuntime.integration.test.ts as the
+#   1. RUNTIME tier: runtime.integration.test.ts as the
 #      p0rt1on-manager SA — API mechanics, RBAC containment, PSA rejection —
 #      with the real instance image enrolling against headscale.
-#   2. PORTION tier (in-cluster pod): Provisioning.k8s.integration.test.ts —
+#   2. PORTION tier (in-cluster pod): lifecycle.integration.test.ts —
 #      a REAL add → rotate → offboard through the tRPC API with real `mc`,
 #      the real instance image and the real HeadscaleHttpApi. Zero mocks.
 #
 # Usage:
-#   ./integration-tests/run-integration.sh          # build images + both tiers
-#   ./integration-tests/run-integration.sh build    # (re)build + import images only
-#   ./integration-tests/run-integration.sh tier1    # runtime tier (images built)
-#   ./integration-tests/run-integration.sh tier2    # portion tier (images built)
-#   ./integration-tests/run-integration.sh clean    # delete the k3d cluster
+#   ./integration-tests/k8s/run.sh          # build images + both tiers
+#   ./integration-tests/k8s/run.sh build    # (re)build + import images only
+#   ./integration-tests/k8s/run.sh tier1    # runtime tier (images built)
+#   ./integration-tests/k8s/run.sh tier2    # portion tier (images built)
+#   ./integration-tests/k8s/run.sh clean    # delete the k3d cluster
 #
 # Cluster lifetime: a cluster this run CREATED is deleted on exit (including on
 # failure). A cluster that already existed is left alone — it's the user's.
@@ -24,7 +24,7 @@
 # Rebuild rule: app/ changed → build (manager image); instance/ changed →
 # build; backup-client/ changed → build. Test-file-only edits: rerun a tier.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 MODE="${1:-all}"
 CLUSTER="${K8S_INTEGRATIONTEST_CLUSTER:-p0rt1on-integrationtest}"
@@ -83,7 +83,7 @@ setup() {
     CREATED_CLUSTER=1
   fi
   kc apply -f deploy/k8s/p0rt1on.yaml
-  kc apply -f integration-tests/k8s-integrationtest.yaml
+  kc apply -f integration-tests/k8s/manifests.yaml
   # The manager Deployment isn't exercised by these tiers (the runner pod
   # plays the manager) and its unimported :latest image would just
   # crash-loop and waste node disk — keep it at 0 during tests.
@@ -122,7 +122,7 @@ tier1() {
     K8S_INTEGRATIONTEST_LOGIN_SERVER="$HEADSCALE_URL" \
     deno test --allow-read --allow-write --allow-env --allow-net \
     --unstable-net \
-    integration-tests/KubernetesRuntime.integration.test.ts
+    integration-tests/k8s/runtime.integration.test.ts
 }
 
 # ---- tier 2: portion-level, in-cluster (real headscale tailnet) -------------
@@ -154,7 +154,7 @@ tier2() {
       "command": ["deno", "test",
         "--allow-read", "--allow-write", "--allow-env", "--allow-ffi",
         "--allow-net", "--allow-run", "--unstable-ffi",
-        "integration-tests/Provisioning.k8s.integration.test.ts"],
+        "integration-tests/k8s/lifecycle.integration.test.ts"],
       "env": [
         {"name": "K8S_NAMESPACE", "value": "p0rt1on"},
         {"name": "INSTANCE_IMAGE", "value": "$INSTANCE_IMAGE"},

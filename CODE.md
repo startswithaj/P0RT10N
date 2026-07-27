@@ -115,15 +115,15 @@ test bans docker literals outside `runtime/`). Selected by
   - PVC retention is pinned `whenScaled: Retain` / `whenDeleted: Retain` so
     suspend (scale-to-0) or a StatefulSet delete never drops a friend's data —
     only a gated offboard deletes the PVCs.
-  - Verified on k3d by `integration-tests/run-integration.sh` (no secrets needed
-    — an in-cluster HEADSCALE is the control plane; REAL images only): runtime
-    tier (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection,
-    real tailnet enrollment) + portion tier (full tRPC addStart→rotate→offboard,
-    zero mocks: real enrollment, serve in HTTP mode, node deleted on offboard;
-    uid 1000 under PSA `restricted`). The portion tier ALSO runs the friend's
-    real backup: a `backup-client` pod joins the same tailnet under its friend
-    tag and snapshots with Kopia through the instance's serve (WireGuard) using
-    only bundle contents — proving the ACL grant, MagicDNS, serve, and an actual
+  - Verified on k3d by `integration-tests/k8s/run.sh` (no secrets needed — an
+    in-cluster HEADSCALE is the control plane; REAL images only): runtime tier
+    (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection, real
+    tailnet enrollment) + portion tier (full tRPC addStart→rotate→offboard, zero
+    mocks: real enrollment, serve in HTTP mode, node deleted on offboard; uid
+    1000 under PSA `restricted`). The portion tier ALSO runs the friend's real
+    backup: a `backup-client` pod joins the same tailnet under its friend tag
+    and snapshots with Kopia through the instance's serve (WireGuard) using only
+    bundle contents — proving the ACL grant, MagicDNS, serve, and an actual
     write to the bucket. That pod runs as ROOT in the non-restricted
     `p0rt1on-integrationtest-clients` namespace (like a friend's docker host); a
     test-only Role there lets the manager SA launch it — the production Role has

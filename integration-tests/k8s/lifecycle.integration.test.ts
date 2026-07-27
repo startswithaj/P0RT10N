@@ -1,54 +1,46 @@
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createCallerFactory } from "../app/packages/server/src/trpc/trpc.ts";
-import { appRouter } from "../app/packages/server/src/trpc/root.ts";
-import type { TrpcContext } from "../app/packages/server/src/trpc/trpc.ts";
-import { ProvisioningService } from "../app/packages/server/src/provisioning/ProvisioningService.ts";
+import { createCallerFactory } from "../../app/packages/server/src/trpc/trpc.ts";
+import { appRouter } from "../../app/packages/server/src/trpc/root.ts";
+import type { TrpcContext } from "../../app/packages/server/src/trpc/trpc.ts";
+import { ProvisioningService } from "../../app/packages/server/src/provisioning/ProvisioningService.ts";
 import {
   buildRestClient,
   KubernetesRuntime,
-} from "../app/packages/server/src/runtime/KubernetesRuntime.ts";
-import { CryptoKeyGen } from "../app/packages/server/src/provisioning/CryptoKeyGen.ts";
+} from "../../app/packages/server/src/runtime/KubernetesRuntime.ts";
+import { CryptoKeyGen } from "../../app/packages/server/src/provisioning/CryptoKeyGen.ts";
 import {
   mcHostEnv,
   McShellClientFactory,
-} from "../app/packages/server/src/minio/McShellClient.ts";
-import { McSmokeTester } from "../app/packages/server/src/provisioning/McSmokeTester.ts";
-import { DrizzleProvisioningRepo } from "../app/packages/server/src/db/ProvisioningRepo.ts";
-import { FriendQueries } from "../app/packages/server/src/db/FriendQueries.ts";
+} from "../../app/packages/server/src/minio/McShellClient.ts";
+import { McSmokeTester } from "../../app/packages/server/src/provisioning/McSmokeTester.ts";
+import { DrizzleProvisioningRepo } from "../../app/packages/server/src/db/ProvisioningRepo.ts";
+import { FriendQueries } from "../../app/packages/server/src/db/FriendQueries.ts";
 import {
   DenoCommandRunner,
   DenoTempFiles,
-} from "../app/packages/server/src/lib/CommandRunner.ts";
-import { FriendServiceImpl } from "../app/packages/server/src/services/FriendService.ts";
-import { ActivityServiceImpl } from "../app/packages/server/src/services/ActivityService.ts";
-import { AuditServiceImpl } from "../app/packages/server/src/services/AuditService.ts";
-import { UsageServiceImpl } from "../app/packages/server/src/services/UsageService.ts";
-import { RuntimeInventoryService } from "../app/packages/server/src/services/InventoryService.ts";
-import { JobService } from "../app/packages/server/src/jobs/JobService.ts";
-import { HeadscaleHttpApi } from "../app/packages/server/src/tailscale/HeadscaleHttpApi.ts";
-import { TailscaleUserInviteApi } from "../app/packages/server/src/tailscale/TailscaleUserInviteApi.ts";
+} from "../../app/packages/server/src/lib/CommandRunner.ts";
+import { FriendServiceImpl } from "../../app/packages/server/src/services/FriendService.ts";
+import { ActivityServiceImpl } from "../../app/packages/server/src/services/ActivityService.ts";
+import { AuditServiceImpl } from "../../app/packages/server/src/services/AuditService.ts";
+import { UsageServiceImpl } from "../../app/packages/server/src/services/UsageService.ts";
+import { RuntimeInventoryService } from "../../app/packages/server/src/services/InventoryService.ts";
+import { JobService } from "../../app/packages/server/src/jobs/JobService.ts";
+import { HeadscaleHttpApi } from "../../app/packages/server/src/tailscale/HeadscaleHttpApi.ts";
+import { TailscaleUserInviteApi } from "../../app/packages/server/src/tailscale/TailscaleUserInviteApi.ts";
 import {
   mockSystemHealthService,
   noopLogger,
   TEST_CONFIG,
-} from "../app/packages/server/src/test-helpers/mocks.ts";
-import { AdminAuth } from "../app/packages/server/src/auth/AdminAuth.ts";
-import { createTestDatabase } from "../app/packages/server/src/test-helpers/testDb.ts";
+} from "../../app/packages/server/src/test-helpers/mocks.ts";
+import { AdminAuth } from "../../app/packages/server/src/auth/AdminAuth.ts";
+import { createTestDatabase } from "../../app/packages/server/src/test-helpers/testDb.ts";
 
-// The PORTION-level k8s integration: a friend is added THROUGH THE tRPC API
-// (friends.addStart → jobs.progress → jobs.claimBundle) and the instance pod
-// materialises in the cluster as a side effect — real router, real services,
-// real SQLite, real `mc` (bundled in the manager image), the real instance
-// image (tailscaled ENABLED) and the real KubernetesRuntime. ZERO mocks: an
-// in-cluster HEADSCALE control plane (integration-tests/k8s-integrationtest.yaml) makes the
-// tailnet real too — the preauth key is actually minted, the pod's userspace
-// tailscaled actually enrolls, and offboard actually deletes the node. What
-// this still can't prove: `tailscale serve` over HTTPS (headscale issues no
-// certs — serve runs HTTP here) — that stays with the nightly real-tailnet
-// tier. MUST run IN-cluster (needs `mc` + cluster DNS + the mounted
-// ServiceAccount): integration-tests/run-integration.sh launches it as a pod.
-// Missing config FAILS (never skips): run it via the driver, not by hand.
+// Adds a friend through the real tRPC API; the instance pod materialises in
+// the cluster — zero mocks, real everything against the in-cluster headscale
+// (manifests.yaml). HTTPS serve can't be proven here (headscale issues no
+// certs) — that's the docker tier's job. Must run in-cluster: k8s/run.sh
+// launches it as a pod. Missing config fails, never skips.
 describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   beforeAll(() => {
     const missing: string[] = [];
@@ -57,14 +49,13 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
     if (missing.length) {
       throw new Error(
         `${missing.join(", ")} not set — run via ` +
-          `./integration-tests/run-integration.sh tier2 (in-cluster).`,
+          `./integration-tests/k8s/run.sh tier2 (in-cluster).`,
       );
     }
   });
 
-  // The test's OWN k8s API access (mounted SA token + cluster CA via DENO_CERT).
-  // The friend's client pod has nothing to do with the app's InstanceRuntime,
-  // so launching it never touches that. Returns parsed JSON (text() elsewhere).
+  // The test's own k8s API access via the mounted SA token (CA via
+  // DENO_CERT) — separate from the app's InstanceRuntime.
   const k8sApi =
     (token: string) =>
     async (method: string, path: string, body?: unknown): Promise<unknown> => {
@@ -87,12 +78,9 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         : await res.json().catch(() => undefined);
     };
 
-  // The friend's REAL backup over the tailnet: a backup-client pod, given ONLY
-  // bundle contents, joins the SAME headscale tailnet under its friend tag and
-  // runs Kopia through the instance's `tailscale serve` (WireGuard) — the
-  // friend-facing path the manager never touches. Runs as ROOT in a
-  // non-restricted namespace, like a friend's docker host. Must run with the
-  // CLAIMED keys, i.e. before rotate revokes them.
+  // A backup-client pod, given only the bundle, joins the tailnet under its
+  // friend tag and runs Kopia through `tailscale serve` — the friend-facing
+  // path. Must run before rotate revokes the claimed keys.
   const backupOverTailnet = async (
     k8s: ReturnType<typeof k8sApi>,
     mc: McShellClientFactory,
@@ -192,9 +180,8 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           namespace,
           dataSize: "50Mi",
           stateSize: "10Mi",
-          // k3d's built-in class stands in for the pantry here; the state PVC
-          // uses the cluster default (also local-path). The point of this tier
-          // is real provisioning, not which disk each class lands on.
+          // k3d's local-path class stands in for the pantry — this tier tests
+          // provisioning, not storage classes.
           pantryStorageClass: "local-path",
           // The instance joins the local headscale tailnet; headscale issues
           // no HTTPS certs, so serve falls back to plain HTTP.
@@ -220,16 +207,15 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         portRange: { min: 9000, max: 9010 },
         serveNodeTag: "tag:p0rt1on-serve",
       });
-      // Real control plane: the in-cluster headscale. Keys minted here are
-      // live — the instance pod redeems its serve key against this server.
+      // Real control plane: keys minted here are live — the instance pod
+      // redeems its serve key against this server.
       const tailscale = new HeadscaleHttpApi({
         baseUrl: headscaleUrl,
         apiKey: Deno.env.get("HEADSCALE_API_KEY") ?? "",
         user: "p0rt1on",
         baseDomain: "hs.test",
       });
-      // Auth-key enrollment only here — unconfigured (no personal token), so
-      // `configured` is false and no invite path is exercised.
+      // Unconfigured: auth-key enrollment only, no invite path.
       const userInvite = new TailscaleUserInviteApi({});
       const logger = noopLogger();
       const config = {
@@ -277,10 +263,9 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
       };
       const caller = createCallerFactory(appRouter)(context);
 
-      // Drive `mc` as the FRIEND, with their bundle creds — the same
-      // env-scoped mechanism McSmokeTester uses (nothing secret on argv).
-      // Returns the raw result instead of throwing: these calls are EXPECTED
-      // to fail, and the refusal IS the assertion.
+      // Drive `mc` as the friend with the bundle creds (env-scoped, nothing
+      // on argv). Returns the result instead of throwing — the refusal IS the
+      // assertion.
       const asFriend = (
         cred: { s3AccessKeyId: string; s3SecretKey: string },
         args: (alias: string) => string[],
@@ -338,18 +323,10 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         // The friend backs up for real over the tailnet (see helper above).
         await backupOverTailnet(k8s, mc, token, headscaleUrl, bundle);
 
-        // NEGATIVE PATH — the claim the whole product rests on. The friend
-        // HOLDS s3:DeleteObject, so a plain `rm` is MEANT to succeed: it
-        // writes a delete marker and every byte survives underneath as a
-        // version. What they must never manage is destroying those versions —
-        // that needs s3:DeleteObjectVersion (never granted) plus
-        // BypassGovernanceRetention (explicitly denied). An attacker holding
-        // the friend's keys can make backups look gone; not BE gone.
-        // Runs with the CLAIMED keys, before rotate revokes them.
-        // Use a canary the friend writes THEMSELVES, now that retention is
-        // armed, rather than leaning on Kopia's blobs: Kopia churns unretained
-        // index/marker objects, and `du` counts delete markers, so neither is
-        // a sound proxy for "the data survived".
+        // Ransomware guard: `rm` only writes a delete marker; destroying
+        // versions needs s3:DeleteObjectVersion (never granted) plus
+        // BypassGovernanceRetention (denied). The canary is written after
+        // retention is armed — Kopia's own churn proves nothing.
         const canary = `ransom-canary-${crypto.randomUUID().slice(0, 8)}`;
         const canaryFile = await tempFiles.write(canary);
         try {
@@ -360,8 +337,6 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           ]);
           expect(put.code).toBe(0);
 
-          // Destroying the version needs s3:DeleteObjectVersion (never
-          // granted) and BypassGovernanceRetention (explicitly denied).
           const purge = await asFriend(bundle, (a) => [
             "rm",
             "--versions",
@@ -382,9 +357,9 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
           await tempFiles.remove(canaryFile);
         }
 
-        // NEGATIVE PATH — the quota is what makes this a *portion* of the
-        // disk rather than the whole thing. addStart set 10 MiB; a write past
-        // it must be refused, or a friend can fill the host.
+        // Negative path — the quota makes this a *portion*: a write past the
+        // 10 MiB set at addStart must be refused, or a friend can fill the
+        // host.
         const oversizeFile = await tempFiles.write(
           "x".repeat(11 * 1024 * 1024),
         );
@@ -429,15 +404,12 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         expect(await tailscale.nodesByTag("tag:p0rt1on-friend-k8sit"))
           .toEqual([]);
 
-        // LEAK CHECK — listInstances() only sees StatefulSets. The PVCs,
-        // Secrets and Services are separate objects, and a surviving data PVC
-        // means the friend's bytes outlive their offboard (a disk leak AND a
-        // retention problem). Tripwire for the teardown ordering rules.
-        // Fetched BY NAME, not listed: the manager SA deliberately has `get`
-        // but not `list` on these (RBAC containment — tier 1 asserts it), so
-        // a label list would 403. Gone (404) or condemned (deletionTimestamp
-        // set) both count as cleaned up: k8s deletion is async, and a PVC
-        // lingering in Terminating until the pod unmounts is not a leak.
+        // Leak check: listInstances() only sees StatefulSets — a surviving
+        // data PVC would outlive the offboard (disk leak + retention
+        // problem). Fetched by name: the SA has `get` but not `list` (tier 1
+        // asserts that), so listing would 403. 404 or a set deletionTimestamp
+        // both count — k8s deletion is async, and a PVC in Terminating is not
+        // a leak.
         const cleanedUp = async (kind: string, name: string) => {
           const res = await fetch(
             `https://kubernetes.default.svc/api/v1/namespaces/${namespace}` +

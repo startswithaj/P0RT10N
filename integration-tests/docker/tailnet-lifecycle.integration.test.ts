@@ -1,25 +1,13 @@
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DenoTempFiles } from "../app/packages/server/src/lib/CommandRunner.ts";
-import { hasBinary } from "../app/packages/server/src/lib/hasBinary.ts";
+import { DenoTempFiles } from "../../app/packages/server/src/lib/CommandRunner.ts";
+import { hasBinary } from "../../app/packages/server/src/lib/hasBinary.ts";
 
-// The PORTION-level DOCKER integration over a REAL tailnet. Unlike the k8s
-// tier (which plays the manager in-process against headscale), this runs the
-// REAL manager image as a container and drives it through its HTTP tRPC
-// surface — so the image, the docker-socket wiring and the auth surface are
-// all under test. The manager mints the Tailscale key from the OAuth client
-// secret, the instance container enrolls on the real tailnet, and a FRIEND
-// container joins that same tailnet with the MINTED bundle key to write a
-// real Kopia backup through `tailscale serve`.
-//
-// The test process never joins the tailnet — the friend container does, like a
-// friend's actual machine. That is also why this needs no host Tailscale.
-//
-// What only this tier can prove: `tailscale serve` over HTTPS with real certs
-// (headscale issues none) and real tailnet semantics.
-//
-// Missing config FAILS (never skips): run it via
-// ./integration-tests/run-docker-tailnet.sh, which loads .env for you.
+// Runs the real manager image as a container over a REAL tailnet: it mints a
+// key from the OAuth secret, the instance enrolls, and a friend container
+// writes a real Kopia backup through `tailscale serve`. Only this tier proves
+// HTTPS serve with real certs. Missing config fails, never skips — run via
+// ./integration-tests/docker/run.sh (loads .env).
 describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => {
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
@@ -35,7 +23,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
     if (missing.length) {
       throw new Error(
         `not configured: ${missing.join(", ")} — run via ` +
-          `./integration-tests/run-docker-tailnet.sh (loads .env).`,
+          `./integration-tests/docker/run.sh (loads .env).`,
       );
     }
   });
@@ -44,21 +32,17 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const managerName = `p0rt1on-integrationtest-manager-${id}`;
   const friendName = `p0rt1on-integrationtest-friend-${id}`;
   const portion = `dockerintegrationtest${id}`;
-  // The network instances join is fixed in the runtime (DOCKER_NETWORK); the
-  // manager container has to be on it too, or it cannot reach them by name.
+  // Instances join this fixed runtime network (DOCKER_NETWORK); the manager
+  // must be on it too or it cannot reach them by name.
   const network = "p0rt1on-net";
   const port = 18080;
   const base = `http://127.0.0.1:${port}`;
-  // Admin auth is a TEST-HARNESS concern, not a real secret: the non-loopback
-  // manager bind requires auth on, so the test mints its own ephemeral creds
-  // rather than pulling them from .env (which only needs the tailnet secrets).
-  // The test owns both sides of this login.
+  // Not a real secret: the non-loopback bind requires auth, so the test mints
+  // its own ephemeral creds.
   const adminUser = "integrationtest-admin";
   const adminPass = crypto.randomUUID();
-  // The pantry is required manager config (a host dir the manager and the
-  // instances it launches share), not a secret — the test supplies its own
-  // throwaway path and bind-mounts it at the SAME absolute path inside the
-  // manager, exactly like compose, so instance data dirs resolve identically.
+  // Throwaway pantry dir, bind-mounted at the same absolute path inside the
+  // manager (as compose does) so instance data dirs resolve identically.
   const pantry = `${Deno.cwd()}/.p0rt1on-integrationtest-tmp/pantry-${id}`;
   const tmp = new DenoTempFiles("./.p0rt1on-integrationtest-tmp");
   const env = (k: string) => Deno.env.get(k) ?? "";
@@ -96,13 +80,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
       // Secrets ride an env-file, never argv (`ps` is world-readable).
       const managerEnv = await tmp.write(
         REQUIRED.map((k) => `${k}=${env(k)}`).join("\n") +
-          // A non-loopback admin bind is allowed ONLY with auth on — it is.
-          // DB under /tmp: `/app/data` is a compose volume mount, absent from
-          // a bare `docker run`, and a per-run throwaway DB is what a test
-          // wants anyway. This manager's allocator therefore cannot see ports
-          // a DEV manager already handed out; it bind-probes each candidate,
-          // so it only collides with a dev instance that is stopped (its port
-          // reads as free) and is started again mid-run.
+          // Auth must be on for the non-loopback bind. Throwaway DB under
+          // /tmp — /app/data only exists under compose.
           `\nP0RT1ON_ADMIN_BIND_HOST=0.0.0.0` +
           `\nP0RT1ON_ADMIN_USERNAME=${adminUser}` +
           `\nP0RT1ON_ADMIN_PASSWORD=${adminPass}` +
@@ -116,9 +95,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
       );
       let cookie = "";
       let friendId = "";
-      // Both env-files hold live secrets (master key, OAuth secret, the
-      // friend's S3 key + minted auth key) — they MUST be removed even if the
-      // test throws mid-flow.
+      // Both env-files hold live secrets — remove them even if the test
+      // throws mid-flow.
       let friendEnv: string | null = null;
 
       const trpc = async (proc: string, input?: unknown) => {
@@ -147,9 +125,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
       };
 
       try {
-        // The manager creates each friend's dir under the pantry; instances
-        // (launched on the host daemon) bind-mount the same host path, so it
-        // must exist and be mounted at the identical path inside the manager.
+        // Instances bind-mount the same host path the manager writes friend
+        // dirs under, so it must exist before the run.
         await Deno.mkdir(pantry, { recursive: true });
         // 1. The REAL manager image, launching instances via the host socket.
         const run = await docker([
@@ -213,9 +190,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
           90,
         );
 
-        // Real serve endpoint on the real tailnet — HTTPS with a real cert,
-        // the thing headscale structurally cannot prove. The endpoint is the
-        // node's live MagicDNS FQDN (always <host>.<tailnet>.ts.net).
+        // A real HTTPS endpoint with a real cert — always the node's MagicDNS
+        // FQDN (<host>.<tailnet>.ts.net).
         expect(bundle.s3Endpoint).toContain(".ts.net");
         expect(bundle.s3Endpoint.startsWith("https://")).toBe(true);
         expect(bundle.tsAuthKey ?? "").not.toBe("");
@@ -223,9 +199,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         const friends = await trpc("friends.list") as { id: string }[];
         friendId = friends[0].id;
 
-        // 4. THE POINT: a friend container joins the tailnet with the MINTED
+        // 4. The point: a friend container joins the tailnet with the minted
         //    key and writes a real Kopia backup through `tailscale serve`.
-        //    Userspace tailscaled — no TUN, so a plain `docker run` suffices.
         friendEnv = await tmp.write(
           `S3_ENDPOINT=${bundle.s3Endpoint}\nS3_BUCKET=${bundle.bucket}\n` +
             `S3_ACCESS_KEY_ID=${bundle.s3AccessKeyId}\n` +
@@ -253,7 +228,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         // Exit 0 means Kopia connected over the tailnet and wrote a snapshot.
         expect(backup.code).toBe(0);
 
-        // 5. Offboard tears the portion down for real.
+        // 5. Start offboard; only the job start is asserted — the finally
+        //    block force-removes the containers.
         const off = await trpc("friends.offboardStart", { friendId }) as {
           jobId: string;
         };

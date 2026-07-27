@@ -3,20 +3,16 @@ import { expect } from "@std/expect";
 import {
   buildRestClient,
   KubernetesRuntime,
-} from "../app/packages/server/src/runtime/KubernetesRuntime.ts";
+} from "../../app/packages/server/src/runtime/KubernetesRuntime.ts";
 import { CoreV1Api } from "@cloudydeno/kubernetes-apis/core/v1";
-import type { FetchLike } from "../app/packages/server/src/tailscale/TailscaleHttpApi.ts";
-import type { InstanceSpec } from "../app/packages/server/src/runtime/runtime.ts";
+import type { FetchLike } from "../../app/packages/server/src/tailscale/TailscaleHttpApi.ts";
+import type { InstanceSpec } from "../../app/packages/server/src/runtime/runtime.ts";
 
-// Drives a REAL k8s API server (k3d/kind), authenticated as the
-// p0rt1on-manager ServiceAccount — so this proves both the API mechanics a
-// fake can't (server-side apply adopt, scale, PSA admission) AND that the
-// least-privilege Role actually suffices / contains.
-// Driver: integration-tests/run-integration.sh (creates the cluster, applies the
-// manifests, mints the SA token + a headscale preauth key, imports the REAL
-// instance image — readiness means tailscaled actually enrolled). No secrets
-// needed — the tailnet is the local headscale. Missing K8S_INTEGRATIONTEST_* config FAILS
-// (never skips): run it via the driver, not by hand.
+// Drives a real k8s API server (k3d) as the p0rt1on-manager ServiceAccount:
+// server-side apply, scale, PSA admission, and proof the least-privilege Role
+// both suffices and contains. Run via integration-tests/k8s/run.sh — it
+// creates the cluster, mints the SA token + headscale preauth key, and
+// imports the real instance image. Missing config fails, never skips.
 describe("KubernetesRuntime (integration: real k8s API)", () => {
   const server = Deno.env.get("K8S_INTEGRATIONTEST_SERVER");
   const token = Deno.env.get("K8S_INTEGRATIONTEST_TOKEN");
@@ -27,7 +23,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
     if (!(server && token && caFile)) {
       throw new Error(
         "K8S_INTEGRATIONTEST_SERVER/K8S_INTEGRATIONTEST_TOKEN/K8S_INTEGRATIONTEST_CA not set — run via " +
-          "./integration-tests/run-integration.sh tier1 (it derives them from " +
+          "./integration-tests/k8s/run.sh tier1 (it derives them from " +
           "the k3d cluster).",
       );
     }
@@ -49,9 +45,8 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
       caCert: Deno.readTextFileSync(caFile ?? ""),
     });
 
-  // A test-owned typed client to inspect real cluster state directly (the
-  // runtime abstracts Secrets/PVCs away). Same lib the runtime uses — no
-  // hand-built URLs.
+  // Test-owned typed client for inspecting state the runtime abstracts away
+  // (Secrets, PVCs). Same lib the runtime uses — no hand-built URLs.
   const readApi = async () =>
     new CoreV1Api(await restClient()).namespace("p0rt1on");
 
@@ -106,10 +101,9 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         await rt.ensureInstance(spec);
         await rt.ensureInstance(spec);
 
-        // PSA `restricted` is enforced on the namespace — the pod being
-        // ADMITTED at all proves our generated pod spec satisfies it, and
-        // readiness proves the REAL image came up: tailscaled (non-root,
-        // userspace) enrolled on the tailnet and MinIO is live.
+        // Admission proves the generated pod spec satisfies PSA `restricted`;
+        // readiness proves the real image came up (tailscaled enrolled, MinIO
+        // live).
         await rt.waitUntilHealthy(spec.name);
         expect(await rt.instanceHealth(spec.name)).toBe("healthy");
 
@@ -187,10 +181,9 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
   it(
     "PSA restricted rejects a privileged pod in the namespace",
     async () => {
-      // The manager Role has no pod-create verb, so this must be proven with
-      // the pod ADMISSION error shape: create via a StatefulSet the manager
-      // CAN make, with a privileged template — the STS is accepted but the
-      // pod is rejected by PSA, visible as replicas never materialising.
+      // The Role can't create pods, so PSA rejection is proven via a
+      // StatefulSet the manager CAN create: the STS is admitted, but its
+      // privileged pod never materialises.
       const raw = fetchWithCa();
       const res = await raw(
         `${server}/apis/apps/v1/namespaces/p0rt1on/statefulsets/it-priv?fieldManager=p0rt1on&force=true`,
@@ -223,8 +216,8 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         },
       );
       try {
-        // The STS may be admitted or warned-and-admitted; what matters is the
-        // pod: give the controller a moment, then assert no pod exists.
+        // STS admission may warn; what matters is the pod — give the
+        // controller a moment, then assert none exists.
         expect(res.status).toBeLessThan(500);
         await new Promise((r) => setTimeout(r, 3000));
         const pod = await raw(

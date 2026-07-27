@@ -7,10 +7,10 @@
 # Locally: reads .env (the same file `docker compose` uses).
 # In CI: .env is absent, so the vars must already be in the environment.
 #
-#   ./integration-tests/run-docker-tailnet.sh          # build images + run
-#   ./integration-tests/run-docker-tailnet.sh run      # run (images built)
+#   ./integration-tests/docker/run.sh          # build images + run
+#   ./integration-tests/docker/run.sh run      # run (images built)
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 MODE="${1:-all}"
 MANAGER_IMAGE="${MANAGER_IMAGE:-p0rt1on-manager:integrationtest}"
@@ -43,4 +43,4 @@ MANAGER_IMAGE="$MANAGER_IMAGE" \
   P0RT1ON_INSTANCE_IMAGE="$INSTANCE_IMAGE" \
   CLIENT_IMAGE="$CLIENT_IMAGE" \
   deno test --allow-read --allow-write --allow-env --allow-net --allow-run \
-  integration-tests/Provisioning.docker.integration.test.ts
+  integration-tests/docker/tailnet-lifecycle.integration.test.ts
