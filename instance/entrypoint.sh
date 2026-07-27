@@ -120,16 +120,20 @@ log "tailnet is up"
 # MagicDNS + HTTPS certificates are enabled on the tailnet.
 log "publishing MinIO via tailscale serve (${TAILSCALE_SERVE_MODE})"
 if [ "$TAILSCALE_SERVE_MODE" = "http" ]; then
-  # No cert issuance on this control plane (headscale) — serve plain HTTP :80.
-  # The tailnet itself (WireGuard) is the encryption on this path.
-  serve_port="--http=80"
+  # No cert issuance on this control plane (headscale) — forward raw TCP on
+  # :80 instead of HTTP-proxying: serve's HTTP mode routes by Host header and
+  # 404s bare-IP requests, and http mode's friend endpoint IS the tailnet IP
+  # (works with MagicDNS off). WireGuard is the encryption on this path.
+  serve_port="--tcp=80"
+  serve_target="tcp://localhost:${MINIO_PORT}"
 else
   serve_port="--https=443"
+  serve_target="http://localhost:${MINIO_PORT}"
 fi
 serve_rc=0
 # timeout guards against serve blocking on a cert that will never issue.
 serve_out=$(timeout 30 tailscale --socket="$TS_SOCKET" serve --bg "$serve_port" \
-  "http://localhost:${MINIO_PORT}" 2>&1) || serve_rc=$?
+  "$serve_target" 2>&1) || serve_rc=$?
 if [ "$serve_rc" -ne 0 ]; then
   printf '%s\n' \
     "tailscale serve (${TAILSCALE_SERVE_MODE}) failed (rc=${serve_rc}): ${serve_out}" \
