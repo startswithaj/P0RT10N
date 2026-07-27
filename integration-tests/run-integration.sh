@@ -15,6 +15,11 @@
 #   ./integration-tests/run-integration.sh build    # (re)build + import images only
 #   ./integration-tests/run-integration.sh tier1    # runtime tier (images built)
 #   ./integration-tests/run-integration.sh tier2    # portion tier (images built)
+#   ./integration-tests/run-integration.sh clean    # delete the k3d cluster
+#
+# Cluster lifetime: a cluster this run CREATED is deleted on exit (including on
+# failure). A cluster that already existed is left alone — it's the user's.
+# K8S_INTEGRATIONTEST_KEEP=1 keeps it either way, for a fast rerun loop.
 #
 # Rebuild rule: app/ changed → build (manager image); instance/ changed →
 # build; backup-client/ changed → build. Test-file-only edits: rerun a tier.
@@ -24,6 +29,8 @@ cd "$(dirname "$0")/.."
 MODE="${1:-all}"
 CLUSTER="${K8S_INTEGRATIONTEST_CLUSTER:-p0rt1on-integrationtest}"
 CTX="k3d-$CLUSTER"
+CREATED_CLUSTER=0
+CA_FILE=""
 # Every kubectl call is PINNED to the k3d context — never the user's current
 # context (which may be a real cluster this script must not touch).
 kc() { kubectl --context "$CTX" "$@"; }
@@ -33,6 +40,28 @@ INSTANCE_IMAGE="p0rt1on-instance:integrationtest"
 MANAGER_IMAGE="p0rt1on-manager:integrationtest"
 CLIENT_IMAGE="p0rt1on-backup-client:integrationtest"
 HEADSCALE_URL="http://headscale.p0rt1on.svc:8080"
+
+# Delete the cluster on exit, but ONLY if this run created it — a pre-existing
+# cluster is the user's. K8S_INTEGRATIONTEST_KEEP=1 opts out (fast rerun loop).
+# Idempotent: "already absent" is success.
+# `[ ... ] && return` is unsafe under `set -e` (a false test aborts the
+# function before the delete) — hence the explicit `if`.
+teardown_cluster() {
+  if [ "$CREATED_CLUSTER" = 1 ] &&
+    [ "${K8S_INTEGRATIONTEST_KEEP:-0}" != 1 ]; then
+    k3d cluster delete "$CLUSTER" >/dev/null 2>&1 || true
+  fi
+}
+
+# One EXIT trap for everything — a second `trap ... EXIT` anywhere would
+# silently replace this one and leak the cluster.
+cleanup() {
+  local code=$?
+  if [ -n "$CA_FILE" ]; then rm -f "$CA_FILE"; fi
+  teardown_cluster
+  exit "$code"
+}
+trap cleanup EXIT
 
 build_images() {
   docker build -t "$INSTANCE_IMAGE" instance
@@ -48,11 +77,13 @@ build_images() {
 setup() {
   # k3d switches the default context on create; kc pins --context, so the
   # switch would only clobber the user's current-context for no gain.
-  k3d cluster list "$CLUSTER" >/dev/null 2>&1 ||
+  if ! k3d cluster list "$CLUSTER" >/dev/null 2>&1; then
     k3d cluster create "$CLUSTER" --wait --timeout 120s \
       --kubeconfig-switch-context=false
+    CREATED_CLUSTER=1
+  fi
   kc apply -f deploy/k8s/p0rt1on.yaml
-  kc apply -f integration-tests/headscale-integrationtest.yaml
+  kc apply -f integration-tests/k8s-integrationtest.yaml
   # The manager Deployment isn't exercised by these tiers (the runner pod
   # plays the manager) and its unimported :latest image would just
   # crash-loop and waste node disk — keep it at 0 during tests.
@@ -76,7 +107,6 @@ tier1() {
   SERVER="$(kc config view -o \
     jsonpath="{.clusters[?(@.name=='$CTX')].cluster.server}")"
   CA_FILE="$(mktemp)"
-  trap 'rm -f "$CA_FILE"' EXIT
   kc config view --raw -o \
     jsonpath="{.clusters[?(@.name=='$CTX')].cluster.certificate-authority-data}" |
     base64 -d > "$CA_FILE"
@@ -115,7 +145,7 @@ tier2() {
   "spec": {
     "serviceAccountName": "p0rt1on-manager",
     "securityContext": {
-      "runAsNonRoot": true, "runAsUser": 1000, "runAsGroup": 1000,
+      "runAsNonRoot": true, "runAsUser": 1993, "runAsGroup": 1993,
       "seccompProfile": {"type": "RuntimeDefault"}
     },
     "containers": [{
@@ -134,7 +164,6 @@ tier2() {
         {"name": "TAILSCALE_LOGIN_SERVER", "value": "$HEADSCALE_URL"},
         {"name": "DENO_CERT",
          "value": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-        {"name": "DENO_DIR", "value": "/tmp/deno"},
         {"name": "HOME", "value": "/tmp"}
       ],
       "securityContext": {
@@ -148,6 +177,13 @@ JSON
 )"
 }
 
+# `clean` must not run setup — that would create a cluster just to delete it.
+if [ "$MODE" = clean ]; then
+  k3d cluster delete "$CLUSTER" >/dev/null 2>&1 || true
+  echo "deleted cluster $CLUSTER (or it was already absent)"
+  exit 0
+fi
+
 setup
 case "$MODE" in
   build) build_images ;;
@@ -158,5 +194,5 @@ case "$MODE" in
     tier1
     tier2
     ;;
-  *) echo "usage: $0 [build|tier1|tier2]" >&2 && exit 2 ;;
+  *) echo "usage: $0 [build|tier1|tier2|clean]" >&2 && exit 2 ;;
 esac

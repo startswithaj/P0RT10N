@@ -56,6 +56,15 @@ CMD ["deno", "run", \
 FROM base AS integration
 COPY integration-tests ./integration-tests
 
+# The base stage caches only the server entrypoint, so the suites' own deps were
+# absent and the runner resolved them at test time. That install relinks
+# node_modules, which Deno 2.9 aborts on when the link already exists (EEXIST) —
+# 2.8 tolerated it. Caching here means no install happens at run time; the chown
+# hands the tree and the cache to the user the runner pod runs as, so a relink
+# would be permitted rather than fatal.
+RUN deno cache integration-tests/*.ts \
+  && chown -R deno:deno /app /deno-dir
+
 # Production. Deliberately last and deliberately empty: the default build target
 # is the final stage, so forgetting `--target` yields the image WITHOUT tests.
 FROM base AS manager
