@@ -19,7 +19,7 @@ import {
 // key from the OAuth secret, the instance enrolls, and a friend container
 // writes a real Kopia backup through `tailscale serve`. Only this tier proves
 // HTTPS serve with real certs. Missing config fails, never skips — run via
-// ./integration-tests/docker/run.sh (loads .env).
+// ./integration-tests/docker/run.ts (loads .env).
 describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => {
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
@@ -33,7 +33,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
     requireConfig({
       env: REQUIRED,
       binaries: ["docker"],
-      hint: "run via ./integration-tests/docker/run.sh (loads .env).",
+      hint: "run via ./integration-tests/docker/run.ts (loads .env).",
     })
   );
 

@@ -49,7 +49,7 @@ import {
 // Adds a friend through the real tRPC API; the instance pod materialises in
 // the cluster — zero mocks, real everything against the in-cluster headscale
 // (manifests.yaml). HTTPS serve can't be proven here (headscale issues no
-// certs) — that's the docker tier's job. Must run in-cluster: k8s/run.sh
+// certs) — that's the docker tier's job. Must run in-cluster: k8s/run.ts
 // launches it as a pod. Missing config fails, never skips.
 describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   const INSTANCE = "p0rt1on-k8sit";
@@ -59,7 +59,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   beforeAll(() =>
     requireConfig({
       env: ["HEADSCALE_URL", "HEADSCALE_API_KEY"],
-      hint: "run via ./integration-tests/k8s/run.sh tier2 (in-cluster).",
+      hint: "run via ./integration-tests/k8s/run.ts tier2 (in-cluster).",
     })
   );
 

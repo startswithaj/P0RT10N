@@ -43,7 +43,7 @@ jobs:
           curl -fsSLO "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           sudo install -m 0755 kubectl /usr/local/bin/kubectl
       - name: Build images + tier1 + tier2
-        run: ./integration-tests/k8s/run.sh
+        run: ./integration-tests/k8s/run.ts
 
   docker-tailnet:
     name: docker portion — real tailnet
@@ -76,4 +76,4 @@ jobs:
           echo "P0RT1ON_MASTER_KEY=$KEY" >> "$GITHUB_ENV"
           echo "P0RT1ON_ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
       - name: Portion e2e over the real tailnet (builds all three images)
-        run: ./integration-tests/docker/run.sh
+        run: ./integration-tests/docker/run.ts

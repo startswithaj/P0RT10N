@@ -91,8 +91,8 @@ port reads as free) and gets started again mid-run.
 **Run:**
 
 ```sh
-./integration-tests/docker/run.sh       # build images + run
-./integration-tests/docker/run.sh run   # images already built
+./integration-tests/docker/run.ts       # build images + run
+./integration-tests/docker/run.ts run   # images already built
 ```
 
 _(Replaced `DockerRuntime.integration.test.ts`, deleted 2026-07-17: it burned a
@@ -103,9 +103,9 @@ running container without starting a second", which needs no tailnet.)_
 
 ---
 
-## 3 & 4. Kubernetes tiers — `k8s/run.sh`
+## 3 & 4. Kubernetes tiers — `k8s/run.ts`
 
-Driven by **`integration-tests/k8s/run.sh`**. The control plane is an
+Driven by **`integration-tests/k8s/run.ts`**. The control plane is an
 **in-cluster headscale**, so **no Tailscale account or secrets are needed** —
 REAL images only. Every test-only k8s object (headscale, the friend-client
 namespace + RBAC, the `p0rt1on-pantry` StorageClass) lives in
@@ -125,10 +125,10 @@ manager Role come from the shipped `deploy/k8s/p0rt1on.yaml`.
 **Run:**
 
 ```sh
-./integration-tests/k8s/run.sh          # build images + both tiers
-./integration-tests/k8s/run.sh build    # (re)build + import images only
-./integration-tests/k8s/run.sh tier1    # runtime tier (images built)
-./integration-tests/k8s/run.sh tier2    # portion tier (images built)
+./integration-tests/k8s/run.ts          # build images + both tiers
+./integration-tests/k8s/run.ts build    # (re)build + import images only
+./integration-tests/k8s/run.ts tier1    # runtime tier (images built)
+./integration-tests/k8s/run.ts tier2    # portion tier (images built)
 ```
 
 **Rebuild rule:** `app/`, `instance/`, or `backup-client/` changed → `build`;
