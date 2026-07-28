@@ -1,30 +1,27 @@
-#!/usr/bin/env -S deno run --allow-run --allow-read --allow-write --allow-env
 // k8s integration driver — REAL images, in-cluster headscale (no secrets).
 //
-//   ./integration-tests/k8s/run.ts          # build images + both tiers
-//   ./integration-tests/k8s/run.ts build    # (re)build + import images only
-//   ./integration-tests/k8s/run.ts tier1    # runtime tier (images built)
-//   ./integration-tests/k8s/run.ts tier2    # portion tier (images built)
-//   ./integration-tests/k8s/run.ts clean    # delete the k3d cluster
+//   deno task test:integration:k8s          # build images + both tiers
+//   deno task test:integration:k8s build    # (re)build + import images only
+//   deno task test:integration:k8s tier1    # runtime tier (images built)
+//   deno task test:integration:k8s tier2    # portion tier (images built)
+//   deno task test:integration:k8s clean    # delete the k3d cluster
 //
 // A cluster this run CREATED is deleted on exit (K8S_INTEGRATIONTEST_KEEP=1
 // keeps it); a pre-existing cluster is the user's and is left alone.
-import { capture, parseKeyOutput, requireBinaries, run } from "../driver.ts";
+import $ from "@david/dax";
+import { parseKeyOutput, requireBinaries } from "../driver.ts";
 import { DEFAULT_HEADSCALE_URL, until } from "../helpers.ts";
 
 const MODES = ["all", "build", "tier1", "tier2", "clean"] as const;
 const mode = Deno.args[0] ?? "all";
 if (!(MODES as readonly string[]).includes(mode)) {
-  console.error(`usage: run.ts [${MODES.join("|")}]`);
+  console.error(`usage: deno task test:integration:k8s [${MODES.join("|")}]`);
   Deno.exit(2);
 }
 
 // All paths below are repo-root relative.
 Deno.chdir(new URL("../..", import.meta.url));
-requireBinaries("docker", "k3d", {
-  bin: "kubectl",
-  probeArgs: ["version", "--client"],
-});
+requireBinaries("docker", "k3d", "kubectl");
 
 const CLUSTER = Deno.env.get("K8S_INTEGRATIONTEST_CLUSTER") ??
   "p0rt1on-integrationtest";
@@ -36,20 +33,14 @@ const MANAGER_IMAGE = "p0rt1on-manager:integrationtest";
 const CLIENT_IMAGE = "p0rt1on-backup-client:integrationtest";
 const HEADSCALE_URL = DEFAULT_HEADSCALE_URL;
 const API_KEY_SECRET = "p0rt1on-integrationtest-headscale";
+const RUNNER = "p0rt1on-integrationtest-runner";
 
 // Every kubectl call is PINNED to the k3d context — never the user's current
 // context (which may be a real cluster this driver must not touch).
-const kc = (args: string[], opts = {}) =>
-  run("kubectl", ["--context", CTX, ...args], opts);
+const kc = (args: string[]) => $`kubectl --context ${CTX} ${args}`;
 
-const kcCapture = (args: string[], opts = {}) =>
-  capture("kubectl", ["--context", CTX, ...args], opts);
-
-const headscale = (args: string[], opts = {}) =>
-  kcCapture(
-    ["exec", "deploy/headscale", "-n", "p0rt1on", "--", "headscale", ...args],
-    opts,
-  );
+const headscale = (args: string[]) =>
+  kc(["exec", "deploy/headscale", "-n", "p0rt1on", "--", "headscale", ...args]);
 
 const state = { createdCluster: false, toreDown: false };
 
@@ -61,9 +52,7 @@ async function teardown(): Promise<void> {
   ) {
     return;
   }
-  const del = await capture("k3d", ["cluster", "delete", CLUSTER], {
-    check: false,
-  });
+  const del = await $`k3d cluster delete ${CLUSTER}`.noThrow().quiet();
   if (del.code !== 0) {
     console.error(
       `WARNING: failed to delete cluster ${CLUSTER}: ${del.stderr.trim()}`,
@@ -73,29 +62,18 @@ async function teardown(): Promise<void> {
 
 // Idempotent across reruns (headscale state is an emptyDir, the pod persists).
 async function ensureHeadscaleUser(): Promise<void> {
-  const list = await headscale(["users", "list", "--output", "json"], {
-    check: false,
-  });
+  const list = await headscale(["users", "list", "--output", "json"])
+    .noThrow().quiet();
   if (list.code === 0 && list.stdout.includes('"p0rt1on"')) return;
   await headscale(["users", "create", "p0rt1on"]);
 }
 
 async function setup(): Promise<void> {
-  const exists = await capture("k3d", ["cluster", "list", CLUSTER], {
-    check: false,
-  });
+  const exists = await $`k3d cluster list ${CLUSTER}`.noThrow().quiet();
   if (exists.code !== 0) {
     // --kubeconfig-switch-context=false: never clobber the user's current
     // kubectl context (kc pins --context anyway).
-    await run("k3d", [
-      "cluster",
-      "create",
-      CLUSTER,
-      "--wait",
-      "--timeout",
-      "120s",
-      "--kubeconfig-switch-context=false",
-    ]);
+    await $`k3d cluster create ${CLUSTER} --wait --timeout 120s --kubeconfig-switch-context=false`;
     state.createdCluster = true;
   }
   await kc(["apply", "-f", "deploy/k8s/p0rt1on.yaml"]);
@@ -122,32 +100,17 @@ async function setup(): Promise<void> {
 }
 
 async function buildImages(): Promise<void> {
-  await run("docker", ["build", "-t", INSTANCE_IMAGE, "instance"]);
+  await $`docker build -t ${INSTANCE_IMAGE} instance`;
   // --target integration: the suites live only in that stage, not in the
   // published manager image.
-  await run("docker", [
-    "build",
-    "--target",
-    "integration",
-    "-t",
-    MANAGER_IMAGE,
-    ".",
-  ]);
-  await run("docker", ["build", "-t", CLIENT_IMAGE, "backup-client"]);
-  await run("k3d", [
-    "image",
-    "import",
-    INSTANCE_IMAGE,
-    MANAGER_IMAGE,
-    CLIENT_IMAGE,
-    "-c",
-    CLUSTER,
-  ]);
+  await $`docker build --target integration -t ${MANAGER_IMAGE} .`;
+  await $`docker build -t ${CLIENT_IMAGE} backup-client`;
+  await $`k3d image import ${INSTANCE_IMAGE} ${MANAGER_IMAGE} ${CLIENT_IMAGE} -c ${CLUSTER}`;
 }
 
 // Mint a preauth key for a tag (user id 1 = the single user setup creates).
 async function mintKey(tag: string): Promise<string> {
-  const res = await headscale([
+  const out = await headscale([
     "preauthkeys",
     "create",
     "--user",
@@ -156,25 +119,25 @@ async function mintKey(tag: string): Promise<string> {
     tag,
     "--expiration",
     "30m",
-  ]);
-  return parseKeyOutput(res.stdout);
+  ]).text();
+  return parseKeyOutput(out);
 }
 
 // ---- tier 1: runtime mechanics, from the host as the manager SA ------------
 async function tier1(): Promise<void> {
-  const server = (await kcCapture([
+  const server = await kc([
     "config",
     "view",
     "-o",
     `jsonpath={.clusters[?(@.name=='${CTX}')].cluster.server}`,
-  ])).stdout.trim();
-  const caB64 = (await kcCapture([
+  ]).text();
+  const caB64 = await kc([
     "config",
     "view",
     "--raw",
     "-o",
     `jsonpath={.clusters[?(@.name=='${CTX}')].cluster.certificate-authority-data}`,
-  ])).stdout.trim();
+  ]).text();
   const caFile = await Deno.makeTempFile({
     prefix: "p0rt1on-integrationtest-ca-",
   });
@@ -183,35 +146,26 @@ async function tier1(): Promise<void> {
     Uint8Array.from(atob(caB64), (c) => c.charCodeAt(0)),
   );
   try {
-    const token = (await kcCapture([
+    const token = await kc([
       "create",
       "token",
       "p0rt1on-manager",
       "-n",
       "p0rt1on",
       "--duration=15m",
-    ])).stdout.trim();
+    ]).text();
     // A tier-1-only tag: its node must never satisfy tier 2's
     // tag:p0rt1on-serve assertions.
     const authKey = await mintKey("tag:p0rt1on-integrationtest-tier1");
-    await run("deno", [
-      "test",
-      "--allow-read",
-      "--allow-write",
-      "--allow-env",
-      "--allow-net",
-      "--unstable-net",
-      "integration-tests/k8s/runtime.integration.test.ts",
-    ], {
-      env: {
+    await $`deno test --allow-read --allow-write --allow-env --allow-net --unstable-net integration-tests/k8s/runtime.integration.test.ts`
+      .env({
         K8S_INTEGRATIONTEST_SERVER: server,
         K8S_INTEGRATIONTEST_TOKEN: token,
         K8S_INTEGRATIONTEST_CA: caFile,
         K8S_INTEGRATIONTEST_IMAGE: INSTANCE_IMAGE,
         K8S_INTEGRATIONTEST_AUTHKEY: authKey,
         K8S_INTEGRATIONTEST_LOGIN_SERVER: HEADSCALE_URL,
-      },
-    });
+      });
   } finally {
     await Deno.remove(caFile).catch(() => undefined);
   }
@@ -233,24 +187,20 @@ async function tier2(): Promise<void> {
   ]);
   await ensureHeadscaleUser();
   const apiKey = parseKeyOutput(
-    (await headscale(["apikeys", "create", "--expiration", "1h"])).stdout,
+    await headscale(["apikeys", "create", "--expiration", "1h"]).text(),
   );
 
   // The API key reaches the pod via a Secret applied over STDIN — never argv
   // (kubectl's argv is world-readable in `ps` for the pod's lifetime).
-  await kc(["apply", "-f", "-"], {
-    stdin: JSON.stringify({
-      apiVersion: "v1",
-      kind: "Secret",
-      metadata: { name: API_KEY_SECRET, namespace: "p0rt1on" },
-      stringData: { apiKey },
-    }),
-  });
+  await kc(["apply", "-f", "-"]).stdinText(JSON.stringify({
+    apiVersion: "v1",
+    kind: "Secret",
+    metadata: { name: API_KEY_SECRET, namespace: "p0rt1on" },
+    stringData: { apiKey },
+  }));
 
   await runRunnerPod();
 }
-
-const RUNNER = "p0rt1on-integrationtest-runner";
 
 // The runner pod, built as a typed object (no JSON heredoc to misquote).
 function runnerPodManifest(): unknown {
@@ -312,7 +262,7 @@ function runnerPodManifest(): unknown {
 }
 
 async function podPhase(): Promise<string> {
-  return (await kcCapture([
+  return await kc([
     "get",
     "pod",
     RUNNER,
@@ -320,7 +270,7 @@ async function podPhase(): Promise<string> {
     "p0rt1on",
     "-o",
     "jsonpath={.status.phase}",
-  ])).stdout.trim();
+  ]).text();
 }
 
 // Create → stream logs → read the pod's terminal phase. NOT `kubectl run
@@ -329,9 +279,9 @@ async function podPhase(): Promise<string> {
 async function runRunnerPod(): Promise<void> {
   await kc(["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"]);
   try {
-    await kc(["apply", "-f", "-"], {
-      stdin: JSON.stringify(runnerPodManifest()),
-    });
+    await kc(["apply", "-f", "-"]).stdinText(
+      JSON.stringify(runnerPodManifest()),
+    );
     await until(
       "runner pod to start",
       async () => {
@@ -345,16 +295,14 @@ async function runRunnerPod(): Promise<void> {
     const phase = await until(
       "runner pod to finish",
       async () => {
-        await run("kubectl", [
-          "--context",
-          CTX,
+        await kc([
           "logs",
           "-f",
           ...(stream.first ? [] : ["--tail=0"]),
           RUNNER,
           "-n",
           "p0rt1on",
-        ], { check: false });
+        ]).noThrow();
         stream.first = false;
         const p = await podPhase();
         return p === "Succeeded" || p === "Failed" ? p : null;
@@ -364,32 +312,26 @@ async function runRunnerPod(): Promise<void> {
     );
     if (phase !== "Succeeded") throw new Error(`runner pod ${phase}`);
   } finally {
-    await kcCapture(
-      ["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"],
-      { check: false },
-    );
-    await kcCapture([
+    await kc(["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"])
+      .noThrow().quiet();
+    await kc([
       "delete",
       "secret",
       API_KEY_SECRET,
       "-n",
       "p0rt1on",
       "--ignore-not-found",
-    ], { check: false });
+    ]).noThrow().quiet();
   }
 }
 
 // `clean` must not run setup — that would create a cluster just to delete it.
 if (mode === "clean") {
-  const del = await capture("k3d", ["cluster", "delete", CLUSTER], {
-    check: false,
-  });
+  const del = await $`k3d cluster delete ${CLUSTER}`.noThrow().quiet();
   if (del.code === 0) {
     console.log(`deleted cluster ${CLUSTER}`);
   } else {
-    const still = await capture("k3d", ["cluster", "list", CLUSTER], {
-      check: false,
-    });
+    const still = await $`k3d cluster list ${CLUSTER}`.noThrow().quiet();
     if (still.code === 0) {
       console.error(`failed to delete ${CLUSTER}: ${del.stderr.trim()}`);
       Deno.exit(1);

@@ -32,7 +32,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         "K8S_INTEGRATIONTEST_TOKEN",
         "K8S_INTEGRATIONTEST_CA",
       ],
-      hint: "run via ./integration-tests/k8s/run.ts tier1 (it derives them " +
+      hint: "run via deno task test:integration:k8s tier1 (it derives them " +
         "from the k3d cluster).",
     })
   );
