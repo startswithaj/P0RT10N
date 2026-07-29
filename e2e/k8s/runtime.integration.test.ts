@@ -16,7 +16,7 @@ import {
 
 // Drives a real k8s API server (k3d) as the p0rt1on-manager ServiceAccount:
 // server-side apply, scale, PSA admission, and proof the least-privilege Role
-// both suffices and contains. Run via integration-tests/k8s/run.ts — it
+// both suffices and contains. Run via e2e/k8s/run.ts — it
 // creates the cluster, mints the SA token + headscale preauth key, and
 // imports the real instance image. Missing config fails, never skips.
 describe("KubernetesRuntime (integration: real k8s API)", () => {
@@ -32,7 +32,7 @@ describe("KubernetesRuntime (integration: real k8s API)", () => {
         "K8S_INTEGRATIONTEST_TOKEN",
         "K8S_INTEGRATIONTEST_CA",
       ],
-      hint: "run via deno task test:integration:k8s tier1 (it derives them " +
+      hint: "run via deno task test:e2e:k8s tier1 (it derives them " +
         "from the k3d cluster).",
     })
   );

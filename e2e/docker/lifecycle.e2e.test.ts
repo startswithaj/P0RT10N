@@ -19,7 +19,7 @@ import {
 // key from the OAuth secret, the instance enrolls, and a friend container
 // writes a real Kopia backup through `tailscale serve`. Only this tier proves
 // HTTPS serve with real certs. Missing config fails, never skips — run via
-// deno task test:integration:docker (loads .env).
+// deno task test:e2e:docker (loads .env).
 describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => {
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
@@ -33,7 +33,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
     requireConfig({
       env: REQUIRED,
       binaries: ["docker"],
-      hint: "run via deno task test:integration:docker (loads .env).",
+      hint: "run via deno task test:e2e:docker (loads .env).",
     })
   );
 

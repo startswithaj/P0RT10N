@@ -52,9 +52,9 @@ CMD ["deno", "run", \
 
 # Test-only image: the integration suites layered onto the real manager image,
 # so CI exercises exactly what ships (pinned `mc`, real SPA build). Built with
-# `--target integration` — see integration-tests/integration-tests.md.
+# `--target integration` — see e2e/e2e.md.
 FROM base AS integration
-COPY integration-tests ./integration-tests
+COPY e2e ./e2e
 
 # The base stage caches only the server entrypoint, so the suites' own deps were
 # absent and the runner resolved them at test time. That install relinks
@@ -62,7 +62,7 @@ COPY integration-tests ./integration-tests
 # 2.8 tolerated it. Caching here means no install happens at run time; the chown
 # hands the tree and the cache to the user the runner pod runs as, so a relink
 # would be permitted rather than fatal.
-RUN deno cache integration-tests/*/*.ts \
+RUN deno cache e2e/*/*.ts \
   && chown -R deno:deno /app /deno-dir
 
 # Production. Deliberately last and deliberately empty: the default build target

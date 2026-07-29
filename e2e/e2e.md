@@ -8,8 +8,8 @@ Running a suite **is** the opt-in (they're excluded from `deno task test`), so
 there's **no `P0RT1ON_INTEGRATION` flag**. If a suite's required infra/config is
 absent, it **fails with a clear message** — it never silently skips (a skip
 reads as a pass). So a bare `deno task test:integration` (glob
-`integration-tests/**/*.integration.test.ts`) only passes when everything below
-is set up; run an individual suite — or the k8s driver — for anything narrower.
+`e2e/**/*.integration.test.ts`) only passes when everything below is set up; run
+an individual suite — or the k8s driver — for anything narrower.
 
 Imports reach the app via `../../app/packages/server/src/…`; run everything from
 the repo root so the `deno.json` import map resolves.
@@ -39,7 +39,7 @@ docker run --rm -v "$PWD:/app" -w /app \
   --entrypoint deno p0rt1on-manager:latest \
   test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
   --allow-run --unstable-ffi \
-  integration-tests/docker/mc-minio.integration.test.ts
+  e2e/docker/mc-minio.integration.test.ts
 ```
 
 **Or on the host** if `mc` is installed:
@@ -49,7 +49,7 @@ docker compose -f deploy/docker-compose.yml up -d minio
 MINIO_ENDPOINT=http://127.0.0.1:9000 \
   MINIO_ROOT_USER=p0rtadmin MINIO_ROOT_PASSWORD=p0rtadmin123 \
   deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net \
-  --allow-run --unstable-ffi integration-tests/docker/mc-minio.integration.test.ts
+  --allow-run --unstable-ffi e2e/docker/mc-minio.integration.test.ts
 ```
 
 ---
@@ -91,8 +91,8 @@ port reads as free) and gets started again mid-run.
 **Run:**
 
 ```sh
-deno task test:integration:docker       # build images + run
-deno task test:integration:docker run   # images already built
+deno task test:e2e:docker       # build images + run
+deno task test:e2e:docker run   # images already built
 ```
 
 _(Replaced `DockerRuntime.integration.test.ts`, deleted 2026-07-17: it burned a
@@ -105,12 +105,12 @@ running container without starting a second", which needs no tailnet.)_
 
 ## 3 & 4. Kubernetes tiers — `k8s/run.ts`
 
-Driven by **`integration-tests/k8s/run.ts`**. The control plane is an
-**in-cluster headscale**, so **no Tailscale account or secrets are needed** —
-REAL images only. Every test-only k8s object (headscale, the friend-client
-namespace + RBAC, the `p0rt1on-pantry` StorageClass) lives in
-`integration-tests/k8s/manifests.yaml`; the namespace, ServiceAccount and
-manager Role come from the shipped `deploy/k8s/p0rt1on.yaml`.
+Driven by **`e2e/k8s/run.ts`**. The control plane is an **in-cluster
+headscale**, so **no Tailscale account or secrets are needed** — REAL images
+only. Every test-only k8s object (headscale, the friend-client namespace + RBAC,
+the `p0rt1on-pantry` StorageClass) lives in `e2e/k8s/manifests.yaml`; the
+namespace, ServiceAccount and manager Role come from the shipped
+`deploy/k8s/p0rt1on.yaml`.
 
 - **tier1 — `k8s/runtime.integration.test.ts`** (host, as the manager
   ServiceAccount): apply → ready → scale → gated teardown, RBAC containment (the
@@ -125,10 +125,10 @@ manager Role come from the shipped `deploy/k8s/p0rt1on.yaml`.
 **Run:**
 
 ```sh
-deno task test:integration:k8s          # build images + both tiers
-deno task test:integration:k8s build    # (re)build + import images only
-deno task test:integration:k8s tier1    # runtime tier (images built)
-deno task test:integration:k8s tier2    # portion tier (images built)
+deno task test:e2e:k8s          # build images + both tiers
+deno task test:e2e:k8s build    # (re)build + import images only
+deno task test:e2e:k8s tier1    # runtime tier (images built)
+deno task test:e2e:k8s tier2    # portion tier (images built)
 ```
 
 **Rebuild rule:** `app/`, `instance/`, or `backup-client/` changed → `build`;

@@ -1,10 +1,10 @@
 // k8s integration driver — REAL images, in-cluster headscale (no secrets).
 //
-//   deno task test:integration:k8s          # build images + both tiers
-//   deno task test:integration:k8s build    # (re)build + import images only
-//   deno task test:integration:k8s tier1    # runtime tier (images built)
-//   deno task test:integration:k8s tier2    # portion tier (images built)
-//   deno task test:integration:k8s clean    # delete the k3d cluster
+//   deno task test:e2e:k8s          # build images + both tiers
+//   deno task test:e2e:k8s build    # (re)build + import images only
+//   deno task test:e2e:k8s tier1    # runtime tier (images built)
+//   deno task test:e2e:k8s tier2    # portion tier (images built)
+//   deno task test:e2e:k8s clean    # delete the k3d cluster
 //
 // A cluster this run CREATED is deleted on exit (K8S_INTEGRATIONTEST_KEEP=1
 // keeps it); a pre-existing cluster is the user's and is left alone.
@@ -15,7 +15,7 @@ import { DEFAULT_HEADSCALE_URL, until } from "../helpers.ts";
 const MODES = ["all", "build", "tier1", "tier2", "clean"] as const;
 const mode = Deno.args[0] ?? "all";
 if (!(MODES as readonly string[]).includes(mode)) {
-  console.error(`usage: deno task test:integration:k8s [${MODES.join("|")}]`);
+  console.error(`usage: deno task test:e2e:k8s [${MODES.join("|")}]`);
   Deno.exit(2);
 }
 
@@ -77,7 +77,7 @@ async function setup(): Promise<void> {
     state.createdCluster = true;
   }
   await kc(["apply", "-f", "deploy/k8s/p0rt1on.yaml"]);
-  await kc(["apply", "-f", "integration-tests/k8s/manifests.yaml"]);
+  await kc(["apply", "-f", "e2e/k8s/manifests.yaml"]);
   // The manager Deployment isn't exercised (the runner pod plays the
   // manager); its unimported :latest image would just crash-loop.
   await kc([
@@ -157,7 +157,7 @@ async function tier1(): Promise<void> {
     // A tier-1-only tag: its node must never satisfy tier 2's
     // tag:p0rt1on-serve assertions.
     const authKey = await mintKey("tag:p0rt1on-integrationtest-tier1");
-    await $`deno test --allow-read --allow-write --allow-env --allow-net --unstable-net integration-tests/k8s/runtime.integration.test.ts`
+    await $`deno test --allow-read --allow-write --allow-env --allow-net --unstable-net e2e/k8s/runtime.integration.test.ts`
       .env({
         K8S_INTEGRATIONTEST_SERVER: server,
         K8S_INTEGRATIONTEST_TOKEN: token,
@@ -232,7 +232,7 @@ function runnerPodManifest(): unknown {
           "--allow-net",
           "--allow-run",
           "--unstable-ffi",
-          "integration-tests/k8s/lifecycle.integration.test.ts",
+          "e2e/k8s/lifecycle.e2e.test.ts",
         ],
         env: [
           { name: "K8S_NAMESPACE", value: "p0rt1on" },

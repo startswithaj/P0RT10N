@@ -115,9 +115,9 @@ test bans docker literals outside `runtime/`). Selected by
   - PVC retention is pinned `whenScaled: Retain` / `whenDeleted: Retain` so
     suspend (scale-to-0) or a StatefulSet delete never drops a friend's data —
     only a gated offboard deletes the PVCs.
-  - Verified on k3d by `integration-tests/k8s/run.ts` (no secrets needed — an
-    in-cluster HEADSCALE is the control plane; REAL images only): runtime tier
-    (apply idempotency, scale, PVC gating, RBAC containment, PSA rejection, real
+  - Verified on k3d by `e2e/k8s/run.ts` (no secrets needed — an in-cluster
+    HEADSCALE is the control plane; REAL images only): runtime tier (apply
+    idempotency, scale, PVC gating, RBAC containment, PSA rejection, real
     tailnet enrollment) + portion tier (full tRPC addStart→rotate→offboard, zero
     mocks: real enrollment, serve in HTTP mode, node deleted on offboard; uid
     1000 under PSA `restricted`). The portion tier ALSO runs the friend's real

@@ -17,7 +17,7 @@ describe("McShellClient (integration: real mc + MinIO)", () => {
     requireConfig({
       binaries: ["mc"],
       hint: "run this suite in the manager image (bundles the pinned mc) " +
-        "against a MinIO at MINIO_ENDPOINT; see integration-tests.md.",
+        "against a MinIO at MINIO_ENDPOINT; see e2e.md.",
     })
   );
   const runner = new DenoCommandRunner();

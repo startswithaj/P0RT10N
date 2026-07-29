@@ -2,8 +2,8 @@
 // needs a real Tailscale OAuth client — it is the only tier proving
 // `tailscale serve` over HTTPS with real certs.
 //
-//   deno task test:integration:docker          # build images + run
-//   deno task test:integration:docker run      # run (images built)
+//   deno task test:e2e:docker          # build images + run
+//   deno task test:e2e:docker run      # run (images built)
 //
 // Locally reads .env (the same file `docker compose` uses); in CI the vars
 // are injected as secrets.
@@ -20,7 +20,7 @@ const MODES = ["all", "run"] as const;
 const mode = Deno.args[0] ?? "all";
 if (!(MODES as readonly string[]).includes(mode)) {
   console.error(
-    `usage: deno task test:integration:docker [${MODES.join("|")}]`,
+    `usage: deno task test:e2e:docker [${MODES.join("|")}]`,
   );
   Deno.exit(2);
 }
@@ -51,7 +51,7 @@ if (mode === "all") {
   await $`docker build -t ${CLIENT_IMAGE} backup-client`;
 }
 
-await $`deno test --allow-read --allow-write --allow-env --allow-net --allow-run integration-tests/docker/tailnet-lifecycle.integration.test.ts`
+await $`deno test --allow-read --allow-write --allow-env --allow-net --allow-run e2e/docker/lifecycle.e2e.test.ts`
   .env({
     MANAGER_IMAGE,
     P0RT1ON_INSTANCE_IMAGE: INSTANCE_IMAGE,

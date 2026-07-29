@@ -59,7 +59,7 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
   beforeAll(() =>
     requireConfig({
       env: ["HEADSCALE_URL", "HEADSCALE_API_KEY"],
-      hint: "run via deno task test:integration:k8s tier2 (in-cluster).",
+      hint: "run via deno task test:e2e:k8s tier2 (in-cluster).",
     })
   );
 
