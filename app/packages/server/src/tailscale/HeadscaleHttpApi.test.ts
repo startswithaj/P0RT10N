@@ -37,6 +37,14 @@ describe("HeadscaleHttpApi", () => {
         validTags: ["tag:p0rt1on-friend-bob"],
         online: false,
       },
+      {
+        id: "3",
+        givenName: "carol",
+        ipAddresses: ["100.64.0.9"],
+        // 0.29+ reports one resolved list instead of the two above.
+        tags: ["tag:p0rt1on-friend-carol"],
+        online: true,
+      },
     ],
   };
 
@@ -126,6 +134,17 @@ describe("HeadscaleHttpApi", () => {
       hostname: "bob",
       tags: ["tag:p0rt1on-friend-bob"],
       online: false,
+    }]);
+  });
+
+  it("nodesByTag reads the single `tags` list headscale 0.29+ returns", async () => {
+    const found = await build([], () => ({ json: nodes }))
+      .nodesByTag("tag:p0rt1on-friend-carol");
+    expect(found).toEqual([{
+      nodeId: "3",
+      hostname: "carol",
+      tags: ["tag:p0rt1on-friend-carol"],
+      online: true,
     }]);
   });
 

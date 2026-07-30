@@ -34,6 +34,9 @@ interface HsNode {
   id: string;
   givenName: string;
   ipAddresses?: string[];
+  /** 0.29+ reports one resolved `tags`; older servers split the same set
+   * across forcedTags/validTags. */
+  tags?: string[];
   forcedTags?: string[];
   validTags?: string[];
   online?: boolean;
@@ -254,9 +257,13 @@ export class HeadscaleHttpApi implements TailscaleApi {
   }
 
   private tagsOf(node: HsNode): string[] {
-    // The same tag can appear in BOTH forcedTags and validTags — dedupe.
+    // A tag can appear in more than one field — dedupe across all of them.
     return [
-      ...new Set([...(node.forcedTags ?? []), ...(node.validTags ?? [])]),
+      ...new Set([
+        ...(node.tags ?? []),
+        ...(node.forcedTags ?? []),
+        ...(node.validTags ?? []),
+      ]),
     ];
   }
 

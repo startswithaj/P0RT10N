@@ -161,6 +161,7 @@ async function lifecycle(): Promise<void> {
     "--timeout=120s",
   ]);
   await ensureHeadscaleUser();
+  await resetManagerState();
   await writeManagerSecret();
   await startManager();
   try {
@@ -175,6 +176,21 @@ async function lifecycle(): Promise<void> {
       "--replicas=0",
     ]).noThrow().quiet();
   }
+}
+
+// Fresh DB per run: a kept cluster (K8S_E2E_KEEP=1) otherwise carries the last
+// run's friend rows, and `add` fails on the unique name before it provisions
+// anything. Safe while the Deployment is scaled to 0.
+async function resetManagerState(): Promise<void> {
+  await kc([
+    "delete",
+    "pvc",
+    "p0rt1on-manager-data",
+    "-n",
+    "p0rt1on",
+    "--ignore-not-found",
+  ]);
+  await kc(["apply", "-f", "deploy/k8s/p0rt1on.yaml"]);
 }
 
 // The manager's whole e2e config, in the Secret its Deployment envFrom's.

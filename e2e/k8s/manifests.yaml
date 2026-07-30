@@ -74,7 +74,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: headscale
-          image: headscale/headscale:0.26.1
+          image: headscale/headscale:0.29.3
           command: ["headscale", "serve"]
           ports:
             - containerPort: 8080

@@ -21,15 +21,14 @@ docker build -t p0rt1on-instance instance/
 
 ## Env (set by the manager)
 
-| Var                   | Required | Purpose                                                        |
-| --------------------- | -------- | -------------------------------------------------------------- |
-| `TAILSCALE_AUTHKEY`   | yes      | the instance's serve auth key (`tag:p0rt1on-serve`)            |
-| `TAILSCALE_HOSTNAME`  | yes      | the tailnet hostname → the friend's endpoint                   |
-| `MINIO_ROOT_USER`     | yes      | MinIO root user (admin plane only)                             |
-| `MINIO_ROOT_PASSWORD` | yes      | MinIO root password                                            |
-| `TAILSCALE_TAG`       | no       | advertise tag (default none; manager sets `tag:p0rt1on-serve`) |
-| `MINIO_PORT`          | no       | MinIO port (default `9000`)                                    |
-| `DATA_DIR`            | no       | data dir (default `/data`; mount a volume here)                |
+| Var                   | Required | Purpose                                             |
+| --------------------- | -------- | --------------------------------------------------- |
+| `TAILSCALE_AUTHKEY`   | yes      | the instance's serve auth key (`tag:p0rt1on-serve`) |
+| `TAILSCALE_HOSTNAME`  | yes      | the tailnet hostname → the friend's endpoint        |
+| `MINIO_ROOT_USER`     | yes      | MinIO root user (admin plane only)                  |
+| `MINIO_ROOT_PASSWORD` | yes      | MinIO root password                                 |
+| `MINIO_PORT`          | no       | MinIO port (default `9000`)                         |
+| `DATA_DIR`            | no       | data dir (default `/data`; mount a volume here)     |
 
 ## Volumes
 

@@ -373,7 +373,6 @@ export class KubernetesRuntime implements InstanceRuntime {
                 // the namespace can enforce PSA `restricted`.
                 { name: "TS_USERSPACE", value: "true" },
                 { name: "TAILSCALE_HOSTNAME", value: spec.name },
-                { name: "TAILSCALE_TAG", value: spec.tag },
                 { name: "MINIO_PORT", value: String(spec.minioPort) },
                 ...Object.entries(tailscaleEnv(this.config.tailscale))
                   .map(([name, value]) => ({ name, value })),

@@ -30,7 +30,6 @@ echo "==> starting $NAME (hostname=$HOST, minio :$PORT)"
 docker run -d --name "$NAME" \
   -e TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
   -e TAILSCALE_HOSTNAME="$HOST" \
-  -e TAILSCALE_TAG="tag:p0rt1on-serve" \
   -e MINIO_ROOT_USER="bootcheck" \
   -e MINIO_ROOT_PASSWORD="bootcheck-secret-123" \
   -e MINIO_PORT="$PORT" \

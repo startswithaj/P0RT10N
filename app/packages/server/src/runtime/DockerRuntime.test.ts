@@ -51,8 +51,6 @@ describe("DockerRuntime.ensureInstance", () => {
       "-e",
       "TAILSCALE_HOSTNAME=alice",
       "-e",
-      "TAILSCALE_TAG=tag:p0rt1on-serve",
-      "-e",
       "MINIO_PORT=9100",
       "p0rt1on-instance:x",
     ]);

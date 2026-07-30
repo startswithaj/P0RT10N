@@ -149,8 +149,6 @@ export class DockerRuntime implements ContainerRuntime {
       "-e",
       `TAILSCALE_HOSTNAME=${spec.tsHostname}`,
       "-e",
-      `TAILSCALE_TAG=${spec.tag}`,
-      "-e",
       `MINIO_PORT=${spec.minioPort}`,
       ...resourceArgs(spec.resources),
       spec.image,

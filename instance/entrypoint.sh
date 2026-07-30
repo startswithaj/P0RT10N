@@ -26,7 +26,6 @@ fi
 : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
 export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
 
-TAILSCALE_TAG="${TAILSCALE_TAG:-}" # e.g. tag:p0rt1on-serve
 # Alternative control plane, e.g. http://headscale:8080 (empty = Tailscale SaaS).
 TAILSCALE_LOGIN_SERVER="${TAILSCALE_LOGIN_SERVER:-}"
 # http = control planes without cert issuance (headscale); default https.
@@ -94,9 +93,11 @@ TAILSCALED_PID=$!
 
 # `tailscale up` is idempotent: a persisted state volume re-authenticates without
 # re-redeeming the single-use key.
+# The tag comes from the auth key (the manager mints it tagged), NOT from
+# --advertise-tags: headscale 0.29+ rejects a tagged key that also advertises
+# tags, and Tailscale ignores the flag for tagged keys anyway.
 extra=""
-[ -n "$TAILSCALE_TAG" ] && extra="--advertise-tags=$TAILSCALE_TAG"
-[ -n "$TAILSCALE_LOGIN_SERVER" ] && extra="$extra --login-server=$TAILSCALE_LOGIN_SERVER"
+[ -n "$TAILSCALE_LOGIN_SERVER" ] && extra="--login-server=$TAILSCALE_LOGIN_SERVER"
 log "joining tailnet as '$TAILSCALE_HOSTNAME'"
 # shellcheck disable=SC2086
 tailscale --socket="$TS_SOCKET" up \
