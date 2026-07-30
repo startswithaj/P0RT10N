@@ -2,7 +2,7 @@ name: CI
 
 # PRs: fast secretless checks, plus the 3-image build (push pr-<n>) for
 # same-repo PRs. Fork PRs get checks only — /build (build-pr.yml) is their sole
-# image path. Merge to main / manual: additionally runs the full integration
+# image path. Merge to main / manual: additionally runs the full e2e
 # suite, which GATES the image push, then release + demo.
 on:
   push:

@@ -42,6 +42,7 @@
     "preview:demo": "deno task --cwd app/packages/client preview:demo",
     "test": "deno test --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi --ignore=**/*.e2e.test.ts,app/packages/client/",
     "test:coverage": "deno test --coverage=coverage --allow-read --allow-write --allow-env --allow-ffi --allow-net --allow-run --unstable-ffi --ignore=**/*.e2e.test.ts,app/packages/client/",
+    "test:e2e": "deno task test:e2e:k8s && deno task test:e2e:docker",
     "test:e2e:k8s": "deno run --allow-run --allow-read --allow-write --allow-env e2e/k8s/run.ts",
     "test:e2e:docker": "deno run --allow-run --allow-read --allow-write --allow-env e2e/docker/run.ts",
     "test:client": "deno task --cwd app/packages/client test",

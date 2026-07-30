@@ -2,9 +2,7 @@
 # launches the combined instance image (see instance/) by shelling out to
 # `docker` against the host daemon (mount /var/run/docker.sock at runtime).
 #
-# Three stages: `base` does all the work, `integration` adds the test suites,
-# and `manager` (production) is LAST so a bare `docker build` — what the GHCR
-# publish job runs — resolves to it and can never ship test code.
+# One stage, no test code: the e2e runner is a separate image (e2e/Dockerfile).
 FROM denoland/deno:2.9.4 AS base
 
 # Bundle the docker CLI the app shells out to (launch/inspect instance
@@ -44,27 +42,21 @@ RUN deno cache app/packages/server/src/main.ts
 # server instead (Dockerfile.dev), so this step is production-only.
 RUN deno task --cwd app/packages/client build
 
+# Fetch @db/sqlite's native library now: it downloads on first import, and a
+# cold start should not need the network.
+RUN deno eval --unstable-ffi 'import "@db/sqlite";'
+
+# The image RUNS as `deno`, so it owns what the app writes: the workspace
+# links Deno refreshes at startup, its module cache, the data dir a volume
+# mounts over, and the home dir `mc` keeps its config in. Deployments needing
+# root (the docker socket) say so explicitly — see docker-compose.yml.
+RUN mkdir -p /data /home/deno \
+  && chown -R deno:deno /app /data /home/deno /deno-dir
+USER deno
+
 EXPOSE 8080
 # Loopback-only admin surface; publish via the compose port mapping.
 CMD ["deno", "run", \
   "--allow-read", "--allow-write", "--allow-env", "--allow-ffi", "--allow-net", "--allow-run", \
   "--unstable-ffi", "app/packages/server/src/main.ts"]
 
-# Test-only image: the integration suites layered onto the real manager image,
-# so CI exercises exactly what ships (pinned `mc`, real SPA build). Built with
-# `--target integration` — see e2e/e2e.md.
-FROM base AS integration
-COPY e2e ./e2e
-
-# The base stage caches only the server entrypoint, so the suites' own deps were
-# absent and the runner resolved them at test time. That install relinks
-# node_modules, which Deno 2.9 aborts on when the link already exists (EEXIST) —
-# 2.8 tolerated it. Caching here means no install happens at run time; the chown
-# hands the tree and the cache to the user the runner pod runs as, so a relink
-# would be permitted rather than fatal.
-RUN deno cache e2e/*/*.ts \
-  && chown -R deno:deno /app /deno-dir
-
-# Production. Deliberately last and deliberately empty: the default build target
-# is the final stage, so forgetting `--target` yields the image WITHOUT tests.
-FROM base AS manager

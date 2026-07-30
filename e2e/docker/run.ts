@@ -45,8 +45,7 @@ const net = await $`docker network inspect ${NETWORK}`.noThrow().quiet();
 if (net.code !== 0) await $`docker network create ${NETWORK}`;
 
 if (mode === "all") {
-  // --target integration: the suites live only in that stage.
-  await $`docker build --target integration -t ${MANAGER_IMAGE} .`;
+  await $`docker build -t ${MANAGER_IMAGE} .`;
   await $`docker build -t ${INSTANCE_IMAGE} instance`;
   await $`docker build -t ${CLIENT_IMAGE} backup-client`;
 }

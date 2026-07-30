@@ -18,8 +18,8 @@ import {
 describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
   const PORTION = "k8sit";
   const INSTANCE = `p0rt1on-${PORTION}`;
-  const CLIENT_NS = "p0rt1on-integrationtest-clients";
-  const CLIENT_POD = "p0rt1on-integrationtest-client";
+  const CLIENT_NS = "p0rt1on-e2e-clients";
+  const CLIENT_POD = "p0rt1on-e2e-client";
 
   beforeAll(() =>
     requireConfig({

@@ -36,9 +36,9 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
   );
 
   const id = crypto.randomUUID().slice(0, 6);
-  const managerName = `p0rt1on-integrationtest-manager-${id}`;
-  const friendName = `p0rt1on-integrationtest-friend-${id}`;
-  const portion = `dockerintegrationtest${id}`;
+  const managerName = `p0rt1on-e2e-manager-${id}`;
+  const friendName = `p0rt1on-e2e-friend-${id}`;
+  const portion = `dockere2e${id}`;
   // Instances join this fixed runtime network (DOCKER_NETWORK); the manager
   // must be on it too or it cannot reach them by name.
   const network = "p0rt1on-net";
@@ -46,11 +46,11 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
   const base = `http://127.0.0.1:${port}`;
   // Not a real secret: the non-loopback bind requires auth, so the test mints
   // its own ephemeral creds.
-  const adminUser = "integrationtest-admin";
+  const adminUser = "e2e-admin";
   const adminPass = crypto.randomUUID();
   // Throwaway pantry dir, bind-mounted at the same absolute path inside the
   // manager (as compose does) so instance data dirs resolve identically.
-  const tmpDir = `${Deno.cwd()}/.p0rt1on-integrationtest-tmp`;
+  const tmpDir = `${Deno.cwd()}/.p0rt1on-e2e-tmp`;
   const pantry = `${tmpDir}/pantry-${id}`;
   const env = (k: string) => Deno.env.get(k) ?? "";
 

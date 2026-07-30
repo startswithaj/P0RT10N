@@ -24,17 +24,18 @@ if (!(MODES as readonly string[]).includes(mode)) {
 Deno.chdir(new URL("../..", import.meta.url));
 requireBinaries("docker", "k3d", "kubectl");
 
-const CLUSTER = Deno.env.get("K8S_E2E_CLUSTER") ?? "p0rt1on-integrationtest";
+const CLUSTER = Deno.env.get("K8S_E2E_CLUSTER") ?? "p0rt1on-e2e";
 const CTX = `k3d-${CLUSTER}`;
 // NOT :latest — that would default imagePullPolicy to Always, and these
 // images only ever exist locally.
-const INSTANCE_IMAGE = "p0rt1on-instance:integrationtest";
-const MANAGER_IMAGE = "p0rt1on-manager:integrationtest";
-const CLIENT_IMAGE = "p0rt1on-backup-client:integrationtest";
+const INSTANCE_IMAGE = "p0rt1on-instance:e2e";
+const MANAGER_IMAGE = "p0rt1on-manager:e2e";
+const CLIENT_IMAGE = "p0rt1on-backup-client:e2e";
+const RUNNER_IMAGE = "p0rt1on-e2e-runner:e2e";
 const HEADSCALE_URL = DEFAULT_HEADSCALE_URL;
 const MANAGER_SECRET = "p0rt1on-manager-secrets";
 const MANAGER_URL = "http://p0rt1on-manager-admin.p0rt1on.svc:8080";
-const RUNNER = "p0rt1on-integrationtest-runner";
+const RUNNER = "p0rt1on-e2e-runner";
 
 // Every kubectl call is PINNED to the k3d context — never the user's current
 // context (which may be a real cluster this driver must not touch).
@@ -95,24 +96,14 @@ async function setup(): Promise<void> {
     "p0rt1on",
     "--replicas=0",
   ]);
-  await kc([
-    "rollout",
-    "status",
-    "deployment/headscale",
-    "-n",
-    "p0rt1on",
-    "--timeout=120s",
-  ]);
-  await ensureHeadscaleUser();
 }
 
 async function buildImages(): Promise<void> {
   await $`docker build -t ${INSTANCE_IMAGE} instance`;
-  // --target integration: the e2e suites live only in that stage, not in the
-  // published manager image.
-  await $`docker build --target integration -t ${MANAGER_IMAGE} .`;
+  await $`docker build -t ${MANAGER_IMAGE} .`;
   await $`docker build -t ${CLIENT_IMAGE} backup-client`;
-  await $`k3d image import ${INSTANCE_IMAGE} ${MANAGER_IMAGE} ${CLIENT_IMAGE} -c ${CLUSTER}`;
+  await $`docker build -f e2e/Dockerfile -t ${RUNNER_IMAGE} .`;
+  await $`k3d image import ${INSTANCE_IMAGE} ${MANAGER_IMAGE} ${CLIENT_IMAGE} ${RUNNER_IMAGE} -c ${CLUSTER}`;
 }
 
 // ---- rbac-psa: black-box security checks as the manager SA -----------------
@@ -304,7 +295,7 @@ function runnerPodManifest(): unknown {
       },
       containers: [{
         name: RUNNER,
-        image: MANAGER_IMAGE,
+        image: RUNNER_IMAGE,
         command: [
           "deno",
           "test",

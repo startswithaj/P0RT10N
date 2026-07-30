@@ -124,10 +124,10 @@ test bans docker literals outside `runtime/`). Selected by
     joins the same tailnet under its friend tag and snapshots with Kopia through
     the instance's serve (WireGuard) using only bundle contents — proving the
     ACL grant, serve, and an actual write to the bucket. That pod runs as ROOT
-    in the non-restricted `p0rt1on-integrationtest-clients` namespace (like a
-    friend's docker host); a test-only Role there lets the manager SA launch it
-    — the production Role has no pod-create. Still pending the nightly
-    real-Tailscale tier: serve over HTTPS (headscale issues no certs).
+    in the non-restricted `p0rt1on-e2e-clients` namespace (like a friend's
+    docker host); a test-only Role there lets the manager SA launch it — the
+    production Role has no pod-create. Still pending the nightly real-Tailscale
+    tier: serve over HTTPS (headscale issues no certs).
   - `serveMode` (`https`|`http`, from `P0RT1ON_TAILSCALE_SERVE_MODE`) drives
     THREE things in lockstep: the instance's serve port (443/80), the friend
     endpoint scheme, and the ACL grant port — all from one env value so they
@@ -168,7 +168,7 @@ is required; its shape depends on the runtime.
 
 - Second `TailscaleApi` impl over headscale's v1 REST API; selected by
   `P0RT1ON_TAILSCALE_BACKEND=headscale` (`P0RT1ON_HEADSCALE_URL/_API_KEY/_USER`
-  required instead of the OAuth secret). The integration-test control plane.
+  required instead of the OAuth secret). The e2e control plane.
 - API quirks handled: numeric user ids (name resolved per call), expire preauth
   keys by key string, classic `acls` policy as a JSON string (needs headscale
   `policy.mode: database`), first-ever policy GET is a 500 "not found" (=

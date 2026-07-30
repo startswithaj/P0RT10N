@@ -9,6 +9,10 @@ admin and a friend see. Excluded from `deno task test` + coverage (filename
 Running a suite **is** the opt-in: if required infra or config is absent it
 **fails with a clear message**, never silently skips (a skip reads as a pass).
 
+```sh
+deno task test:e2e        # both suites (~7 min; docker needs .env)
+```
+
 Two suites, one per deployment target:
 
 | Suite     | Runtime              | Control plane                                           |
@@ -79,11 +83,11 @@ deno task test:e2e:k8s lifecycle  # portion lifecycle (images built)
 deno task test:e2e:k8s clean      # delete the k3d cluster
 ```
 
-**Rebuild rule:** the lifecycle suite is COPIED INTO the manager image and runs
-from there, so **editing it requires `build`** — rerunning `lifecycle` alone
-silently reruns the stale copy baked into the image. Same for any change under
-`app/`, `instance/` or `backup-client/`. Only `rbac-psa` runs from the working
-tree (on the host).
+**Rebuild rule:** the lifecycle suite runs from the e2e runner image
+(`e2e/Dockerfile` — deno + `mc` + the suite, no server or SPA), so **editing it
+requires `build`**; the rebuild is seconds, not the manager image's minutes.
+Same for any change under `app/`, `instance/` or `backup-client/`. Only
+`rbac-psa` runs from the working tree, on the host.
 
 **Cluster lifetime:** a cluster the run CREATED is deleted on exit, including on
 failure; a pre-existing cluster is yours and is left alone. `K8S_E2E_KEEP=1`

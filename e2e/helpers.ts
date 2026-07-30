@@ -1,5 +1,5 @@
-// Shared plumbing for the integration suites — the pieces every tier used to
-// reinvent. No app runtime logic here.
+// Shared plumbing for the e2e suites. No app runtime logic here — these
+// helpers speak only the public surfaces the suites are allowed to use.
 import { retry } from "@std/async";
 import type { FriendBundle } from "@p0rt1on/shared/domain";
 
@@ -9,13 +9,12 @@ export type ClaimedBundle = Pick<
   "bucket" | "s3Endpoint" | "s3AccessKeyId" | "s3SecretKey" | "tsAuthKey"
 >;
 
-export const DEFAULT_MANAGER_IMAGE = "p0rt1on-manager:integrationtest";
-export const DEFAULT_INSTANCE_IMAGE = "p0rt1on-instance:integrationtest";
-export const DEFAULT_CLIENT_IMAGE = "p0rt1on-backup-client:integrationtest";
+export const DEFAULT_MANAGER_IMAGE = "p0rt1on-manager:e2e";
+export const DEFAULT_INSTANCE_IMAGE = "p0rt1on-instance:e2e";
+export const DEFAULT_CLIENT_IMAGE = "p0rt1on-backup-client:e2e";
 export const DEFAULT_HEADSCALE_URL = "http://headscale.p0rt1on.svc:8080";
 
-// True when `bin` is runnable (on PATH) — `mc` in the manager container,
-// `docker` on the host. Requires --allow-run.
+// True when `bin` is runnable (on PATH). Requires --allow-run.
 function hasBinary(bin: string): boolean {
   try {
     return new Deno.Command(bin, {
