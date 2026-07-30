@@ -1,8 +1,8 @@
-# Every test-only k8s object for the integration tiers, in one file: the
-# headscale control plane, the friend-client namespace + its RBAC, and the
-# pantry StorageClass. The namespace, ServiceAccount and manager Role are NOT
-# here — those come from the SHIPPED deploy/k8s/p0rt1on.yaml, because proving
-# the real least-privilege Role suffices is the point of tier 1.
+# Every test-only k8s object for the e2e suites, in one file: the headscale
+# control plane, the manager admin Service, the friend-client namespace + its
+# RBAC, and the pantry StorageClass. The namespace, ServiceAccount, manager
+# Deployment and Role are NOT here — those come from the SHIPPED
+# deploy/k8s/p0rt1on.yaml, because testing the real artifacts is the point.
 #
 # Headscale gives the portion test a real tailnet (real tailscaled enrollment,
 # WireGuard, node lifecycle) with no Tailscale account. Not a production
@@ -110,6 +110,21 @@ spec:
     - name: stun
       port: 3478
       protocol: UDP
+---
+# TEST ONLY: exposes the manager's admin API (8080) inside the cluster so the
+# e2e pod can drive it. Production keeps 8080 loopback-only (port-forward);
+# the e2e manager binds 0.0.0.0 with auth ON.
+apiVersion: v1
+kind: Service
+metadata:
+  name: p0rt1on-manager-admin
+  namespace: p0rt1on
+spec:
+  selector: { app: p0rt1on-manager }
+  ports:
+    - name: admin
+      port: 8080
+      targetPort: 8080
 ---
 # The friend's backup-client runs here — as ROOT, like a friend's docker host,
 # so NO PSA `restricted` label (unlike the p0rt1on namespace). Test-only.

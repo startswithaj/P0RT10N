@@ -99,3 +99,47 @@ export function friendClientEnv(
 export const SEED_THEN_BACKUP =
   'mkdir -p /backup && printf %s "$PAYLOAD" > /backup/canary.txt && ' +
   "exec /entrypoint.sh";
+
+// Cookie-aware tRPC-over-HTTP caller — drives a manager's PUBLIC API surface,
+// never its code. Throws on HTTP or tRPC errors with the message attached.
+export function trpcClient(base: string) {
+  const jar = { cookie: "" };
+  return async (proc: string, input?: unknown): Promise<unknown> => {
+    const res = await fetch(`${base}/trpc/${proc}`, {
+      method: input === undefined ? "GET" : "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(jar.cookie ? { cookie: jar.cookie } : {}),
+      },
+      body: input === undefined ? undefined : JSON.stringify(input),
+    });
+    const setCookie = res.headers.get("set-cookie");
+    if (setCookie) jar.cookie = setCookie.split(";")[0];
+    const body = await res.json().catch(() => null) as {
+      result?: { data?: unknown };
+      error?: { message?: string };
+    } | null;
+    if (!res.ok || body?.error) {
+      throw new Error(
+        `trpc ${proc} failed (${res.status}): ${
+          body?.error?.message ?? "<no body>"
+        }`,
+      );
+    }
+    return body?.result?.data;
+  };
+}
+
+// mc's documented per-alias env mechanism (MC_HOST_<alias>) — credentials in
+// env, never argv. Composed here, not imported: e2e uses public surfaces only.
+export function mcHostEnvFor(
+  alias: string,
+  endpoint: string,
+  accessKeyId: string,
+  secretKey: string,
+): Record<string, string> {
+  const url = new URL(endpoint);
+  url.username = accessKeyId;
+  url.password = secretKey;
+  return { [`MC_HOST_${alias}`]: url.toString() };
+}

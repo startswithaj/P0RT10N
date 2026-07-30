@@ -1,9 +1,6 @@
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  DenoCommandRunner,
-  DenoTempFiles,
-} from "../../app/packages/server/src/lib/CommandRunner.ts";
+import $ from "@david/dax";
 import {
   type ClaimedBundle,
   DEFAULT_CLIENT_IMAGE,
@@ -12,15 +9,16 @@ import {
   friendClientEnv,
   requireConfig,
   SEED_THEN_BACKUP,
+  trpcClient,
   until,
 } from "../helpers.ts";
 
-// Runs the real manager image as a container over a REAL tailnet: it mints a
-// key from the OAuth secret, the instance enrolls, and a friend container
-// writes a real Kopia backup through `tailscale serve`. Only this tier proves
-// HTTPS serve with real certs. Missing config fails, never skips — run via
-// deno task test:e2e:docker (loads .env).
-describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => {
+// E2E: the SHIPPED containers over a REAL tailnet — the manager mints a key
+// from the OAuth secret, the instance enrolls, and a friend container writes
+// a real Kopia backup through `tailscale serve`. Only this suite proves HTTPS
+// serve with real certs. No app code is imported. Missing config fails, never
+// skips — run via deno task test:e2e:docker (loads .env).
+describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
     "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET",
@@ -52,18 +50,24 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
   const adminPass = crypto.randomUUID();
   // Throwaway pantry dir, bind-mounted at the same absolute path inside the
   // manager (as compose does) so instance data dirs resolve identically.
-  const pantry = `${Deno.cwd()}/.p0rt1on-integrationtest-tmp/pantry-${id}`;
-  const tmp = new DenoTempFiles("./.p0rt1on-integrationtest-tmp");
+  const tmpDir = `${Deno.cwd()}/.p0rt1on-integrationtest-tmp`;
+  const pantry = `${tmpDir}/pantry-${id}`;
   const env = (k: string) => Deno.env.get(k) ?? "";
 
-  const runner = new DenoCommandRunner();
-  const docker = (args: string[]) => runner.run("docker", args);
+  const docker = (args: string[]) => $`docker ${args}`.noThrow().quiet();
+
+  const writeEnvFile = async (content: string): Promise<string> => {
+    await Deno.mkdir(tmpDir, { recursive: true });
+    const path = await Deno.makeTempFile({ dir: tmpDir, prefix: "env-" });
+    await Deno.writeTextFile(path, content);
+    return path;
+  };
 
   it(
     "creates a portion, and the friend backs up to it over the real tailnet",
     async () => {
       // Secrets ride an env-file, never argv (`ps` is world-readable).
-      const managerEnv = await tmp.write(
+      const managerEnv = await writeEnvFile(
         REQUIRED.map((k) => `${k}=${env(k)}`).join("\n") +
           // Auth must be on for the non-loopback bind. Throwaway DB under
           // /tmp — /app/data only exists under compose.
@@ -77,36 +81,12 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
             Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ?? DEFAULT_INSTANCE_IMAGE
           }\n`,
       );
-      let cookie = "";
       let friendId = "";
       // Both env-files hold live secrets — remove them even if the test
       // throws mid-flow.
       let friendEnv: string | null = null;
 
-      const trpc = async (proc: string, input?: unknown) => {
-        const res = await fetch(`${base}/trpc/${proc}`, {
-          method: input === undefined ? "GET" : "POST",
-          headers: {
-            "content-type": "application/json",
-            ...(cookie ? { cookie } : {}),
-          },
-          body: input === undefined ? undefined : JSON.stringify(input),
-        });
-        const setCookie = res.headers.get("set-cookie");
-        if (setCookie) cookie = setCookie.split(";")[0];
-        const body = await res.json().catch(() => null) as {
-          result?: { data?: unknown };
-          error?: { message?: string };
-        } | null;
-        if (!res.ok || body?.error) {
-          throw new Error(
-            `trpc ${proc} failed (${res.status}): ${
-              body?.error?.message ?? "<no body>"
-            }`,
-          );
-        }
-        return body?.result?.data;
-      };
+      const trpc = trpcClient(base);
 
       try {
         // Instances bind-mount the same host path the manager writes friend
@@ -178,7 +158,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
 
         // 4. The point: a friend container joins the tailnet with the minted
         //    key and writes a real Kopia backup through `tailscale serve`.
-        friendEnv = await tmp.write(
+        friendEnv = await writeEnvFile(
           Object.entries(friendClientEnv(bundle, { PAYLOAD: "p0rt1on-canary" }))
             .map(([k, v]) => `${k}=${v}`).join("\n") + "\n",
         );
@@ -226,8 +206,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (integration)", () => 
         await docker(["rm", "-f", friendName]);
         await docker(["rm", "-f", managerName]);
         await docker(["rm", "-f", `p0rt1on-instance-p0rt1on-${portion}`]);
-        await tmp.remove(managerEnv).catch(() => undefined);
-        if (friendEnv) await tmp.remove(friendEnv).catch(() => undefined);
+        await Deno.remove(managerEnv).catch(() => undefined);
+        if (friendEnv) await Deno.remove(friendEnv).catch(() => undefined);
         await Deno.remove(pantry, { recursive: true }).catch(() => undefined);
       }
     },

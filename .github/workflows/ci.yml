@@ -24,14 +24,14 @@ jobs:
   # Integration tiers — main / manual only (they need Docker, k3d, a real
   # tailnet). Skipped on PRs; a skip satisfies `build`'s needs. On main a red
   # tier blocks the image.
-  integration:
+  e2e:
     if: ${{ github.event_name != 'pull_request' }}
     needs: test
-    uses: ./.github/workflows/integration.yml
+    uses: ./.github/workflows/e2e.yml
     secrets: inherit
 
   build:
-    needs: [test, integration]
+    needs: [test, e2e]
     # Fork PRs skip build entirely — /build (build-pr.yml) is their only image
     # path. On push, github.event.pull_request is null → guard is true.
     if: ${{ !github.event.pull_request.head.repo.fork }}

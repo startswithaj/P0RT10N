@@ -1,18 +1,19 @@
-// k8s integration driver — REAL images, in-cluster headscale (no secrets).
+// k8s e2e driver — the SHIPPED containers on k3d with an in-cluster headscale
+// control plane (no Tailscale account or secrets needed).
 //
-//   deno task test:e2e:k8s          # build images + both tiers
-//   deno task test:e2e:k8s build    # (re)build + import images only
-//   deno task test:e2e:k8s tier1    # runtime tier (images built)
-//   deno task test:e2e:k8s tier2    # portion tier (images built)
-//   deno task test:e2e:k8s clean    # delete the k3d cluster
+//   deno task test:e2e:k8s            # build images + rbac-psa + lifecycle
+//   deno task test:e2e:k8s build      # (re)build + import images only
+//   deno task test:e2e:k8s rbac-psa   # security checks (images built)
+//   deno task test:e2e:k8s lifecycle  # portion lifecycle vs the real manager
+//   deno task test:e2e:k8s clean      # delete the k3d cluster
 //
-// A cluster this run CREATED is deleted on exit (K8S_INTEGRATIONTEST_KEEP=1
-// keeps it); a pre-existing cluster is the user's and is left alone.
+// A cluster this run CREATED is deleted on exit (K8S_E2E_KEEP=1 keeps it); a
+// pre-existing cluster is the user's and is left alone.
 import $ from "@david/dax";
 import { parseKeyOutput, requireBinaries } from "../driver.ts";
 import { DEFAULT_HEADSCALE_URL, until } from "../helpers.ts";
 
-const MODES = ["all", "build", "tier1", "tier2", "clean"] as const;
+const MODES = ["all", "build", "rbac-psa", "lifecycle", "clean"] as const;
 const mode = Deno.args[0] ?? "all";
 if (!(MODES as readonly string[]).includes(mode)) {
   console.error(`usage: deno task test:e2e:k8s [${MODES.join("|")}]`);
@@ -23,16 +24,16 @@ if (!(MODES as readonly string[]).includes(mode)) {
 Deno.chdir(new URL("../..", import.meta.url));
 requireBinaries("docker", "k3d", "kubectl");
 
-const CLUSTER = Deno.env.get("K8S_INTEGRATIONTEST_CLUSTER") ??
-  "p0rt1on-integrationtest";
+const CLUSTER = Deno.env.get("K8S_E2E_CLUSTER") ?? "p0rt1on-integrationtest";
 const CTX = `k3d-${CLUSTER}`;
-// NOT :latest — that defaults imagePullPolicy to Always and kubelet would try
-// Docker Hub instead of the imported images.
+// NOT :latest — that would default imagePullPolicy to Always, and these
+// images only ever exist locally.
 const INSTANCE_IMAGE = "p0rt1on-instance:integrationtest";
 const MANAGER_IMAGE = "p0rt1on-manager:integrationtest";
 const CLIENT_IMAGE = "p0rt1on-backup-client:integrationtest";
 const HEADSCALE_URL = DEFAULT_HEADSCALE_URL;
-const API_KEY_SECRET = "p0rt1on-integrationtest-headscale";
+const MANAGER_SECRET = "p0rt1on-manager-secrets";
+const MANAGER_URL = "http://p0rt1on-manager-admin.p0rt1on.svc:8080";
 const RUNNER = "p0rt1on-integrationtest-runner";
 
 // Every kubectl call is PINNED to the k3d context — never the user's current
@@ -47,9 +48,7 @@ const state = { createdCluster: false, toreDown: false };
 async function teardown(): Promise<void> {
   if (state.toreDown) return;
   state.toreDown = true;
-  if (
-    !state.createdCluster || Deno.env.get("K8S_INTEGRATIONTEST_KEEP") === "1"
-  ) {
+  if (!state.createdCluster || Deno.env.get("K8S_E2E_KEEP") === "1") {
     return;
   }
   const del = await $`k3d cluster delete ${CLUSTER}`.noThrow().quiet();
@@ -60,11 +59,20 @@ async function teardown(): Promise<void> {
   }
 }
 
-// Idempotent across reruns (headscale state is an emptyDir, the pod persists).
+// Idempotent across reruns. Polls because there is no readiness probe: a
+// finished rollout can still precede the CLI socket.
 async function ensureHeadscaleUser(): Promise<void> {
-  const list = await headscale(["users", "list", "--output", "json"])
-    .noThrow().quiet();
-  if (list.code === 0 && list.stdout.includes('"p0rt1on"')) return;
+  const users = await until(
+    "headscale CLI to answer",
+    async () => {
+      const list = await headscale(["users", "list", "--output", "json"])
+        .noThrow().quiet();
+      return list.code === 0 ? list.stdout : null;
+    },
+    30,
+    2000,
+  );
+  if (users.includes('"p0rt1on"')) return;
   await headscale(["users", "create", "p0rt1on"]);
 }
 
@@ -78,8 +86,7 @@ async function setup(): Promise<void> {
   }
   await kc(["apply", "-f", "deploy/k8s/p0rt1on.yaml"]);
   await kc(["apply", "-f", "e2e/k8s/manifests.yaml"]);
-  // The manager Deployment isn't exercised (the runner pod plays the
-  // manager); its unimported :latest image would just crash-loop.
+  // The manager runs only during the lifecycle suite; parked at 0 otherwise.
   await kc([
     "scale",
     "deployment",
@@ -101,30 +108,15 @@ async function setup(): Promise<void> {
 
 async function buildImages(): Promise<void> {
   await $`docker build -t ${INSTANCE_IMAGE} instance`;
-  // --target integration: the suites live only in that stage, not in the
+  // --target integration: the e2e suites live only in that stage, not in the
   // published manager image.
   await $`docker build --target integration -t ${MANAGER_IMAGE} .`;
   await $`docker build -t ${CLIENT_IMAGE} backup-client`;
   await $`k3d image import ${INSTANCE_IMAGE} ${MANAGER_IMAGE} ${CLIENT_IMAGE} -c ${CLUSTER}`;
 }
 
-// Mint a preauth key for a tag (user id 1 = the single user setup creates).
-async function mintKey(tag: string): Promise<string> {
-  const out = await headscale([
-    "preauthkeys",
-    "create",
-    "--user",
-    "1",
-    "--tags",
-    tag,
-    "--expiration",
-    "30m",
-  ]).text();
-  return parseKeyOutput(out);
-}
-
-// ---- tier 1: runtime mechanics, from the host as the manager SA ------------
-async function tier1(): Promise<void> {
+// ---- rbac-psa: black-box security checks as the manager SA -----------------
+async function rbacPsa(): Promise<void> {
   const server = await kc([
     "config",
     "view",
@@ -138,9 +130,7 @@ async function tier1(): Promise<void> {
     "-o",
     `jsonpath={.clusters[?(@.name=='${CTX}')].cluster.certificate-authority-data}`,
   ]).text();
-  const caFile = await Deno.makeTempFile({
-    prefix: "p0rt1on-integrationtest-ca-",
-  });
+  const caFile = await Deno.makeTempFile({ prefix: "p0rt1on-e2e-ca-" });
   await Deno.writeFile(
     caFile,
     Uint8Array.from(atob(caB64), (c) => c.charCodeAt(0)),
@@ -154,25 +144,19 @@ async function tier1(): Promise<void> {
       "p0rt1on",
       "--duration=15m",
     ]).text();
-    // A tier-1-only tag: its node must never satisfy tier 2's
-    // tag:p0rt1on-serve assertions.
-    const authKey = await mintKey("tag:p0rt1on-integrationtest-tier1");
-    await $`deno test --allow-read --allow-write --allow-env --allow-net --unstable-net e2e/k8s/runtime.integration.test.ts`
+    await $`deno test --allow-read --allow-env --allow-net --unstable-net e2e/k8s/rbac-psa.e2e.test.ts`
       .env({
-        K8S_INTEGRATIONTEST_SERVER: server,
-        K8S_INTEGRATIONTEST_TOKEN: token,
-        K8S_INTEGRATIONTEST_CA: caFile,
-        K8S_INTEGRATIONTEST_IMAGE: INSTANCE_IMAGE,
-        K8S_INTEGRATIONTEST_AUTHKEY: authKey,
-        K8S_INTEGRATIONTEST_LOGIN_SERVER: HEADSCALE_URL,
+        K8S_E2E_SERVER: server,
+        K8S_E2E_TOKEN: token,
+        K8S_E2E_CA: caFile,
       });
   } finally {
     await Deno.remove(caFile).catch(() => undefined);
   }
 }
 
-// ---- tier 2: portion-level, in-cluster (real headscale tailnet) ------------
-async function tier2(): Promise<void> {
+// ---- lifecycle: the real manager Deployment, driven over HTTP --------------
+async function lifecycle(): Promise<void> {
   // Clean control plane per run (state is an emptyDir, a restart wipes it):
   // stale nodes make headscale rename new ones (hostname collision), which
   // breaks offboard's hostname-matched cleanup.
@@ -186,24 +170,124 @@ async function tier2(): Promise<void> {
     "--timeout=120s",
   ]);
   await ensureHeadscaleUser();
+  await writeManagerSecret();
+  await startManager();
+  try {
+    await runRunnerPod();
+  } finally {
+    await kc([
+      "scale",
+      "deployment",
+      "p0rt1on-manager",
+      "-n",
+      "p0rt1on",
+      "--replicas=0",
+    ]).noThrow().quiet();
+  }
+}
+
+// The manager's whole e2e config, in the Secret its Deployment envFrom's.
+// Deleted first, not applied over: the shipped placeholders must not survive.
+async function writeManagerSecret(): Promise<void> {
   const apiKey = parseKeyOutput(
     await headscale(["apikeys", "create", "--expiration", "1h"]).text(),
   );
-
-  // The API key reaches the pod via a Secret applied over STDIN — never argv
-  // (kubectl's argv is world-readable in `ps` for the pod's lifetime).
+  await kc([
+    "delete",
+    "secret",
+    MANAGER_SECRET,
+    "-n",
+    "p0rt1on",
+    "--ignore-not-found",
+  ]);
   await kc(["apply", "-f", "-"]).stdinText(JSON.stringify({
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name: API_KEY_SECRET, namespace: "p0rt1on" },
-    stringData: { apiKey },
+    metadata: { name: MANAGER_SECRET, namespace: "p0rt1on" },
+    stringData: {
+      P0RT1ON_MASTER_KEY: "k8s-e2e-master-key",
+      P0RT1ON_ADMIN_USERNAME: "e2e-admin",
+      P0RT1ON_ADMIN_PASSWORD: crypto.randomUUID(),
+      P0RT1ON_ADMIN_BIND_HOST: "0.0.0.0",
+      P0RT1ON_TAILSCALE_BACKEND: "headscale",
+      P0RT1ON_TAILSCALE_SERVE_MODE: "http",
+      // headscale tags are owned by a user, never by another tag.
+      P0RT1ON_TAILSCALE_TAG_OWNER: "p0rt1on@",
+      P0RT1ON_HEADSCALE_URL: HEADSCALE_URL,
+      P0RT1ON_HEADSCALE_API_KEY: apiKey,
+      P0RT1ON_HEADSCALE_USER: "p0rt1on",
+      P0RT1ON_HEADSCALE_BASE_DOMAIN: "hs.test",
+      P0RT1ON_INSTANCE_IMAGE: INSTANCE_IMAGE,
+    },
   }));
-
-  await runRunnerPod();
 }
 
-// The runner pod, built as a typed object (no JSON heredoc to misquote).
+// Scale the SHIPPED Deployment up on the imported image. IfNotPresent is
+// required: k3d-imported images can never be pulled.
+async function startManager(): Promise<void> {
+  await kc([
+    "patch",
+    "deployment",
+    "p0rt1on-manager",
+    "-n",
+    "p0rt1on",
+    "--type",
+    "strategic",
+    "-p",
+    JSON.stringify({
+      spec: {
+        template: {
+          spec: {
+            containers: [{
+              name: "manager",
+              image: MANAGER_IMAGE,
+              imagePullPolicy: "IfNotPresent",
+            }],
+          },
+        },
+      },
+    }),
+  ]);
+  await kc([
+    "scale",
+    "deployment",
+    "p0rt1on-manager",
+    "-n",
+    "p0rt1on",
+    "--replicas=1",
+  ]);
+  const roll = await kc([
+    "rollout",
+    "status",
+    "deployment/p0rt1on-manager",
+    "-n",
+    "p0rt1on",
+    "--timeout=120s",
+  ]).noThrow();
+  if (roll.code !== 0) {
+    // Failure artifact BEFORE teardown deletes the evidence.
+    await kc([
+      "describe",
+      "pods",
+      "-n",
+      "p0rt1on",
+      "-l",
+      "app=p0rt1on-manager",
+    ]).noThrow();
+    await kc(["logs", "-n", "p0rt1on", "deploy/p0rt1on-manager", "--tail=50"])
+      .noThrow();
+    throw new Error("manager deployment failed to roll out");
+  }
+}
+
+// Holds no secrets inline — admin creds and the headscale key come from the
+// Secret by reference.
 function runnerPodManifest(): unknown {
+  const secretEnv = (name: string, key = name) => ({
+    name,
+    valueFrom: { secretKeyRef: { name: MANAGER_SECRET, key } },
+  });
+
   return {
     apiVersion: "v1",
     kind: "Pod",
@@ -213,8 +297,7 @@ function runnerPodManifest(): unknown {
       serviceAccountName: "p0rt1on-manager",
       securityContext: {
         runAsNonRoot: true,
-        // The image's `deno` user — matches the chown baked into the
-        // integration stage.
+        // The image's `deno` user, which owns the cached deps.
         runAsUser: 1993,
         runAsGroup: 1993,
         seccompProfile: { type: "RuntimeDefault" },
@@ -228,24 +311,18 @@ function runnerPodManifest(): unknown {
           "--allow-read",
           "--allow-write",
           "--allow-env",
-          "--allow-ffi",
           "--allow-net",
           "--allow-run",
-          "--unstable-ffi",
           "e2e/k8s/lifecycle.e2e.test.ts",
         ],
         env: [
           { name: "K8S_NAMESPACE", value: "p0rt1on" },
-          { name: "INSTANCE_IMAGE", value: INSTANCE_IMAGE },
           { name: "CLIENT_IMAGE", value: CLIENT_IMAGE },
           { name: "HEADSCALE_URL", value: HEADSCALE_URL },
-          {
-            name: "HEADSCALE_API_KEY",
-            valueFrom: {
-              secretKeyRef: { name: API_KEY_SECRET, key: "apiKey" },
-            },
-          },
-          { name: "TAILSCALE_LOGIN_SERVER", value: HEADSCALE_URL },
+          { name: "MANAGER_URL", value: MANAGER_URL },
+          secretEnv("P0RT1ON_ADMIN_USERNAME"),
+          secretEnv("P0RT1ON_ADMIN_PASSWORD"),
+          secretEnv("HEADSCALE_API_KEY", "P0RT1ON_HEADSCALE_API_KEY"),
           {
             name: "DENO_CERT",
             value: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
@@ -273,9 +350,8 @@ async function podPhase(): Promise<string> {
   ]).text();
 }
 
-// Create → stream logs → read the pod's terminal phase. NOT `kubectl run
-// --attach --rm`: a dropped attach kills a passing run, and --rm deletes the
-// evidence. A dropped log stream just re-attaches (--tail=0 after the first).
+// The pod's terminal phase is the verdict, not the log stream — a dropped
+// stream re-attaches (--tail=0 after the first) instead of failing the run.
 async function runRunnerPod(): Promise<void> {
   await kc(["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"]);
   try {
@@ -310,18 +386,21 @@ async function runRunnerPod(): Promise<void> {
       30,
       2000,
     );
-    if (phase !== "Succeeded") throw new Error(`runner pod ${phase}`);
+    if (phase !== "Succeeded") {
+      // The manager's log usually names the step that broke.
+      await kc([
+        "logs",
+        "-n",
+        "p0rt1on",
+        "deploy/p0rt1on-manager",
+        "--tail=200",
+      ])
+        .noThrow();
+      throw new Error(`runner pod ${phase}`);
+    }
   } finally {
     await kc(["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"])
       .noThrow().quiet();
-    await kc([
-      "delete",
-      "secret",
-      API_KEY_SECRET,
-      "-n",
-      "p0rt1on",
-      "--ignore-not-found",
-    ]).noThrow().quiet();
   }
 }
 
@@ -354,14 +433,14 @@ const exitCode = await (async () => {
     await setup();
     if (mode === "build") {
       await buildImages();
-    } else if (mode === "tier1") {
-      await tier1();
-    } else if (mode === "tier2") {
-      await tier2();
+    } else if (mode === "rbac-psa") {
+      await rbacPsa();
+    } else if (mode === "lifecycle") {
+      await lifecycle();
     } else {
       await buildImages();
-      await tier1();
-      await tier2();
+      await rbacPsa();
+      await lifecycle();
     }
     return 0;
   } catch (e) {

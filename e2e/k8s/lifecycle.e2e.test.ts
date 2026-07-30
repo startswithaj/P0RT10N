@@ -1,102 +1,122 @@
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createCallerFactory } from "../../app/packages/server/src/trpc/trpc.ts";
-import { appRouter } from "../../app/packages/server/src/trpc/root.ts";
-import type { TrpcContext } from "../../app/packages/server/src/trpc/trpc.ts";
-import { ProvisioningService } from "../../app/packages/server/src/provisioning/ProvisioningService.ts";
-import {
-  buildRestClient,
-  KubernetesRuntime,
-} from "../../app/packages/server/src/runtime/KubernetesRuntime.ts";
-import { CryptoKeyGen } from "../../app/packages/server/src/provisioning/CryptoKeyGen.ts";
-import {
-  mcHostEnv,
-  McShellClientFactory,
-} from "../../app/packages/server/src/minio/McShellClient.ts";
-import { McSmokeTester } from "../../app/packages/server/src/provisioning/McSmokeTester.ts";
-import { DrizzleProvisioningRepo } from "../../app/packages/server/src/db/ProvisioningRepo.ts";
-import { FriendQueries } from "../../app/packages/server/src/db/FriendQueries.ts";
-import {
-  DenoCommandRunner,
-  DenoTempFiles,
-} from "../../app/packages/server/src/lib/CommandRunner.ts";
-import { FriendServiceImpl } from "../../app/packages/server/src/services/FriendService.ts";
-import { ActivityServiceImpl } from "../../app/packages/server/src/services/ActivityService.ts";
-import { AuditServiceImpl } from "../../app/packages/server/src/services/AuditService.ts";
-import { UsageServiceImpl } from "../../app/packages/server/src/services/UsageService.ts";
-import { RuntimeInventoryService } from "../../app/packages/server/src/services/InventoryService.ts";
-import { JobService } from "../../app/packages/server/src/jobs/JobService.ts";
-import { HeadscaleHttpApi } from "../../app/packages/server/src/tailscale/HeadscaleHttpApi.ts";
-import { TailscaleUserInviteApi } from "../../app/packages/server/src/tailscale/TailscaleUserInviteApi.ts";
-import {
-  mockSystemHealthService,
-  noopLogger,
-  TEST_CONFIG,
-} from "../../app/packages/server/src/test-helpers/mocks.ts";
-import { AdminAuth } from "../../app/packages/server/src/auth/AdminAuth.ts";
-import { createTestDatabase } from "../../app/packages/server/src/test-helpers/testDb.ts";
 import {
   type ClaimedBundle,
   DEFAULT_CLIENT_IMAGE,
-  DEFAULT_HEADSCALE_URL,
-  DEFAULT_INSTANCE_IMAGE,
   friendClientEnv,
+  mcHostEnvFor,
   requireConfig,
   SEED_THEN_BACKUP,
+  trpcClient,
   until,
 } from "../helpers.ts";
 
-// Adds a friend through the real tRPC API; the instance pod materialises in
-// the cluster — zero mocks, real everything against the in-cluster headscale
-// (manifests.yaml). HTTPS serve can't be proven here (headscale issues no
-// certs) — that's the docker tier's job. Must run in-cluster: k8s/run.ts
-// launches it as a pod. Missing config fails, never skips.
-describe("Portion lifecycle over tRPC on k8s (integration)", () => {
-  const INSTANCE = "p0rt1on-k8sit";
+// The shipped containers only: the real manager Deployment driven over its
+// HTTP API, the real instance image on a headscale tailnet, a real Kopia
+// backup from a friend pod. Imports no app code — it sees what an admin and a
+// friend see. Runs in-cluster (needs `mc`, cluster DNS, the mounted SA).
+describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
+  const PORTION = "k8sit";
+  const INSTANCE = `p0rt1on-${PORTION}`;
   const CLIENT_NS = "p0rt1on-integrationtest-clients";
   const CLIENT_POD = "p0rt1on-integrationtest-client";
 
   beforeAll(() =>
     requireConfig({
-      env: ["HEADSCALE_URL", "HEADSCALE_API_KEY"],
-      hint: "run via deno task test:e2e:k8s tier2 (in-cluster).",
+      env: [
+        "MANAGER_URL",
+        "P0RT1ON_ADMIN_USERNAME",
+        "P0RT1ON_ADMIN_PASSWORD",
+        "HEADSCALE_URL",
+        "HEADSCALE_API_KEY",
+      ],
+      binaries: ["mc"],
+      hint: "run via deno task test:e2e:k8s lifecycle (in-cluster).",
     })
   );
 
-  // The test's own k8s API access via the mounted SA token (CA via
-  // DENO_CERT) — separate from the app's InstanceRuntime.
-  const k8sApi =
-    (token: string) =>
-    async (method: string, path: string, body?: unknown): Promise<unknown> => {
-      const res = await fetch(`https://kubernetes.default.svc${path}`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      if (!res.ok) {
-        throw new Error(
-          `k8s ${method} ${path} failed (${res.status}): ${await res.text()
-            .catch(() => "")}`,
-        );
-      }
-      return res.status === 204
-        ? undefined
-        : await res.json().catch(() => undefined);
-    };
+  const env = (k: string) => Deno.env.get(k) ?? "";
+  const namespace = () => Deno.env.get("K8S_NAMESPACE") ?? "p0rt1on";
 
-  // A backup-client pod, given only the bundle, joins the tailnet under its
-  // friend tag and runs Kopia through `tailscale serve` — the friend-facing
-  // path. Must run before rotate revokes the claimed keys.
-  const backupOverTailnet = async (
-    k8s: ReturnType<typeof k8sApi>,
-    mc: McShellClientFactory,
-    token: string,
-    headscaleUrl: string,
-    bundle: ClaimedBundle,
-  ): Promise<void> => {
+  const saToken = () =>
+    Deno.readTextFileSync(
+      "/var/run/secrets/kubernetes.io/serviceaccount/token",
+    ).trim();
+
+  // The cluster API is a public surface; the SA token is mounted, CA via
+  // DENO_CERT.
+  const k8s = async (
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<{ status: number; body: unknown }> => {
+    const res = await fetch(`https://kubernetes.default.svc${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${saToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+
+  const podPhase = async (ns: string, name: string): Promise<string> => {
+    const res = await k8s("GET", `/api/v1/namespaces/${ns}/pods/${name}`);
+    if (res.status === 404) return "Absent";
+    const pod = res.body as { status?: { phase?: string } };
+    return pod.status?.phase ?? "Unknown";
+  };
+
+  // The manager allocates the port, so read it off the Service it created.
+  const instanceEndpoint = async (): Promise<string> => {
+    const res = await k8s(
+      "GET",
+      `/api/v1/namespaces/${namespace()}/services/${INSTANCE}`,
+    );
+    const svc = res.body as { spec?: { ports?: { port?: number }[] } };
+    const port = svc.spec?.ports?.[0]?.port;
+    if (!port) {
+      throw new Error(`no port on service ${INSTANCE} (${res.status})`);
+    }
+    return `http://${INSTANCE}.${namespace()}.svc:${port}`;
+  };
+
+  // `mc` as the FRIEND, creds in env not argv. Returns the raw result:
+  // refusals are assertions here.
+  const asFriend = async (
+    cred: { s3AccessKeyId: string; s3SecretKey: string },
+    args: (alias: string) => string[],
+  ) => {
+    const alias = `e2e${crypto.randomUUID().slice(0, 8)}`;
+    const out = await new Deno.Command("mc", {
+      args: args(alias),
+      env: mcHostEnvFor(
+        alias,
+        await instanceEndpoint(),
+        cred.s3AccessKeyId,
+        cred.s3SecretKey,
+      ),
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    const dec = new TextDecoder();
+    const res = {
+      code: out.code,
+      stdout: dec.decode(out.stdout),
+      stderr: dec.decode(out.stderr),
+    };
+    // Log rather than throw: some calls are meant to fail, and a bare exit
+    // code is not evidence.
+    if (res.code !== 0) console.error(`mc exit ${res.code}: ${res.stderr}`);
+    return res;
+  };
+
+  const trpc = trpcClient(env("MANAGER_URL"));
+
+  // A backup-client pod, given ONLY the bundle, joins the tailnet under its
+  // friend tag and runs Kopia through serve. Its exit status is Kopia's.
+  const backupOverTailnet = async (bundle: ClaimedBundle): Promise<void> => {
     await k8s("POST", `/api/v1/namespaces/${CLIENT_NS}/pods`, {
       apiVersion: "v1",
       kind: "Pod",
@@ -106,324 +126,226 @@ describe("Portion lifecycle over tRPC on k8s (integration)", () => {
         containers: [{
           name: "client",
           image: Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE,
-          // The pod's exit status is Kopia's.
           command: ["sh", "-c", SEED_THEN_BACKUP],
           env: Object.entries(friendClientEnv(bundle, {
             PAYLOAD: "p0rt1on-canary",
-            TAILSCALE_LOGIN_SERVER: headscaleUrl,
+            TAILSCALE_LOGIN_SERVER: env("HEADSCALE_URL"),
           })).map(([name, value]) => ({ name, value })),
         }],
       },
     });
 
-    // Kopia is one-shot: poll for the pod's terminal phase (~2min budget
-    // covers enrollment + repo create + snapshot).
+    // Kopia is one-shot; the 2min budget covers enrollment + repo + snapshot.
     const phase = await until("client pod terminal phase", async () => {
-      const pod = await k8s(
-        "GET",
-        `/api/v1/namespaces/${CLIENT_NS}/pods/${CLIENT_POD}`,
-      ) as { status?: { phase?: string } };
-      const p = pod.status?.phase;
+      const p = await podPhase(CLIENT_NS, CLIENT_POD);
       return p === "Succeeded" || p === "Failed" ? p : null;
     }, 60).catch(() => "Pending");
     if (phase !== "Succeeded") {
-      const logRes = await fetch(
+      const logs = await fetch(
         `https://kubernetes.default.svc/api/v1/namespaces/${CLIENT_NS}` +
           `/pods/${CLIENT_POD}/log?tailLines=100`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${saToken()}` } },
       );
       console.error(
         "backup-client log:",
-        logRes.ok ? await logRes.text() : "<no log>",
+        logs.ok ? await logs.text() : "<no log>",
       );
     }
     expect(phase).toBe("Succeeded");
 
-    // The friend's Kopia repo actually landed objects in the bucket —
-    // written over the tailnet, through serve, with the bundle keys.
-    const du = await mc
-      .forInstance({ alias: INSTANCE, minioPort: 9000 })
-      .du(bundle.bucket);
-    expect(du.objectCount).toBeGreaterThan(0);
+    // The blobs landed — listed as the friend, with the bundle keys.
+    const ls = await asFriend(bundle, (a) => ["ls", `${a}/${bundle.bucket}`]);
+    expect(ls.code).toBe(0);
+    expect(ls.stdout.trim().length).toBeGreaterThan(0);
   };
 
+  afterAll(async () => {
+    // Best-effort cleanup; offboard via the API is the only remover allowed.
+    await k8s(
+      "DELETE",
+      `/api/v1/namespaces/${CLIENT_NS}/pods/${CLIENT_POD}`,
+    ).catch(() => undefined);
+    await trpc("friends.list").then(async (friends) => {
+      const left = friends as { id: string }[];
+      if (left.length === 0) return;
+      await trpc("friends.offboardStart", { friendId: left[0].id });
+      await until("leftover friend offboarded", async () => {
+        const now = await trpc("friends.list") as unknown[];
+        return now.length === 0 || null;
+      }, 60);
+    }).catch(() => undefined);
+  });
+
   it(
-    "addStart creates the pod; rotate + offboard leave it clean",
+    "add → backup → suspend/resume → rotate → offboard, all via the API",
     async () => {
-      const namespace = Deno.env.get("K8S_NAMESPACE") ?? "p0rt1on";
-      const token = Deno.readTextFileSync(
-        "/var/run/secrets/kubernetes.io/serviceaccount/token",
-      ).trim();
-      const k8s = k8sApi(token);
-      const headscaleUrl = Deno.env.get("HEADSCALE_URL") ??
-        DEFAULT_HEADSCALE_URL;
-      const runtime = new KubernetesRuntime(
-        {
-          namespace,
-          dataSize: "50Mi",
-          stateSize: "10Mi",
-          // k3d's local-path class stands in for the pantry — this tier tests
-          // provisioning, not storage classes.
-          pantryStorageClass: "local-path",
-          // The instance joins the local headscale tailnet; headscale issues
-          // no HTTPS certs, so serve falls back to plain HTTP.
-          tailscale: { loginServer: headscaleUrl, serveMode: "http" },
-        },
-        // In-cluster: auto-detect the mounted SA (token + CA + server).
-        await buildRestClient({}),
-      );
-      const keyGen = new CryptoKeyGen("k8s-integrationtest-master-key");
-      const runner = new DenoCommandRunner();
-      // /app is read-only for the runner pod's non-root uid — write temp
-      // files (mc policy JSON, smoke objects) under /tmp instead.
-      const tempFiles = new DenoTempFiles("/tmp/p0rt1on-tmp");
-      const mc = new McShellClientFactory(
-        runner,
-        tempFiles,
-        keyGen,
-        (t) => runtime.adminEndpoint(t.alias, t.minioPort),
-      );
-      const database = createTestDatabase();
-      const queries = new FriendQueries(database.db);
-      const repo = new DrizzleProvisioningRepo(database.db, {
-        portRange: { min: 9000, max: 9010 },
-        serveNodeTag: "tag:p0rt1on-serve",
-      });
-      // Real control plane: keys minted here are live — the instance pod
-      // redeems its serve key against this server.
-      const tailscale = new HeadscaleHttpApi({
-        baseUrl: headscaleUrl,
-        apiKey: Deno.env.get("HEADSCALE_API_KEY") ?? "",
-        user: "p0rt1on",
-        baseDomain: "hs.test",
-      });
-      // Unconfigured: auth-key enrollment only, no invite path.
-      const userInvite = new TailscaleUserInviteApi({});
-      const logger = noopLogger();
-      const config = {
-        ...TEST_CONFIG,
-        instanceImage: Deno.env.get("INSTANCE_IMAGE") ??
-          DEFAULT_INSTANCE_IMAGE,
-        // Headscale serves over HTTP (no certs); the friend endpoint is the
-        // node's live tailnet IP, so no MagicDNS base domain is configured.
-        serveMode: "http" as const,
-      };
-      // Mirrors app.ts wiring with the runtime + headscale swaps.
-      const context: TrpcContext = {
-        friendService: new FriendServiceImpl(
-          queries,
-          repo,
-          mc,
-          tailscale,
-          config.serveMode,
-          logger,
-        ),
-        provisioningService: new ProvisioningService(
-          config,
-          repo,
-          mc,
-          runtime,
-          tailscale,
-          userInvite,
-          keyGen,
-          new McSmokeTester(runner, tempFiles),
-          logger,
-        ),
-        usageService: new UsageServiceImpl(queries),
-        activityService: new ActivityServiceImpl(queries),
-        auditService: new AuditServiceImpl(queries, repo),
-        inventoryService: new RuntimeInventoryService(
-          queries,
-          runtime,
-          logger,
-        ),
-        systemHealthService: mockSystemHealthService(),
-        jobService: new JobService(logger),
-        capabilities: { inviteApiConfigured: userInvite.configured },
-        auth: AdminAuth.disabled(),
-        logger,
-      };
-      const caller = createCallerFactory(appRouter)(context);
+      // No readiness probe, and boot runs migrations + preflight first.
+      await until("manager /health", async () => {
+        const res = await fetch(`${env("MANAGER_URL")}/health`)
+          .catch(() => null);
+        const ok = res?.status === 200;
+        await res?.body?.cancel();
+        return ok || null;
+      }, 30);
 
-      // Drive `mc` as the friend with the bundle creds (env-scoped, nothing
-      // on argv). Returns the result instead of throwing — the refusal IS the
-      // assertion.
-      const asFriend = (
-        cred: { s3AccessKeyId: string; s3SecretKey: string },
-        args: (alias: string) => string[],
-      ) => {
-        const alias = `p0rt1on-neg-${crypto.randomUUID().slice(0, 8)}`;
-        return runner.run(
-          "mc",
-          args(alias),
-          mcHostEnv(alias, runtime.adminEndpoint(INSTANCE, 9000), {
-            accessKeyId: cred.s3AccessKeyId,
-            secretKey: cred.s3SecretKey,
-          }),
-        );
-      };
+      // Auth is mandatory: the e2e manager binds non-loopback.
+      await trpc("auth.login", {
+        username: env("P0RT1ON_ADMIN_USERNAME"),
+        password: env("P0RT1ON_ADMIN_PASSWORD"),
+      });
 
+      // The mutation detaches a job; retrying claimBundle IS the wait.
+      const { jobId } = await trpc("friends.addStart", {
+        name: PORTION,
+        isolationMode: "dedicated",
+        quotaBytes: 10 * 1024 * 1024,
+        retentionDays: 1,
+        lockMode: "GOVERNANCE",
+      }) as { jobId: string };
+      const bundle = await until(
+        "provisioning to finish + bundle claim",
+        () =>
+          trpc("jobs.claimBundle", { jobId })
+            .catch(() => null) as Promise<ClaimedBundle | null>,
+        90,
+      );
+
+      // http mode addresses the node by tailnet IP, so friends need no
+      // MagicDNS. headscale mints from 100.64.0.0/10.
+      expect(bundle.s3Endpoint).toMatch(/^http:\/\/100\./);
+      expect(bundle.s3SecretKey.length).toBeGreaterThan(0);
+      expect((bundle.tsAuthKey ?? "").length).toBeGreaterThan(0);
+
+      // The instance pod exists in the cluster BECAUSE of the API call.
+      expect(await podPhase(namespace(), `${INSTANCE}-0`)).toBe("Running");
+      const friends = await trpc("friends.list") as {
+        id: string;
+        status: string;
+      }[];
+      const friendId = friends[0].id;
+      expect(friends[0].status).toBe("active");
+
+      // The friend backs up for real over the tailnet.
+      await backupOverTailnet(bundle);
+
+      // Ransomware guard: `rm` only writes a delete marker; destroying
+      // versions needs s3:DeleteObjectVersion (never granted) plus
+      // BypassGovernanceRetention (denied). The canary is written after
+      // retention is armed — Kopia's own churn proves nothing.
+      const canary = `ransom-canary-${crypto.randomUUID().slice(0, 8)}`;
+      const canaryFile = await Deno.makeTempFile();
+      await Deno.writeTextFile(canaryFile, canary);
       try {
-        // ADD via the API: the mutation detaches a job; the pod, bucket,
-        // scoped user, smoke test, retention and quota all happen behind it.
-        const { jobId } = await caller.friends.addStart({
-          name: "k8sit",
-          isolationMode: "dedicated",
-          quotaBytes: 10 * 1024 * 1024,
-          retentionDays: 1,
-          lockMode: "GOVERNANCE",
-        });
-        const events = await Array.fromAsync(
-          await caller.jobs.progress({ jobId }),
-        );
-        if (events.at(-1)?.type !== "done") {
-          // Surface WHICH step failed and why — the assertion alone hides it.
-          console.error("add job events:", JSON.stringify(events, null, 2));
-        }
-        expect(events.at(-1)?.type).toBe("done");
+        const put = await asFriend(bundle, (a) => [
+          "cp",
+          canaryFile,
+          `${a}/${bundle.bucket}/${canary}`,
+        ]);
+        expect(put.code).toBe(0);
 
-        // The pod exists in the cluster BECAUSE of the API call.
-        expect(await runtime.listInstances()).toContainEqual({
-          name: INSTANCE,
-          state: "running",
-        });
-        expect(await runtime.instanceHealth(INSTANCE)).toBe("healthy");
+        const purge = await asFriend(bundle, (a) => [
+          "rm",
+          "--versions",
+          "--bypass",
+          "--force",
+          `${a}/${bundle.bucket}/${canary}`,
+        ]);
+        expect(purge.code).not.toBe(0);
 
-        // ...and its tailscaled ACTUALLY enrolled on the headscale tailnet
-        // (healthy already implies `tailscale status` = Running in-pod).
-        expect(await tailscale.isNodeOnline(TEST_CONFIG.serveNodeTag))
-          .toBe(true);
+        // The refusal is only half of it — prove the bytes survive.
+        const read = await asFriend(bundle, (a) => [
+          "cat",
+          `${a}/${bundle.bucket}/${canary}`,
+        ]);
+        expect(read.code).toBe(0);
+        expect(read.stdout.trim()).toBe(canary);
 
-        // The once-shown bundle is claimable exactly once.
-        const bundle = await caller.jobs.claimBundle({ jobId });
-        expect(bundle.s3SecretKey.length).toBeGreaterThan(0);
-
-        const friends = await caller.friends.list();
-        const friendId = friends[0].id;
-        expect(friends[0].status).toBe("active");
-
-        // The friend backs up for real over the tailnet (see helper above).
-        await backupOverTailnet(k8s, mc, token, headscaleUrl, bundle);
-
-        // Ransomware guard: `rm` only writes a delete marker; destroying
-        // versions needs s3:DeleteObjectVersion (never granted) plus
-        // BypassGovernanceRetention (denied). The canary is written after
-        // retention is armed — Kopia's own churn proves nothing.
-        const canary = `ransom-canary-${crypto.randomUUID().slice(0, 8)}`;
-        const canaryFile = await tempFiles.write(canary);
-        try {
-          const put = await asFriend(bundle, (a) => [
-            "cp",
-            canaryFile,
-            `${a}/${bundle.bucket}/${canary}`,
-          ]);
-          expect(put.code).toBe(0);
-
-          const purge = await asFriend(bundle, (a) => [
-            "rm",
-            "--versions",
-            "--bypass",
-            "--force",
-            `${a}/${bundle.bucket}/${canary}`,
-          ]);
-          expect(purge.code).not.toBe(0);
-
-          // The refusal is only half of it — prove the bytes are still there.
-          const read = await asFriend(bundle, (a) => [
-            "cat",
-            `${a}/${bundle.bucket}/${canary}`,
-          ]);
-          expect(read.code).toBe(0);
-          expect(read.stdout.trim()).toBe(canary);
-        } finally {
-          await tempFiles.remove(canaryFile);
-        }
-
-        // Negative path — the quota makes this a *portion*: a write past the
-        // 10 MiB set at addStart must be refused, or a friend can fill the
-        // host.
-        const oversizeFile = await tempFiles.write(
-          "x".repeat(11 * 1024 * 1024),
-        );
-        try {
-          const overQuota = await asFriend(bundle, (a) => [
-            "cp",
-            oversizeFile,
-            `${a}/${bundle.bucket}/oversize`,
-          ]);
-          expect(overQuota.code).not.toBe(0);
-        } finally {
-          await tempFiles.remove(oversizeFile);
-        }
-
-        // ROTATE via the API: create-before-remove against the live MinIO.
-        const rotated = await caller.friends.rotateKey({ friendId });
-        expect(rotated.s3AccessKeyId).not.toBe(bundle.s3AccessKeyId);
-        // A DIFFERENT key is not a REVOKED key: rotation exists because the
-        // old credential is presumed compromised, so prove the old one is
-        // dead...
+        // Suspend cuts ACCESS (S3 user disabled, nodes revoked), never data.
+        const suspended = await trpc("friends.suspend", { friendId }) as {
+          status: string;
+        };
+        expect(suspended.status).toBe("suspended");
         expect(
           (await asFriend(bundle, (a) => ["ls", `${a}/${bundle.bucket}`])).code,
         ).not.toBe(0);
-        // ...and that rotation did not just break access for everyone.
-        expect(
-          (await asFriend(rotated, (a) => ["ls", `${a}/${bundle.bucket}`]))
-            .code,
-        ).toBe(0);
 
-        // OFFBOARD via the API: full teardown, then the cluster is clean.
-        const off = await caller.friends.offboardStart({ friendId });
-        const offEvents = await Array.fromAsync(
-          await caller.jobs.progress({ jobId: off.jobId }),
-        );
-        expect(offEvents.at(-1)?.type).toBe("done");
-        expect(await runtime.listInstances()).toEqual([]);
-        expect(await caller.friends.list()).toEqual([]);
-        // Offboard removed BOTH tailnet nodes: the instance's serve node and
-        // the friend's client node (revoked by the friend tag).
-        expect(await tailscale.nodesByTag(TEST_CONFIG.serveNodeTag))
-          .toEqual([]);
-        expect(await tailscale.nodesByTag("tag:p0rt1on-friend-k8sit"))
-          .toEqual([]);
-
-        // Leak check: listInstances() only sees StatefulSets — a surviving
-        // data PVC would outlive the offboard (disk leak + retention
-        // problem). Fetched by name: the SA has `get` but not `list` (tier 1
-        // asserts that), so listing would 403. 404 or a set deletionTimestamp
-        // both count — k8s deletion is async, and a PVC in Terminating is not
-        // a leak.
-        const cleanedUp = async (kind: string, name: string) => {
-          const res = await fetch(
-            `https://kubernetes.default.svc/api/v1/namespaces/${namespace}` +
-              `/${kind}/${name}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          if (res.status === 404) {
-            await res.body?.cancel();
-            return true;
-          }
-          const obj = await res.json() as {
-            metadata?: { deletionTimestamp?: string };
-          };
-          return obj.metadata?.deletionTimestamp !== undefined;
+        const resumed = await trpc("friends.resume", { friendId }) as {
+          status: string;
         };
-
-        expect(await cleanedUp("persistentvolumeclaims", `${INSTANCE}-data`))
-          .toBe(true);
-        expect(await cleanedUp("persistentvolumeclaims", `${INSTANCE}-state`))
-          .toBe(true);
-        expect(await cleanedUp("secrets", `${INSTANCE}-creds`)).toBe(true);
-        expect(await cleanedUp("services", INSTANCE)).toBe(true);
+        expect(resumed.status).toBe("active");
+        await until("friend reads canary after resume", async () => {
+          const read2 = await asFriend(bundle, (a) => [
+            "cat",
+            `${a}/${bundle.bucket}/${canary}`,
+          ]);
+          return (read2.code === 0 && read2.stdout.trim() === canary) || null;
+        }, 30);
       } finally {
-        // Best-effort teardown if any step failed mid-way.
-        await k8s(
-          "DELETE",
-          `/api/v1/namespaces/${CLIENT_NS}/pods/${CLIENT_POD}`,
-        ).catch(() => undefined);
-        await runtime.removeInstance(INSTANCE, { removeData: true })
-          .catch(() => undefined);
-        database.driver.close();
+        await Deno.remove(canaryFile).catch(() => undefined);
       }
+
+      // Quota: a write past the 10 MiB set at addStart must be refused.
+      const oversizeFile = await Deno.makeTempFile();
+      await Deno.writeTextFile(oversizeFile, "x".repeat(11 * 1024 * 1024));
+      try {
+        const overQuota = await asFriend(bundle, (a) => [
+          "cp",
+          oversizeFile,
+          `${a}/${bundle.bucket}/oversize`,
+        ]);
+        expect(overQuota.code).not.toBe(0);
+      } finally {
+        await Deno.remove(oversizeFile).catch(() => undefined);
+      }
+
+      // A different key is not a revoked key: prove old dead, new live.
+      const rotated = await trpc("friends.rotateKey", { friendId }) as {
+        s3AccessKeyId: string;
+        s3SecretKey: string;
+      };
+      expect(rotated.s3AccessKeyId).not.toBe(bundle.s3AccessKeyId);
+      expect(
+        (await asFriend(bundle, (a) => ["ls", `${a}/${bundle.bucket}`])).code,
+      ).not.toBe(0);
+      expect(
+        (await asFriend(rotated, (a) => ["ls", `${a}/${bundle.bucket}`]))
+          .code,
+      ).toBe(0);
+
+      // The friend list empties only when the detached job finishes.
+      await trpc("friends.offboardStart", { friendId });
+      await until("offboard to finish (friend list empty)", async () => {
+        const left = await trpc("friends.list") as unknown[];
+        return left.length === 0 || null;
+      }, 60);
+
+      // Leak check, by name because the SA has `get` but not `list`.
+      // Deletion is async, so Terminating counts as gone.
+      const cleanedUp = async (kind: string, name: string) => {
+        const res = await k8s(
+          "GET",
+          `/api/v1/namespaces/${namespace()}/${kind}/${name}`,
+        );
+        if (res.status === 404) return true;
+        const obj = res.body as { metadata?: { deletionTimestamp?: string } };
+        return obj.metadata?.deletionTimestamp !== undefined;
+      };
+
+      expect(await cleanedUp("persistentvolumeclaims", `${INSTANCE}-data`))
+        .toBe(true);
+      expect(await cleanedUp("persistentvolumeclaims", `${INSTANCE}-state`))
+        .toBe(true);
+      expect(await cleanedUp("secrets", `${INSTANCE}-creds`)).toBe(true);
+      expect(await cleanedUp("services", INSTANCE)).toBe(true);
+      expect(await podPhase(namespace(), `${INSTANCE}-0`)).toBe("Absent");
+
+      // Both tailnet nodes are gone, per headscale itself.
+      const nodes = await fetch(`${env("HEADSCALE_URL")}/api/v1/node`, {
+        headers: { Authorization: `Bearer ${env("HEADSCALE_API_KEY")}` },
+      }).then((r) => r.json()) as { nodes?: { name?: string }[] };
+      expect(
+        (nodes.nodes ?? []).filter((n) => n.name?.includes(PORTION)),
+      ).toEqual([]);
     },
   );
 });

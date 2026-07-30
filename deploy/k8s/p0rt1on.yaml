@@ -101,6 +101,12 @@ spec:
       serviceAccountName: p0rt1on-manager
       securityContext:
         runAsNonRoot: true
+        # The image ships no USER (runs as root by default); pin its `deno`
+        # user or kubelet refuses the container under runAsNonRoot. fsGroup
+        # makes the mounted /data PVC writable for that uid.
+        runAsUser: 1993
+        runAsGroup: 1993
+        fsGroup: 1993
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: manager
@@ -119,6 +125,10 @@ spec:
               value: p0rt1on-pantry
             - name: P0RT1ON_DB_PATH
               value: /data/p0rt1on.db
+            # `mc` writes its config under $HOME; the image's /home/deno is not
+            # writable by the non-root uid, so point HOME at the data volume.
+            - name: HOME
+              value: /data
             # Trust the cluster CA for API calls (Deno reads this PEM).
             - name: DENO_CERT
               value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
