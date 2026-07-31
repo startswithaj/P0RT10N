@@ -7,14 +7,8 @@ import type {
 import { ManualAclRequiredError, ServiceError } from "../lib/ServiceError.ts";
 import { manualAclInstructions } from "./manualAcl.ts";
 
-// TailscaleApi over the Tailscale REST API v2 (fetch, injected for unit tests).
-// Device + auth-key lifecycle and per-friend ACL grants: each friend tag
-// granted access to ONLY its endpoint (grant src=tag → dst=endpoint) and added
-// to tagOwners so its auth key can be minted. Policy edits use the ETag for
-// optimistic concurrency.
-
 const DEFAULT_BASE = "https://api.tailscale.com/api/v2";
-/** A node seen within this window is treated as online (no realtime field). */
+/** A node seen within this window is treated as online; the API has no realtime field. */
 const ONLINE_WINDOW_MS = 15 * 60 * 1000;
 
 export type FetchLike = (
@@ -23,34 +17,31 @@ export type FetchLike = (
 ) => Promise<Response>;
 
 export interface TailscaleConfig {
-  /** API access token (Bearer). Supplied via env/secret, never persisted. */
+  /** The token arrives via env or secret and is never persisted. */
   token: string;
   baseUrl?: string;
-  /** Owner assigned to each friend tag in tagOwners (default autogroup:admin). */
   tagOwner?: string;
 }
 
-/** Raw device shape (subset) from GET /tailnet/{tailnet}/devices. */
 interface ApiDevice {
   id: string;
   hostname: string;
-  /** Full MagicDNS FQDN, e.g. `p0rt1on-alice.mouse-stairs.ts.net`. */
+  /** The full MagicDNS FQDN, e.g. `p0rt1on-alice.mouse-stairs.ts.net`. */
   name?: string;
   tags?: string[];
   lastSeen?: string;
   addresses?: string[];
-  /** Owner login (email) for USER-owned devices; empty for tagged nodes. */
+  /** The owner's login email for USER-owned devices; empty for tagged nodes. */
   user?: string;
 }
 
-/** One grant rule (modern policy model): src principals → dst destinations. */
 interface AclGrant {
   src: string[];
   dst?: string[];
   ip?: string[];
 }
 
-/** The tailnet policy (loose — preserves any fields we don't touch). */
+/** Deliberately loose so any policy fields we don't touch are preserved. */
 interface AclPolicy {
   tagOwners?: Record<string, string[]>;
   grants?: AclGrant[];
@@ -65,18 +56,17 @@ function sameList(a: string[] = [], b: string[] = []): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** Full semantic match (src + dst + ip) — a host-only match would let a
+/** Matches on the full grant (src + dst + ip): a host-only match would let a
  * friend whose endpoint changed keep the stale grant AND gain a new one. */
 function matchesGrant(g: AclGrant, want: AclGrant): boolean {
   return sameList(g.src, want.src) && sameList(g.dst, want.dst) &&
     sameList(g.ip, want.ip);
 }
 
-/** Bounded attempts for the ETag compare-and-swap on policy writes. */
 const POLICY_CAS_ATTEMPTS = 3;
 
-/** HTTP status → ServiceError code. 412 = ETag mismatch on a policy write
- * (concurrent edit) → CONFLICT, which updatePolicy treats as retryable. */
+/** A 412 means the policy ETag no longer matched (a concurrent edit); it maps
+ * to CONFLICT, which updatePolicy treats as retryable. */
 function codeForStatus(
   status: number,
 ): "FORBIDDEN" | "CONFLICT" | "INTERNAL_SERVER_ERROR" {
@@ -85,10 +75,8 @@ function codeForStatus(
   return "INTERNAL_SERVER_ERROR";
 }
 
-/**
- * Split `host:port` for a grant. In Tailscale's grants model `dst` is a bare
- * hostname (a colon is rejected) and the port lives in `ip` as `proto:port`.
- */
+/** In the grants model `dst` is a bare host (a colon is rejected); the port
+ * lives in `ip` as `proto:port`. */
 export function splitHostPort(
   hostPort: string,
 ): { host: string; port: string } {
@@ -100,15 +88,12 @@ export function splitHostPort(
 
 export class TailscaleHttpApi implements TailscaleApi {
   private readonly base: string;
-  // Cached OAuth access token (when `token` is a client secret). Access tokens
-  // are short-lived, so we exchange lazily and refresh before expiry.
   private accessToken: string | null = null;
   private accessExpiresAt = 0;
 
   constructor(
     private readonly config: TailscaleConfig,
     private readonly fetchFn: FetchLike = globalThis.fetch,
-    /** Injectable clock for the online-window heuristic (testability). */
     private readonly now: () => number = () => Date.now(),
   ) {
     this.base = config.baseUrl ?? DEFAULT_BASE;
@@ -142,7 +127,7 @@ export class TailscaleHttpApi implements TailscaleApi {
     try {
       await this.request("DELETE", `/tailnet/${this.tn()}/keys/${keyId}`);
     } catch (err) {
-      // Already revoked/expired is success (teardown idempotency house rule).
+      // A key already revoked or expired counts as success.
       if (err instanceof ServiceError && /\(404\)/.test(err.message)) return;
       throw err;
     }
@@ -165,8 +150,8 @@ export class TailscaleHttpApi implements TailscaleApi {
     if (users !== null) {
       return users.some((u) => u.loginName.toLowerCase() === want);
     }
-    // No users:read scope (404) — fall back to devices: a user-owned device
-    // carries its owner's login email, so a matching one means they've joined.
+    // Without the users:read scope, fall back to devices: a user-owned device
+    // carries its owner's login email, so a match means they've joined.
     return (await this.listDevices())
       .some((d) => (d.user ?? "").toLowerCase() === want);
   }
@@ -176,7 +161,8 @@ export class TailscaleHttpApi implements TailscaleApi {
     return (json as { devices?: ApiDevice[] }).devices ?? [];
   }
 
-  /** The tailnet's users, or null when the token lacks `users:read` (404). */
+  /** Returns null when the token lacks the `users:read` scope, which the API
+   * reports as a 404. */
   private async listUsersOrNull(): Promise<{ loginName: string }[] | null> {
     try {
       const json = await this.request("GET", `/tailnet/${this.tn()}/users`);
@@ -201,7 +187,6 @@ export class TailscaleHttpApi implements TailscaleApi {
   }
 
   async nodeFqdn(hostname: string): Promise<string | null> {
-    // `name` is the node's full MagicDNS FQDN — the serve URL host, verbatim.
     const dev = (await this.listDevices()).find((d) => d.hostname === hostname);
     return dev?.name ?? null;
   }
@@ -210,9 +195,8 @@ export class TailscaleHttpApi implements TailscaleApi {
     await this.request("DELETE", `/device/${nodeId}`);
   }
 
-  /** Grant `src` (tag or user email) access to ONLY `endpointHostPort`; own the
-   * tag when `src` is one. Idempotent. A stale grant for the same friend
-   * (endpoint changed) is replaced, not left to accumulate beside the new one. */
+  /** Idempotent; a stale grant for the same friend (after an endpoint change) is
+   * replaced, not left to accumulate beside the new one. */
   async ensureFriendAcl(src: string, endpointHostPort: string): Promise<void> {
     const ownsTag = src.startsWith("tag:");
     try {
@@ -240,7 +224,7 @@ export class TailscaleHttpApi implements TailscaleApi {
         };
       });
     } catch (err) {
-      // No policy_file write scope → tell the admin exactly what to paste.
+      // Without the policy_file write scope, tell the admin exactly what to paste.
       if (err instanceof ServiceError && err.code === "FORBIDDEN") {
         throw new ManualAclRequiredError(
           manualAclInstructions(src, endpointHostPort, this.tagOwner()),
@@ -250,8 +234,7 @@ export class TailscaleHttpApi implements TailscaleApi {
     }
   }
 
-  /** Declare `tag` in tagOwners (owned by the configured tagOwner) when absent.
-   * Idempotent — a no-op once present, so it's cheap on every provision. */
+  /** Idempotent. */
   async ensureTagOwner(tag: string): Promise<void> {
     await this.updatePolicy((policy) => {
       if (policy.tagOwners?.[tag]) return null; // already declared
@@ -262,8 +245,6 @@ export class TailscaleHttpApi implements TailscaleApi {
     });
   }
 
-  /** MagicDNS enablement from GET /dns/preferences — the only readable signal
-   * bearing on HTTPS-serve (MagicDNS is a prerequisite for cert issuance). */
   async magicDnsEnabled(): Promise<boolean> {
     const json = await this.request(
       "GET",
@@ -272,20 +253,17 @@ export class TailscaleHttpApi implements TailscaleApi {
     return Boolean((json as { magicDNS?: boolean }).magicDNS);
   }
 
-  /** HTTPS-certificate enablement — the definitive signal for serve --https.
-   * GET /tailnet/-/settings → `httpsEnabled` (needs networking_settings:read). */
   async httpsCertsEnabled(): Promise<boolean> {
     const json = await this.request("GET", `/tailnet/${this.tn()}/settings`);
     return Boolean((json as { httpsEnabled?: boolean }).httpsEnabled);
   }
 
-  /** Read-only check of tagOwners in the policy (reuses the ETag GET). */
   async isTagOwned(tag: string): Promise<boolean> {
     const { policy } = await this.getPolicy();
     return Boolean(policy.tagOwners?.[tag]);
   }
 
-  /** Drop the friend's grant (and tag ownership, if a tag). Idempotent. */
+  /** Idempotent. */
   async removeFriendAcl(src: string): Promise<void> {
     await this.updatePolicy((policy) => {
       const grants = (policy.grants ?? []).filter((g) => !sameSrc(g, src));
@@ -307,12 +285,9 @@ export class TailscaleHttpApi implements TailscaleApi {
     return this.config.tagOwner ?? "autogroup:admin";
   }
 
-  /**
-   * Read-modify-write on the policy, guarded by the ETag. On 412 (someone
-   * else edited the policy between our GET and POST) re-fetch, re-apply the
-   * mutation, and retry — bounded, then the conflict surfaces as-is.
-   * `mutate` returning null means "nothing to change" (no POST).
-   */
+  /** ETag-guarded read-modify-write: a 412 (concurrent edit) re-fetches and
+   * retries a bounded number of times. `mutate` returning null means there is
+   * nothing to change, so no POST is made. */
   private async updatePolicy(
     mutate: (policy: AclPolicy) => AclPolicy | null,
     attemptsLeft = POLICY_CAS_ATTEMPTS,
@@ -333,7 +308,6 @@ export class TailscaleHttpApi implements TailscaleApi {
     }
   }
 
-  /** GET the policy as JSON plus its ETag (for optimistic concurrency). */
   private async getPolicy(): Promise<{ policy: AclPolicy; etag: string }> {
     const path = `/tailnet/${this.tn()}/acl`;
     const res = await this.fetchFn(`${this.base}${path}`, {
@@ -349,7 +323,6 @@ export class TailscaleHttpApi implements TailscaleApi {
     return { policy, etag };
   }
 
-  /** POST the updated policy back, guarded by the ETag. */
   private async setPolicy(policy: AclPolicy, etag: string): Promise<void> {
     const path = `/tailnet/${this.tn()}/acl`;
     const res = await this.fetchFn(`${this.base}${path}`, {
@@ -377,12 +350,9 @@ export class TailscaleHttpApi implements TailscaleApi {
     );
   }
 
-  /**
-   * The Bearer to send. An OAuth CLIENT SECRET (`tskey-client-…`) is NOT a valid
-   * API token — it must be exchanged (client-credentials grant) for a short-lived
-   * access token. A plain API token (`tskey-api-…`) is used as-is. Cached +
-   * refreshed 60s before expiry.
-   */
+  /** An OAuth client secret (`tskey-client-…`) is not a valid API token, so it is
+   * exchanged for a short-lived access token; a plain `tskey-api-…` token is
+   * used as-is. */
   private bearer(): Promise<string> {
     if (!this.config.token.startsWith("tskey-client-")) {
       return Promise.resolve(this.config.token);
@@ -393,7 +363,6 @@ export class TailscaleHttpApi implements TailscaleApi {
     return this.exchangeToken();
   }
 
-  /** POST the OAuth token endpoint; cache the access token + its expiry. */
   private async exchangeToken(): Promise<string> {
     // Client id is the 3rd dash-segment of `tskey-client-<id>-<secret>`.
     const clientId = this.config.token.split("-")[2] ?? "";
@@ -435,7 +404,6 @@ export class TailscaleHttpApi implements TailscaleApi {
     return Number.isFinite(seen) && this.now() - seen < ONLINE_WINDOW_MS;
   }
 
-  /** Authenticated request; throws ServiceError on non-2xx. Returns parsed JSON. */
   private async request(
     method: string,
     path: string,

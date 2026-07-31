@@ -12,13 +12,6 @@ import type { LockMode } from "@p0rt1on/shared/domain";
 import { NotImplementedError, ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
-// Real McClient: shells out to `mc` for one instance. Root creds ride a
-// per-call `MC_HOST_<alias>` env var (invisible in host `ps`, no `~/.mc`
-// state), factory-derived from the master key — nothing here persisted.
-// Arg-building + parsing unit-tested with a fake runner; real `mc` behaviour
-// verified by the integration suite.
-
-/** Least-privilege IAM policy: bucket-scoped CRUD, deny lock bypass. */
 function bucketScopedPolicy(bucket: string): string {
   return JSON.stringify({
     Version: "2012-10-17",
@@ -50,12 +43,9 @@ function bucketScopedPolicy(bucket: string): string {
   });
 }
 
-/**
- * Compose the `MC_HOST_<alias>` env var that makes an mc call self-contained:
- * creds ride the child env (not visible in `ps`) instead of argv or `~/.mc`
- * alias state. User/secret are URL-encoded — they can contain URL-significant
- * chars.
- */
+/** Creds ride the child env, not `ps`-visible argv or `~/.mc` alias state.
+ * The user and secret are URL-encoded because they can contain
+ * URL-significant chars. */
 export function mcHostEnv(
   alias: string,
   endpoint: string,
@@ -70,7 +60,6 @@ export function mcHostEnv(
   return { [`MC_HOST_${alias}`]: url };
 }
 
-/** Parse the last JSON line of `mc du --json`. */
 function parseDu(stdout: string): DuResult {
   const lines = stdout.trim().split("\n").filter((l) => l.length > 0);
   const last = lines[lines.length - 1] ?? "{}";
@@ -94,7 +83,6 @@ export class McShellClient implements McClient {
     private readonly readyDelayMs = 500,
   ) {}
 
-  /** `<alias>/<bucket>`. */
   private path(bucket: string): string {
     return `${this.target.alias}/${bucket}`;
   }
@@ -103,14 +91,9 @@ export class McShellClient implements McClient {
     return mcHostEnv(this.target.alias, this.endpoint, this.rootCred);
   }
 
-  /**
-   * Run an mc subcommand; throw on non-zero exit with the captured stderr.
-   * `redact` values are masked out of the error message (argv echo AND mc's
-   * own output can both contain them) — the root cred (raw and URL-encoded,
-   * since mc may echo the composed MC_HOST URL) is always on the list — and
-   * argv after `--` is structurally omitted (see lib/redact.ts), so secrets
-   * never reach logs/UI.
-   */
+  /** Masks the `redact` values plus the root secret, both raw and URL-encoded
+   * (mc may echo the composed MC_HOST URL), so secrets never reach logs or
+   * the UI. */
   private async exec(args: string[], redact: string[] = []): Promise<string> {
     const res = await this.runner.run(this.mcBin, args, this.hostEnv());
     if (res.code !== 0) {
@@ -133,11 +116,8 @@ export class McShellClient implements McClient {
     return this.exec(["mb", "--with-lock", this.path(bucket)]).then(() => {});
   }
 
-  /**
-   * Run a removal, treating "already absent" as success (teardown idempotency
-   * house rule). `absent` matches errors meaning the resource is gone — or
-   * could never exist (e.g. a bucket name below MinIO's 3-char minimum).
-   */
+  /** An error matching `absent` counts as success, so teardown is idempotent:
+   * the target is gone, or its name is invalid and could never have existed. */
   private async execRemove(args: string[], absent: RegExp): Promise<void> {
     try {
       await this.exec(args);
@@ -149,12 +129,9 @@ export class McShellClient implements McClient {
 
   async removeBucket(bucket: string): Promise<void> {
     const absent = /does not exist|bucket name cannot be|invalid bucket name/i;
-    // Two steps because `rb --force` cannot delete versions still under
-    // GOVERNANCE retention (it sends no bypass header) — and every active
-    // friend has in-retention data; that's the product. `rm --bypass` uses
-    // the root alias's BypassGovernanceRetention right (friend creds are
-    // explicitly denied it). COMPLIANCE-locked versions still — correctly —
-    // fail here: nothing can delete those until retention lapses.
+    // `rb --force` can't delete versions under GOVERNANCE retention (it sends
+    // no bypass header); `rm --bypass` uses root's bypass right. COMPLIANCE
+    // still correctly fails.
     await this.execRemove(
       [
         "rm",
@@ -323,10 +300,9 @@ export class McShellClient implements McClient {
       this.target.alias,
       "audit_webhook:p0rt1on",
       `endpoint=${endpoint}`,
-      // MinIO sends auth_token as the Authorization header VERBATIM, and the
-      // manager's /internal/minio-events expects the Bearer scheme — so the prefix
-      // must be baked in here. Quoted because mc's KV parser splits on the
-      // embedded space otherwise.
+      // MinIO sends auth_token as the Authorization header VERBATIM, so
+      // "Bearer" must be baked in; quoted because mc's KV parser would split
+      // on the embedded space.
       `auth_token="Bearer ${authToken}"`,
     ], [authToken]);
     // `--json` avoids mc's interactive restart UI (needs a TTY we don't have).
@@ -337,14 +313,11 @@ export class McShellClient implements McClient {
       "--json",
       this.target.alias,
     ]);
-    // The restart drops connections for a moment. "Webhook configured" must
-    // mean "serving again" — the very next mc call (rotate, offboard, the
-    // admin clicking around right after an add) lands in that window
-    // otherwise. Bounded wait, ~15s worst case.
+    // The restart drops connections briefly; "webhook configured" must mean
+    // "serving again" — the very next mc call lands in that window otherwise.
     await this.awaitReady(30);
   }
 
-  /** Poll `mc ready` (readyDelayMs apart) until MinIO answers; bounded. */
   private async awaitReady(attemptsLeft: number): Promise<void> {
     const res = await this.runner.run(
       this.mcBin,
@@ -372,17 +345,10 @@ export class McShellClient implements McClient {
   }
 }
 
-/** Derives an instance's root credential (master-key HMAC, never stored). */
 export interface RootCredSource {
   rootCredentialFor(instanceHost: string): S3Credential;
 }
 
-/**
- * Builds an McShellClient per instance, sharing one runner + temp-file impl.
- * Owns admin-plane endpoint composition (via the injected addressing-mode
- * composer) and root-cred derivation, so callers pass only
- * `{ alias, minioPort }`.
- */
 export class McShellClientFactory implements McClientFactory {
   constructor(
     private readonly runner: CommandRunner,

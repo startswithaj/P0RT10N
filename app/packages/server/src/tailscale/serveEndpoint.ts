@@ -1,11 +1,9 @@
 import type { TailscaleApi } from "./tailscale.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// Friend-facing serve URL, resolved LIVE from the tailnet node (used by
-// provisioning and the read side). http mode uses the node's tailnet IP (works
-// with MagicDNS off); https uses the node's MagicDNS FQDN (what the cert covers).
-// Throws if the node isn't on the tailnet — a missing node is a genuine
-// inconsistency, not papered over with a composed guess.
+// Resolves the friend-facing serve URL LIVE from the node. In http mode it uses
+// the tailnet IP, which works with MagicDNS off; in https mode it uses the
+// MagicDNS FQDN, which is what the cert covers.
 
 export async function serveEndpoint(
   tailscale: Pick<TailscaleApi, "nodeIpv4" | "nodeFqdn">,

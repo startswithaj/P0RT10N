@@ -2,14 +2,9 @@ import { isAbsolute, relative, resolve } from "@std/path";
 import type { LogLevel } from "../services/types.ts";
 import type { ProvisioningConfig } from "../provisioning/deps.ts";
 
-// The single place every env var is read. Construct once at boot; pass where needed.
-// Tests inject a fake source, so nothing else touches `Deno.env` directly.
+// Tests inject a fake source; nothing outside this class touches `Deno.env`
+// directly.
 
-/**
- * Every setting p0rt1on can be configured with. A name that is not here is not
- * configurable: it is one of the constants below, or a constant next to the
- * code that uses it.
- */
 export enum EnvVar {
   MasterKey = "P0RT1ON_MASTER_KEY",
   Pantry = "P0RT1ON_PANTRY",
@@ -52,26 +47,20 @@ export enum EnvVar {
   PortionK8sMemoryLimit = "P0RT1ON_PORTION_K8S_MEMORY_LIMIT",
 }
 
-/** Path instances POST audit events to, on the listener below. */
 export const MINIO_EVENT_PATH = "/internal/minio-events";
-/**
- * The audit listener's port. Fixed: it is the manager talking to its own
- * instances, and both deployments publish 8081 (docker-compose.yml, deploy/k8s).
- */
+/** Fixed rather than configurable: only the manager's own instances call it,
+ * and both deployments publish 8081 (docker-compose.yml, deploy/k8s). */
 export const EVENT_PORT = 8081;
 /** The audit listener binds outward so instance containers can reach it; what
  * is actually exposed is decided by the published ports. */
 export const EVENT_BIND_HOST = "0.0.0.0";
-/** Service name the manager answers on in-cluster (deploy/k8s/p0rt1on.yaml). */
+/** The Service name the manager answers on in-cluster — must match
+ * deploy/k8s/p0rt1on.yaml. */
 const K8S_MANAGER_SERVICE = "p0rt1on-manager";
-/**
- * Host ports dedicated instances are allocated from. The allocator skips ports
- * already in the database and bind-probes the rest, so the range only has to be
- * wide enough, not tuned.
- */
+/** Host ports dedicated instances are allocated from. The allocator skips DB-known
+ * ports and bind-probes the rest, so the range only has to be wide enough, not tuned. */
 const PORT_RANGE = { min: 9100, max: 9999 };
 
-/** Where raw values come from — real env by default, a map in tests. */
 export interface EnvSource {
   get(key: string): string | undefined;
 }
@@ -79,17 +68,10 @@ export interface EnvSource {
 const denoSource: EnvSource = { get: (k) => Deno.env.get(k) };
 const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
-/**
- * Vars the app cannot run without, validated at construction. Master key:
- * every instance root credential (and the audit token) derives from it. The
- * control-plane credential is backend-dependent (checked in the constructor):
- * every add/suspend/offboard calls the API — no stub, no fallback; a manager
- * without it could only fail later and worse.
- */
+/** The control-plane credential is backend-dependent; a manager without it
+ * would only fail later and worse. */
 const REQUIRED_VARS: readonly EnvVar[] = [
   EnvVar.MasterKey,
-  // The pantry is the one storage location for portion data — a host path on
-  // docker, a StorageClass name on k8s. Required in both (the only mode).
   EnvVar.Pantry,
 ] as const;
 
@@ -113,7 +95,6 @@ export class Env {
     }
   }
 
-  /** A REQUIRED_VARS value — the constructor guarantees it exists. */
   #required(key: EnvVar): string {
     const v = this.#opt(key);
     if (v === undefined) throw new Error(`${key} is not set`);
@@ -145,12 +126,8 @@ export class Env {
     const raw = this.src.get(EnvVar.LogLevel);
     return LOG_LEVELS.includes(raw as LogLevel) ? raw as LogLevel : "info";
   }
-  /**
-   * The admin API's port. It must differ from the audit listener's fixed port:
-   * the admin API stays loopback-only while the audit listener faces the
-   * container network, so a collision would expose the admin surface. Checked
-   * here so a misconfig fails at boot with a clear message.
-   */
+  /** Must differ from the audit listener's port: the admin API stays loopback-only while
+   * the audit listener faces the container network — a collision would expose the admin surface. */
   get port(): number {
     const p = this.#num(EnvVar.Port, 8080);
     if (p === EVENT_PORT) {
@@ -163,42 +140,37 @@ export class Env {
   }
 
   // ---- MinIO event forwarding ----
-  /** Operator webhook to forward every MinIO event to, byte-identical. Unset →
-   * forwarding disabled (no forwarder attached). */
+  /** An operator webhook every MinIO event is forwarded to byte-identically;
+   * unset disables forwarding. */
   get minioForwardUrl(): string | undefined {
     return this.#opt(EnvVar.MinioForwardUrl);
   }
-  /** Sent verbatim as the Authorization header on forwarded events. Secret —
-   * env-only, never logged (prefer this over a token in the URL). */
+  /** Sent verbatim as the Authorization header on forwarded events. It is a
+   * secret: env-only, never logged, and preferred over a token in the URL. */
   get minioForwardAuthorization(): string | undefined {
     return this.#opt(EnvVar.MinioForwardAuthorization);
   }
 
   // ---- admin auth ----
-  /** Admin credentials from env; null → auth disabled (loopback-only bind). */
+  /** Null disables auth, which in turn restricts the admin bind to loopback. */
   get adminAuth(): { username: string; password: string } | null {
     const username = this.#opt(EnvVar.AdminUsername);
     const password = this.#opt(EnvVar.AdminPassword);
     return username && password ? { username, password } : null;
   }
-  /** Admin listener bind. Non-loopback is refused unless auth is enabled
-   * (the boot guard) — a bare admin API must never face the network. */
+  /** A non-loopback bind is refused by the boot guard unless auth is enabled —
+   * a bare admin API must never face the network. */
   get adminBindHost(): string {
     return this.#str(EnvVar.AdminBindHost, "127.0.0.1");
   }
   get dbPath(): string {
     return this.#str(EnvVar.DbPath, "./data/p0rt1on.db");
   }
-  /**
-   * The pantry: the one storage location for every friend's MinIO data. Its
-   * shape depends on the runtime — an absolute host directory on docker
-   * ($PANTRY/<instance>), a StorageClass name on k8s (every portion's data PVC
-   * is provisioned from it). Required in both.
-   */
+  /** On docker an absolute host directory ($PANTRY/<instance>); on k8s a
+   * StorageClass name. Required in both. */
   get pantry(): string {
     const value = this.#required(EnvVar.Pantry);
     if (this.runtimeKind === "kubernetes") {
-      // On k8s the pantry is a StorageClass name, not a path.
       if (value.startsWith("/")) {
         throw new Error(
           `${EnvVar.Pantry} on kubernetes is a StorageClass name, not a ` +
@@ -207,8 +179,8 @@ export class Env {
       }
       return value;
     }
-    // Docker: an absolute host path, and the manager's own DB must not live
-    // inside it — its lifecycle differs, and offboard `rm -rf`s a subtree.
+    // The manager's own DB must not live inside the pantry — its lifecycle
+    // differs, and offboard `rm -rf`s a subtree.
     if (!isAbsolute(value)) {
       throw new Error(
         `${EnvVar.Pantry} must be an absolute path, got "${value}"`,
@@ -225,17 +197,13 @@ export class Env {
   }
 
   // ---- runtime selection ----
-  /** Which InstanceRuntime realizes instances. Docker stays the default. */
   get runtimeKind(): "docker" | "kubernetes" {
     return this.#str(EnvVar.Runtime, "docker") === "kubernetes"
       ? "kubernetes"
       : "docker";
   }
-  /**
-   * Kubernetes runtime settings. `apiBase`/`token`/`caFile` are dev/explicit
-   * overrides; when all are unset the client auto-detects the mounted
-   * in-cluster ServiceAccount (token + CA + server) itself.
-   */
+  /** `apiBase`/`token`/`caFile` are dev/explicit overrides; when unset the client
+   * auto-detects the mounted in-cluster ServiceAccount (token + CA + server). */
   kubeSettings(): {
     namespace: string;
     apiBase?: string;
@@ -257,7 +225,6 @@ export class Env {
       caFile: this.#opt(EnvVar.K8sCaFile),
       dataSize: this.#str(EnvVar.K8sDataSize, "50Gi"),
       stateSize: this.#str(EnvVar.K8sStateSize, "1Gi"),
-      // Per-portion container CPU/memory (native k8s values, all optional).
       resources: {
         cpuRequest: this.#opt(EnvVar.PortionK8sCpuRequest),
         cpuLimit: this.#opt(EnvVar.PortionK8sCpuLimit),
@@ -267,7 +234,7 @@ export class Env {
     };
   }
 
-  /** Per-portion docker resource caps → `docker run` flags (all optional). */
+  /** Per-portion docker resource caps, passed through as `docker run` flags. */
   dockerPortionResources(): {
     cpuShares?: string;
     cpus?: string;
@@ -283,46 +250,34 @@ export class Env {
   }
 
   // ---- secrets ----
-  /**
-   * Master key all instance root creds (and the audit token) derive from.
-   * Keep it stable + backed up — losing or changing it loses admin access
-   * to every instance.
-   */
+  /** All instance root creds (and the audit token) derive from it. Keep it
+   * stable and backed up — losing or changing it loses admin access to every
+   * instance. */
   get masterKey(): string {
     return this.#required(EnvVar.MasterKey);
   }
 
   // ---- Tailscale ----
-  /** OAuth client secret for the Tailscale API. */
   get tailscaleOauthClientSecret(): string {
     return this.#required(EnvVar.TailscaleOauthClientSecret);
   }
-  /**
-   * Personal Tailscale API token (`tskey-api-…`) for user-invite onboarding.
-   * OPTIONAL and deliberately separate from the OAuth client: creating a
-   * user-invite needs a user-owned token, which OAuth clients categorically
-   * are not. Unset → invite mode falls back to manual console instructions.
-   * Full-access + expires ≤90 days, so it is opt-in and used only for invites.
-   */
+  /** Optional, and deliberately separate from the OAuth client: user-invites
+   * need a user-owned token, which OAuth clients are not. When unset, invites
+   * fall back to manual console steps. */
   get tailscaleApiToken(): string | undefined {
     return this.#opt(EnvVar.TailscaleApiToken);
   }
-  /**
-   * Who owns each friend tag in the policy's `tagOwners` (e.g. `tag:p0rt1on`).
-   * REQUIRED on the real Tailscale backend: the manager authenticates as the
-   * OAuth client, and Tailscale only mints keys for tags that client OWNS — so
-   * the API's `autogroup:admin` fallback always 400s ("requested tags are
-   * invalid or not permitted"), and only at the authkey step, AFTER the
-   * instance container is up. Fail at boot instead. Headscale derives its own
-   * default, so it stays optional there.
-   */
+  /** Required on the real Tailscale backend: keys mint only for tags the OAuth
+   * client owns, and the fallback owner 400s at the authkey step after the
+   * container is already up — so fail at boot instead. Headscale derives its
+   * own default, so it is optional there. */
   get tagOwner(): string | undefined {
     return this.tailscaleBackend === "tailscale"
       ? this.#required(EnvVar.TailscaleTagOwner)
       : this.#opt(EnvVar.TailscaleTagOwner);
   }
-  /** Which control plane the manager talks to. `headscale` is the self-hosted
-   * test-tier backend — see HeadscaleHttpApi for what it can't do (HTTPS certs). */
+  /** `headscale` is the self-hosted test-tier backend — see HeadscaleHttpApi
+   * for what it can't do (HTTPS certs). */
   get tailscaleBackend(): "tailscale" | "headscale" {
     return this.#str(EnvVar.TailscaleBackend, "tailscale") === "headscale"
       ? "headscale"
@@ -338,15 +293,12 @@ export class Env {
       baseUrl: this.#required(EnvVar.HeadscaleUrl),
       apiKey: this.#required(EnvVar.HeadscaleApiKey),
       user: this.#str(EnvVar.HeadscaleUser, "p0rt1on"),
-      // Headscale's API can't report its `base_domain`, so the manager is told.
       baseDomain: this.#required(EnvVar.HeadscaleBaseDomain),
     };
   }
-  /** Instance enrollment extras. Headscale needs an explicit login server —
-   * its own URL, the same base the manager's API talks to, so it's derived
-   * rather than configured twice. The SaaS backend uses Tailscale's default
-   * login server (undefined here). Without cert issuance `tailscale serve` must
-   * fall back to plain HTTP (WireGuard still encrypts the path). */
+  /** Headscale needs an explicit login server, derived from its API base rather
+   * than configured twice. Without cert issuance `tailscale serve` falls back
+   * to plain HTTP (WireGuard still encrypts the path). */
   instanceTailscale(): { loginServer?: string; serveMode: "https" | "http" } {
     return {
       loginServer: this.tailscaleBackend === "headscale"
@@ -358,11 +310,8 @@ export class Env {
     };
   }
 
-  /**
-   * Where instances POST audit events. Derived, not configured: it is the
-   * manager's own listener, and how an instance reaches it depends only on
-   * where the two are running. Never 127.0.0.1 — that would be the instance.
-   */
+  /** Derived, not configured: it is the manager's own listener. Never
+   * 127.0.0.1 — that would be the instance itself. */
   #auditWebhookUrl(): string {
     const host = this.runtimeKind === "kubernetes"
       ? `${K8S_MANAGER_SERVICE}.${this.kubeSettings().namespace}.svc`
@@ -370,26 +319,21 @@ export class Env {
     return `http://${host}:${EVENT_PORT}${MINIO_EVENT_PATH}`;
   }
 
-  /**
-   * Everything the provisioning stack needs, with dev-friendly defaults —
-   * except `auditWebhookToken`, which is DERIVED from the master key, not
-   * env-sourced; app.ts composes it in.
-   */
+  /** `auditWebhookToken` is DERIVED from the master key, not env-sourced;
+   * app.ts composes it in. */
   provisioningConfig(): Omit<ProvisioningConfig, "auditWebhookToken"> {
     return {
       instanceImage: this.#str(EnvVar.InstanceImage, "p0rt1on-instance:latest"),
-      // `host` (default): host-run manager reaches the loopback-published
-      // port. `network`: containerized manager reaches instances by container
-      // name over the shared docker network — published loopback ports are
-      // unreachable cross-container on Linux.
+      // `network` means a containerized manager reaching instances by container
+      // name — published loopback ports are unreachable cross-container.
       instanceAddressing:
         this.#str(EnvVar.InstanceAddressing, "host") === "network"
           ? "network"
           : "host",
       portRange: PORT_RANGE,
       sharedInstanceName: this.#str(EnvVar.SharedInstanceName, "pool"),
-      // Same source as the instance's TAILSCALE_SERVE_MODE — the friend
-      // endpoint scheme + ACL grant port must match how instances serve.
+      // Same source as the instance's TAILSCALE_SERVE_MODE: the friend endpoint
+      // scheme and the ACL grant port must match how instances serve.
       serveMode: this.instanceTailscale().serveMode,
       serveNodeTag: this.#str(
         EnvVar.TailscaleServeNodeTag,

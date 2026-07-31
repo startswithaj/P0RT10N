@@ -38,18 +38,14 @@ import type {
   SmokeTester,
 } from "./deps.ts";
 
-/** The instance fields boot recovery/realign need — a `liveInstances` row. */
 type InstanceRef = {
   instanceId: number;
   tsHostname: string;
   minioPort: number;
 };
 
-/**
- * How a friend joined the tailnet, resolved during the `authkey` step. authKey
- * carries the one-shot key secret; invite carries the acceptance link (or the
- * manual-console fallback when no token was configured / the create failed).
- */
+/** In invite mode, manualInstructions replaces the invite link when no invite
+ * token is configured or creating the invite failed. */
 type EnrollmentResult =
   | { mode: "authKey"; tsAuthKey: string }
   | {
@@ -61,7 +57,6 @@ type EnrollmentResult =
     warning?: string;
   };
 
-/** Kopia quickstart join for an auth-key friend: redeem the single-use key. */
 function kopiaJoinLines(tailscaleUpCommand: string): string[] {
   return [
     "# Join the tailnet (redeems your single-use key):",
@@ -70,8 +65,6 @@ function kopiaJoinLines(tailscaleUpCommand: string): string[] {
   ];
 }
 
-/** Kopia quickstart join for an invited friend: they generate their OWN auth
- * key (in their Tailscale account, after accepting) and join with it. */
 function kopiaInviteJoinLines(): string[] {
   return [
     "# After accepting the invite, generate an auth key in your Tailscale admin",
@@ -81,7 +74,6 @@ function kopiaInviteJoinLines(): string[] {
   ];
 }
 
-/** Kopia quickstart: the retention flags + snapshot step (create flow only). */
 function kopiaCreateTail(retentionDays: number): string[] {
   return [
     `  --retention-mode=GOVERNANCE --retention-period=${retentionDays}d`,
@@ -91,16 +83,10 @@ function kopiaCreateTail(retentionDays: number): string[] {
   ];
 }
 
-/**
- * The "Add friend" state machine plus its destructive siblings. Pure
- * orchestration over injected deps — each provisioning step is one small
- * helper, sequenced by `provision`. On any failure the friend row is flipped to
- * `failed` (recoverable by the cleanup sweep) and the error is rethrown.
- */
 export class ProvisioningService implements ProvisioningServiceContract {
-  // Serializes the mutating ops (add/offboard/rotate/sweep) — intentional for
-  // a single-admin app: it closes interleavings like reap-vs-add without
-  // distributed locking. Read-only queries never touch it.
+  // Serializes mutating ops (add/offboard/rotate/sweep) to rule out
+  // interleavings like reap-vs-add without distributed locking; read-only
+  // queries never take it.
   private readonly mutex = new Mutex();
 
   constructor(
@@ -115,18 +101,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     private readonly logger: Logger,
   ) {}
 
-  /** Non-streaming provision: drains the stream and hands back the bundle. */
   addFriend(input: AddFriendInput): Promise<FriendBundle> {
     return drainForResult(this.addFriendStream(input));
   }
 
-  /**
-   * Provision a friend, yielding a `step` event as each step begins and a final
-   * `done` event carrying the once-shown bundle. A throw between steps propagates
-   * straight out (the subscription errors on that step), so the UI halts on the
-   * exact failing step instead of a fake timer running past it. Steps are named
-   * by key (see PROVISION_STEPS); order can change without mislabelling.
-   */
   addFriendStream(
     input: AddFriendInput,
   ): AsyncGenerator<ProgressEvent<ProvisionStepKey, FriendBundle>> {
@@ -151,7 +129,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       instanceExisted: reservation.instanceExisted,
     });
     try {
-      // yield* forwards the step events AND returns provisionSteps' bundle.
       const bundle = yield* this.provisionSteps(
         input,
         naming,
@@ -161,7 +138,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       log.info("provisioning complete", { friendId: reservation.friendId });
       yield { type: "done", result: bundle };
     } catch (err) {
-      // Mark recoverable-failed for the cleanup sweep, then rethrow unchanged.
+      // Mark the friend failed so the cleanup sweep can reap it.
       await this.repo.markFailed(reservation.friendId);
       // Audit the failure BEFORE the reap below deletes the friend row — the
       // add runs in a detached job, so the tRPC middleware never sees this.
@@ -184,13 +161,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
       if (diag?.recentLogs) {
         log.debug("instance logs", { logs: diag.recentLogs });
       }
-      // Reap the partial resources, but DON'T block the throw on it: the failure
-      // reaches the client only when this generator throws, and the reap can take
-      // minutes on a failed provision (mc calls against a MinIO that never came
-      // up, Tailscale node/key revokes). Detach it so the error surfaces at once;
-      // markFailed above + the periodic sweep are the convergence fallback if
-      // this best-effort reap can't finish. Queued on the same mutex so it can't
-      // race a concurrent add/offboard/rotate.
+      // Detach the reap — it can take minutes and the error must surface now;
+      // if it can't finish, the row is already marked failed and the sweep
+      // retries. It runs under the same mutex, so it can't race other ops.
       void this.mutex
         .run(() =>
           this.attempt(
@@ -200,8 +173,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
           )
         )
         .catch((reapErr) =>
-          // attempt() already logs+swallows per-step; this only fires if the
-          // detached chain itself rejects (e.g. the mutex task). Never silent.
+          // attempt() already logs and swallows per-step failures; this fires
+          // only if the detached chain itself rejects (e.g. the mutex task),
+          // so nothing is silent.
           log.error("detached inline reap failed unexpectedly", {
             friendId: reservation.friendId,
             error: String(reapErr),
@@ -243,10 +217,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
       newAccessKeyId: cred.accessKeyId,
       oldAccessKeyId: ctx.s3AccessKeyId,
     });
-    // Create-before-remove: the friend must never be credential-less, and the
-    // DB must never record a key ID MinIO doesn't have. Key IDs are random,
-    // so old and new coexist during the overlap. The bucket-scoped policy
-    // already exists — just attach it to the new user.
+    // Create-before-remove: the friend is never credential-less and the DB never
+    // records a key ID MinIO lacks; random IDs let old and new coexist briefly.
     await mc.createUser(cred);
     await mc.attachPolicy(cred.accessKeyId, ctx.bucket);
     await this.repo.recordAccessKey(friendId, cred.accessKeyId);
@@ -271,7 +243,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
     await this.repo.audit(friendId, "rotate_key");
     log.info("S3 key rotated");
-    // No tsAuthKey: the node is already enrolled (see FriendBundle docs).
     return this.buildRotateBundle(ctx, cred, warnings);
   }
 
@@ -287,10 +258,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
     const minted = await this.tailscale.mintAuthKey({ tag: ctx.nodeTag });
     await this.repo.recordTsKeyId(friendId, minted.keyId);
-    // Mint-then-revoke: the friend is never left keyless if the mint fails.
-    // The old key must not stay live once superseded (unused = still valid
-    // for ~90 days). Revocation is an auth_keys API op, so it runs in manual
-    // ACL mode too.
+    // Mint before revoking so a failed mint never leaves the friend keyless;
+    // an unused key stays valid ~90 days. Revocation is an auth_keys op, so it
+    // works in manual ACL mode.
     if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
     await this.repo.audit(friendId, "reissue_ts_key");
     log.info("tailscale key re-issued", { tag: ctx.nodeTag });
@@ -319,14 +289,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     });
   }
 
-  /**
-   * Reconcile an invited friend's status and persist it. Acceptance is read
-   * WITHOUT the personal token — `tailscale.hasJoined` uses the users list
-   * (with a `users:read` scope) or falls back to devices. Only the finer
-   * pending-vs-expired split needs the personal token (it inspects the invite
-   * itself); without it an un-joined friend reads `pending` (invite sent) or
-   * `manual` (admin invited by hand).
-   */
+  /** Acceptance is checked without the personal token; only the
+   * pending-vs-expired split needs it, so without a token an un-joined friend
+   * shows as `pending` or `manual`. */
   async inviteStatus(friendId: number): Promise<InviteStatusView> {
     const ctx = await this.repo.context(friendId);
     if (ctx.enrollmentMode !== "invite" || !ctx.inviteEmail) {
@@ -337,8 +302,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       await this.persistInviteStatus(friendId, email, ctx.inviteId, "accepted");
       return { status: "accepted", email };
     }
-    // Not joined yet. With the personal token we can tell pending from expired
-    // by inspecting the invite; otherwise report the outstanding state.
     if (this.userInvite.configured && ctx.inviteId) {
       const invite = await this.userInvite.getUserInvite(ctx.inviteId);
       const status: InviteStatus = invite ? "pending" : "expired";
@@ -364,21 +327,15 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return this.repo.recordInvite(friendId, { email, inviteId, status });
   }
 
-  /**
-   * Re-issue the config a running instance must carry but that lives OUTSIDE
-   * its data: the audit webhook (derived token) and every live friend's ACL
-   * grant. Run on each boot reconcile of a present/recovered instance so the
-   * webhook + tailnet policy converge on intent. Every step is idempotent, so
-   * re-running on a steady-state instance is a cheap no-op.
-   */
+  /** Re-issue config living OUTSIDE instance data (audit webhook, friend ACL
+   * grants) on each boot reconcile. Idempotent — steady state is a cheap no-op. */
   realignInstance(instance: InstanceRef): Promise<void> {
     return this.mutex.run(() => this.realignInstanceLocked(instance));
   }
 
   private async realignInstanceLocked(instance: InstanceRef): Promise<void> {
-    // The audit token is derived from the master key, so re-issuing it is what
-    // lets a manager rebuild (new token) reconnect the instance with no manual
-    // step. Idempotent.
+    // The token is master-key-derived, so re-issuing lets a rebuilt manager
+    // reconnect the instance with no manual step. Idempotent.
     await this.mc.forInstance({
       alias: instance.tsHostname,
       minioPort: instance.minioPort,
@@ -389,14 +346,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     await this.reapplyFriendAcls(instance);
   }
 
-  /**
-   * Recreate an instance the DB knows about but whose container/pod is gone,
-   * over its EXISTING pantry data (the caller gates on data presence). The
-   * friend's buckets, IAM users and creds live in that data and are untouched;
-   * only the tailnet node identity is re-established. Idempotent: a partial
-   * failure re-runs next boot — once the container is present again its ACLs +
-   * webhook converge via the normal realign path.
-   */
+  /** Recreate a missing container on top of its surviving data volume; buckets
+   * and creds are untouched, only the tailnet identity is re-established.
+   * Idempotent. */
   recoverInstance(instance: InstanceRef): Promise<void> {
     return this.mutex.run(() => this.recoverInstanceLocked(instance));
   }
@@ -426,10 +378,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     if (serveNode) {
       await this.repo.recordServeNodeId(instance.instanceId, serveNode.nodeId);
     }
-    // Webhook + ACLs — the same path a healthy instance realigns through.
     await this.realignInstanceLocked(instance);
     // System audit row (friendId null): the event is instance-level and may
-    // span several pooled friends; the detail names the instance.
+    // span several pooled friends.
     await this.repo.audit(
       null,
       "instance_recovered",
@@ -444,7 +395,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log.info("instance recreated over existing data");
   }
 
-  /** Delete every serve node currently holding this hostname (best-effort). */
   private async deleteServeNodes(
     tsHostname: string,
     log: Logger,
@@ -463,9 +413,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /** Mint the serve node's auth key, first ensuring its tag is owned (auto mode
-   * only — manual mode's admin declares it by hand). The serve tag never appears
-   * as an ACL src, so nothing else declares it in tagOwners. */
+  /** Ensure the serve tag is owned first (auto mode only) — it never appears as
+   * an ACL src, so nothing else declares it in tagOwners. */
   private async mintServeKey() {
     if (this.config.aclMode !== "manual") {
       await this.tailscale.ensureTagOwner(this.config.serveNodeTag);
@@ -473,13 +422,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return this.tailscale.mintAuthKey({ tag: this.config.serveNodeTag });
   }
 
-  /**
-   * Re-apply the ACL grant for every non-failed friend on the instance. In auto
-   * mode `ensureFriendAcl` is a no-op when the grant is already present, so this
-   * is cheap on a steady-state reconcile. Manual mode is admin-owned — skip it
-   * silently here (recover logs a one-off reminder). Sequential: each call
-   * edits the whole tailnet policy, so concurrent applies would clobber it.
-   */
+  /** Idempotent per grant; in manual mode the admin owns the policy, so skip.
+   * Applies run sequentially because each call edits the whole tailnet policy
+   * and concurrent edits would clobber each other. */
   private async reapplyFriendAcls(instance: InstanceRef): Promise<void> {
     if (this.config.aclMode === "manual") return;
     const tags = await this.repo.liveFriendTagsOnInstance(instance.instanceId);
@@ -501,16 +446,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /** Non-streaming offboard: drains the teardown stream to completion. */
   offboard(friendId: number): Promise<OffboardResult> {
     return drainForResult(this.offboardStream(friendId));
   }
 
-  /**
-   * Tear a friend down, yielding a `step` event as each step begins and a final
-   * `done` event. A throw propagates out, so the UI halts on the failing step.
-   * Steps are named by key (see OFFBOARD_STEPS).
-   */
   offboardStream(
     friendId: number,
   ): AsyncGenerator<ProgressEvent<OffboardStepKey, OffboardResult>> {
@@ -530,10 +469,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     });
     const manualUserRemoval = yield* this.tearDownSteps(ctx, log);
     yield { type: "step", step: "record" };
-    // Record the offboard BEFORE deleting the friend row: the audit FK points at
-    // friends.id, so inserting after the delete trips a FOREIGN KEY constraint.
-    // The name is snapshot into the audit row (friendName), so it survives the
-    // delete without stuffing it into `detail`.
+    // Audit BEFORE deleting the friend row — the audit FK points at friends.id.
+    // The name is snapshot into the row (friendName), so it survives the delete.
     await this.repo.audit(friendId, "offboard", `mode=${ctx.isolationMode}`);
     await this.repo.deleteFriend(friendId);
     yield { type: "step", step: "reap" };
@@ -553,10 +490,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   // ---- provisioning steps (add-friend flow) ----
 
-  // Each helper yields its own step events (see PROVISION_STEPS) and, via yield*,
-  // returns its result to the caller. Keys are explicit, so the order can change
-  // without mislabelling. buildAddBundle is the generator's return value (picked
-  // up by addFriendStream's `yield*`), not a yielded event.
   private async *provisionSteps(
     input: AddFriendInput,
     naming: FriendNaming,
@@ -568,15 +501,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
       minioPort: reservation.hostPort,
     });
     const cred = this.keyGen.generateS3Credential();
-    // The ACL grant subject differs by enrollment: an auth-key friend's node
-    // tag, or an invited friend's own login email (identity-src grant).
     const aclSrc = input.enrollment.mode === "invite"
       ? input.enrollment.email
       : naming.nodeTag;
     log.info("step: ensure instance + ACL");
     // MUST precede minting the friend key: Tailscale rejects an auth key for a
     // tag that isn't yet declared in tagOwners, and ensureFriendAcl declares it.
-    // In manual ACL mode this returns the grant lines the admin must paste.
     const manualAcl = yield* this.ensureInfraSteps(reservation, aclSrc, log);
     yield { type: "step", step: "authkey" };
     const enroll = await this.enrollFriend(
@@ -608,7 +538,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /** Dispatch enrollment by mode: invite (create-or-advise) or authKey (mint). */
   private enrollFriend(
     input: AddFriendInput,
     naming: FriendNaming,
@@ -621,8 +550,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return this.enrollByAuthKey(friendId, naming.nodeTag, log);
   }
 
-  /** authKey enrollment: mint the friend's single-use tagged key; store its id
-   * (never the secret) so failure-reap/offboard can revoke it. */
+  /** Mint the friend's single-use tagged key and store its id (never the
+   * secret) so a failure reap or offboard can revoke it. */
   private async enrollByAuthKey(
     friendId: number,
     tag: string,
@@ -634,10 +563,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return { mode: "authKey", tsAuthKey: friendKey.key };
   }
 
-  /** invite enrollment: create a real user-invite when a personal token is
-   * configured (Tailscale emails the friend); otherwise — or if the create
-   * fails (expired/insufficient token) — record `manual` and advise the admin
-   * to invite from the console. Never fails the provision on a token problem. */
+  /** A missing or broken token never fails the add; it falls back to manual
+   * invite instructions. */
   private async enrollByInvite(
     friendId: number,
     email: string,
@@ -691,11 +618,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
   }
 
-  /**
-   * Ensure the instance is up (skip if the shared pool already runs), then ACL
-   * the friend. In `manual` mode the manager can't edit the policy file, so it
-   * skips the API call and returns the grant lines for the admin to paste.
-   */
+  /** In manual ACL mode the manager can't edit the policy, so this returns the
+   * grant lines for the admin to paste. */
   private async *ensureInfraSteps(
     reservation: InstanceReservation,
     aclSrc: string,
@@ -724,7 +648,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
         serveNode.nodeId,
       );
     }
-    // Port follows the serve mode: 443 (https certs) or 80 (http — headscale).
     const endpointHostPort = `${ip}:${
       this.config.serveMode === "http" ? 80 : 443
     }`;
@@ -748,9 +671,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log: Logger,
   ): Promise<void> {
     if (reservation.instanceExisted) {
-      // Adopting the shared pool: never assume it works — start it if it's
-      // stopped and verify the HEALTHCHECK, so a dead pool fails THIS add
-      // cleanly instead of at some later mc call (no silent adopt).
+      // Adopting the shared pool: start if stopped and verify health, so a dead
+      // pool fails THIS add cleanly instead of at some later mc call.
       log.debug("adopting existing instance; verifying health", {
         instanceId: reservation.instanceId,
         tsHostname: reservation.tsHostname,
@@ -759,12 +681,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
       await this.runtime.waitUntilHealthy(reservation.tsHostname);
       return;
     }
-    // The instance needs its OWN serve auth key (server-side tag), separate
-    // from the friend's enrollment key. It and the derived root cred ride the
-    // spec IN MEMORY — the runtime picks the secret transport (docker: temp
-    // env-file; k8s: Secret). Admin access needs no further setup: every mc
-    // call derives the same root cred and carries it in its own MC_HOST env
-    // var.
+    // The instance's own serve key (not the friend's) and the derived root
+    // cred travel on the spec in memory only; the runtime picks the secret
+    // transport (env-file or Secret).
     const serveKey = await this.mintServeKey();
     const spec = this.specFor(reservation, serveKey.key);
     log.debug("starting instance", {
@@ -799,7 +718,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     await this.repo.recordAccessKey(friendId, cred.accessKeyId); // ID only
   }
 
-  /** Smoke-test the key BEFORE arming retention, then set retention + quota. */
+  /** Smoke-test the key BEFORE arming retention. */
   private async *smokeAndArmSteps(
     mc: McClient,
     input: AddFriendInput,
@@ -809,9 +728,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log: Logger,
   ): AsyncGenerator<StepEvent<ProvisionStepKey>, void> {
     yield { type: "step", step: "smoke" };
-    // Smoke-test over the ADMIN endpoint (same MinIO), not the Tailscale URL —
-    // the manager isn't on the tailnet and can't reach `<host>.<tailnet>:443`.
-    // Only the runtime knows how to address an instance.
+    // Smoke-test over the ADMIN endpoint (same MinIO) — the manager isn't on
+    // the tailnet and can't reach the serve URL.
     const adminEndpoint = this.runtime.adminEndpoint(
       reservation.tsHostname,
       reservation.hostPort,
@@ -870,15 +788,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   // ---- offboard helpers ----
 
-  /**
-   * True when the instance container is ABSENT — its MinIO, and with it every
-   * bucket/user/policy, is already gone. Storage teardown is then vacuously
-   * done; reaching in with `mc` would only wedge on connection-refused (the
-   * failure that used to strand an offboard whose instance had already been
-   * removed). A present-but-unreachable instance is NOT treated this way — we
-   * can't prove its data is gone, so the mc call still runs and surfaces the
-   * real error rather than silently leaking a shared instance's resources.
-   */
+  /** An absent container means the MinIO storage is already gone, so teardown
+   * is vacuously done (mc would only wedge). Present-but-unreachable is not
+   * the same: the data may survive, so mc still runs. */
   private async instanceGone(
     ctx: FriendProvisionContext,
     log: Logger,
@@ -897,13 +809,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return false;
   }
 
-  /**
-   * Best-effort MinIO teardown for the reap sweep — each step treats "already
-   * absent" as success, so partially-provisioned friends converge. If the
-   * instance is gone, its storage went with it: those steps are vacuously done
-   * (else the mc calls would wedge on connection-refused, keeping the tombstone
-   * forever). Returns a per-step success map the caller folds into `results`.
-   */
+  /** Best-effort MinIO teardown: "already absent" is success. */
   private async reapStorage(
     ctx: FriendProvisionContext,
     mc: McClient,
@@ -932,8 +838,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
-  /** Returns the manual user-removal advisory (invite friends, no-token or
-   * guarded-out cases), else undefined. */
+  /** Returns the manual user-removal advisory, or undefined when none is
+   * needed. */
   private async *tearDownSteps(
     ctx: FriendProvisionContext,
     log: Logger,
@@ -960,19 +866,14 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return manualUserRemoval;
   }
 
-  /**
-   * Revoke a friend's tailnet identity. auth-key: delete the tagged nodes and
-   * revoke the enrollment key. invite: revoke a still-pending invite, then
-   * delete the joined user only when it's unambiguously safe (see
-   * deleteInvitedUserOrAdvise), else return a manual-removal advisory.
-   */
   private async tearDownEnrollment(
     ctx: FriendProvisionContext,
     log: Logger,
   ): Promise<string | undefined> {
     if (ctx.enrollmentMode !== "invite") {
       await this.revokeFriendNodes(ctx.nodeTag);
-      // Unused the key stays live ~90 days; absent id / already-revoked = ok.
+      // An unused key stays live ~90 days; a missing id or an already-revoked
+      // key is fine.
       if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
       return undefined;
     }
@@ -988,13 +889,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return await this.deleteInvitedUserOrAdvise(ctx, ctx.inviteEmail, log);
   }
 
-  /**
-   * Delete the joined tailnet user, but ONLY when it's unambiguously this
-   * friend's and safe: no other live portion shares the email, the user
-   * actually joined, and it's a plain member (never an owner/admin — deleting
-   * one could lock the admin out of the whole tailnet). Otherwise advise manual
-   * removal — the blast radius is too large to guess.
-   */
+  /** Delete ONLY when unambiguously safe: no other portion shares the email and
+   * it's a plain member — deleting an owner/admin could lock out the tailnet. */
   private async deleteInvitedUserOrAdvise(
     ctx: FriendProvisionContext,
     email: string,
@@ -1024,21 +920,14 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return undefined;
   }
 
-  /** ACL grant subject: an invited friend's login email (identity-src) or an
-   * auth-key friend's node tag. */
   private aclSrcFor(ctx: FriendProvisionContext): string {
     return ctx.enrollmentMode === "invite" && ctx.inviteEmail
       ? ctx.inviteEmail
       : ctx.nodeTag;
   }
 
-  /**
-   * Remove the friend's policy entries — except in manual ACL mode, where the
-   * token can't edit the policy (the add path skipped the write too): calling
-   * the API would 403 AFTER the user/bucket are gone, wedging the friend row.
-   * Removal is then the admin's job; offboard advises via OffboardResult, the
-   * sweep can only log.
-   */
+  /** Manual ACL mode skips: the token can't edit the policy and the call would
+   * 403 AFTER the user/bucket are gone, wedging the friend row. */
   private async removeAclOrAdvise(src: string, log: Logger): Promise<void> {
     if (this.config.aclMode === "manual") {
       log.info("manual ACL mode — admin should remove the policy entries", {
@@ -1049,8 +938,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     await this.tailscale.removeFriendAcl(src);
   }
 
-  /** Failure-reap: revoke a recorded pending invite so a retry doesn't
-   * double-send. 404-tolerant; no-op for auth-key friends / no token. */
+  /** Revoke a recorded pending invite so a retried add doesn't double-send; a
+   * 404 is fine. */
   private async revokeDanglingInvite(
     ctx: FriendProvisionContext,
   ): Promise<void> {
@@ -1066,13 +955,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /** Dedicated → always reap; shared → only when this was the last friend. */
   private async reapInstanceIfEmpty(
     ctx: FriendProvisionContext,
     log: Logger,
   ): Promise<void> {
-    // Count + mark in one transaction; a false return means friends remain
-    // (or a concurrent add just reserved onto the pool) — leave it alone.
+    // Counts and marks in one transaction; false means friends remain (or a
+    // concurrent add just reserved onto the pool), so leave the instance alone.
     const marked = await this.repo.markInstanceReaping(ctx.instanceId, {
       requireEmpty: ctx.isolationMode !== "dedicated",
     });
@@ -1099,12 +987,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   // ---- cleanup sweep (reap failed-provision tombstones) ----
 
-  /**
-   * Run `fn`, logging + swallowing any error — teardown must be best-effort.
-   * Returns whether it succeeded so callers can gate tombstone deletion on
-   * resource teardown (a DB row must never be deleted while a resource it
-   * records may still exist).
-   */
+  /** Logs and swallows — teardown is best-effort. Returns whether the step
+   * succeeded so callers can gate tombstone deletion on it (never delete a row
+   * whose resource may still exist). */
   private async attempt(
     log: Logger,
     step: string,
@@ -1121,9 +1006,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     }
   }
 
-  /** Delete an instance's own (serve) tailnet node. Match by stored ID (stable
-   * across control-plane renames); fall back to hostname for pre-column
-   * instances. Absent = already gone = success. */
+  /** Matches by stored ID (stable across control-plane renames), falling back
+   * to hostname for pre-column instances. An absent node is already gone,
+   * which is success. */
   private async revokeServeNode(
     serveNodeId: string | null,
     tsHostname: string,
@@ -1135,14 +1020,12 @@ export class ProvisioningService implements ProvisioningServiceContract {
     if (target) await this.tailscale.deleteNode(target.nodeId);
   }
 
-  /** Best-effort teardown of a failed friend's (possibly partial) resources. */
   private async reapFriend(friendId: number, log: Logger): Promise<void> {
     const ctx = await this.repo.context(friendId).catch(() => null);
     if (!ctx) return; // already reaped
     const rlog = log.child({ reapFriendId: friendId, name: ctx.name });
-    // A COMPLIANCE bucket with data is untouchable until retention lapses —
-    // skip the whole reap (keeping the tombstone) rather than half-tearing
-    // the friend down around an undeletable bucket.
+    // COMPLIANCE data is untouchable until retention lapses — skip the whole
+    // reap (keep the tombstone) rather than half-tear around an undeletable bucket.
     const locked = await this.guardComplianceLock(ctx).then(() => false)
       .catch((err) => {
         rlog.warn("reap skipped: COMPLIANCE retention", {
@@ -1171,8 +1054,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       revokeAuthKey: await this.attempt(rlog, "revokeAuthKey", async () => {
         if (ctx.tsKeyId) await this.tailscale.revokeAuthKey(ctx.tsKeyId);
       }),
-      // Invite friends: drop a dangling pending invite so a retry doesn't
-      // double-send. Inert (no-op) for auth-key friends.
       revokeInvite: await this.attempt(
         rlog,
         "revokeInvite",
@@ -1200,7 +1081,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /** Reap an orphaned failed instance (no friend rows): container + volumes + row. */
   private async reapOrphanInstance(
     instanceId: number,
     tsHostname: string,
@@ -1233,11 +1113,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /**
-   * Boot recovery: any row still `provisioning` at process start is
-   * a crashed provision — fail it so the sweep (run right after in main.ts)
-   * reaps it on the same boot and frees the name/port.
-   */
+  /** Any row still `provisioning` at process start is a crashed provision —
+   * fail it so the same boot's sweep (main.ts) reaps it and frees the name/port. */
   async recoverStaleProvisioning(): Promise<string[]> {
     const names = await this.repo.failStaleProvisioning();
     if (names.length > 0) {
@@ -1256,7 +1133,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
   private async sweepFailedLocked(): Promise<number> {
     const log = this.logger.child({ op: "sweepFailed" });
     const friendIds = await this.repo.failedFriendIds();
-    // Sequential (Promise chain, not a loop) — each reap frees its instance.
+    // Reaps run sequentially — each one frees its instance before the next
+    // starts.
     await friendIds.reduce(
       (p, id) => p.then(() => this.reapFriend(id, log)),
       Promise.resolve(),
@@ -1284,16 +1162,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return total;
   }
 
-  /**
-   * COMPLIANCE-locked objects cannot be deleted by anyone — root bypass
-   * included — until their retention lapses. Refuse BEFORE any destructive
-   * step, or the teardown fails opaquely halfway with the user/policy already
-   * gone. Earliest-offboard estimate is conservative: every lock expires at
-   * most retentionDays after its write, and writes can't be in the future,
-   * so now + retentionDays always suffices. An empty bucket has no locks —
-   * proceed. A failed usage check proceeds too: the rm step will surface a
-   * genuine lock, and retries stay safe (all steps are idempotent).
-   */
+  /** COMPLIANCE locks block deletion for everyone (root included), so refuse
+   * before any destructive step. An empty bucket or a failed usage check
+   * proceeds. */
   private async guardComplianceLock(
     ctx: FriendProvisionContext,
   ): Promise<void> {
@@ -1316,12 +1187,8 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /**
-   * Remove every IAM user attached to the friend's bucket-scoped policy except
-   * `keep`. MinIO is the source of truth for which users belong to a friend:
-   * a failed rotation can leave a live user no DB row records, and this sweep
-   * is how it converges (run at the start of rotate and during teardown).
-   */
+  /** MinIO is the source of truth for a friend's users: a failed rotation can
+   * leave a live user no DB row records — this sweep is how it converges. */
   private async removeStaleUsers(
     mc: McClient,
     policyName: string,
@@ -1350,8 +1217,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     name: string,
     isolationMode: IsolationMode,
   ): FriendNaming {
-    // Prefix the tailnet hostname with p0rt1on- so the serve URL is
-    // p0rt1on-<name>.<tailnet>.ts.net (the friend's endpoint carries the brand).
     return {
       bucket: name,
       nodeTag: `tag:p0rt1on-friend-${name}`,
@@ -1376,8 +1241,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     );
   }
 
-  /** The runtime spec from an instance's identity alone — image/tag from config,
-   * root cred derived from the hostname. Used by add (via specFor) and recover. */
   private specForInstance(
     tsHostname: string,
     minioPort: number,
@@ -1410,8 +1273,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
       s3SecretKey: cred.secretKey,
       enrollmentMode: enroll.mode,
       manualAclInstructions,
-      // Join preamble differs by mode: auth-key redeems the minted key; invite
-      // has the friend generate their own key in their Tailscale account.
       kopiaQuickstart: this.kopiaQuickstart({
         endpoint,
         bucket: naming.bucket,
@@ -1453,8 +1314,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
       bucket: ctx.bucket,
       s3AccessKeyId: cred.accessKeyId,
       s3SecretKey: cred.secretKey,
-      // tsAuthKey / tailscaleUpCommand omitted — node already enrolled; the repo
-      // already exists, so this is a `connect` (with the rotated key).
+      // tsAuthKey / tailscaleUpCommand are omitted — the node is already
+      // enrolled, and the existing repo makes the quickstart a `connect` with
+      // the rotated key.
       kopiaQuickstart: this.kopiaQuickstart({
         endpoint,
         bucket: ctx.bucket,
@@ -1465,13 +1327,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
-  /**
-   * Copy-pasteable Kopia setup for the bundle. `create` (add) arms retention +
-   * a new repo; `connect` (rotate) reuses the existing repo with the new key.
-   * `tailscaleUpCommand` prepends a tailnet-join preamble (auth-key add only) —
-   * invite friends join with their own account, rotate needs no join. Mirrors
-   * backup-client/entrypoint.
-   */
+  /** Mirrors backup-client/entrypoint — keep the two in sync. */
   private kopiaQuickstart(opts: {
     endpoint: string;
     bucket: string;

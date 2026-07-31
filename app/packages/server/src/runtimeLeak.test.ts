@@ -5,7 +5,7 @@ import { expect } from "@std/expect";
 // layers (provisioning/, boot/, services/) describe instances in domain
 // language; container names, volume names, the docker network, and
 // host-gateway addressing are the docker runtime's business alone. A match
-// here means a docker-ism crossed the InstanceRuntime seam.
+// here means a docker-ism escaped the InstanceRuntime boundary.
 
 describe("runtime vocabulary tripwire", () => {
   const BANNED =

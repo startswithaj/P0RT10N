@@ -20,26 +20,18 @@ import type { Pod } from "@cloudydeno/kubernetes-apis/core/v1";
 import type { StatefulSet } from "@cloudydeno/kubernetes-apis/apps/v1";
 import { toQuantity } from "@cloudydeno/kubernetes-apis/common.ts";
 
-// InstanceRuntime over the k8s API via the typed @cloudydeno client. One
-// instance = StatefulSet(1) + Service + Secret + 2 PVCs, one namespace, all
-// labelled `p0rt1on=1`. Least privilege: tailscaled runs userspace (no
-// caps/devices) so the ns enforces PSA `restricted`; instance pods get no API
-// token; manager RBAC is one ns-scoped Role. Suspend = scale to 0.
-
 export interface KubeConfig {
   namespace: string;
-  /** PVC sizes. Per-friend quota stays bucket-level (MinIO), not storage. */
+  /** Per-friend quota is enforced at the MinIO bucket level, not by PVC size. */
   dataSize: string;
   stateSize: string;
-  /**
-   * The pantry StorageClass every portion's DATA PVC is provisioned from — the
-   * k8s spelling of "one configured storage location". Tailscale state stays
-   * OFF it (its PVC uses the cluster default), mirroring the docker split.
-   */
+  /** The StorageClass every portion's DATA PVC is provisioned from; tailscale
+   * state stays off it and uses the cluster default class. */
   pantryStorageClass: string;
-  /** Instance enrollment extras (headscale test tier); absent = SaaS defaults. */
+  /** Instance enrollment extras for the headscale test tier; when absent, SaaS
+   * defaults apply. */
   tailscale?: InstanceTailscaleOptions;
-  /** Per-portion container CPU/memory (native k8s values); fields optional. */
+  /** Per-portion container CPU/memory caps, as native k8s quantity values. */
   resources?: {
     cpuRequest?: string;
     cpuLimit?: string;
@@ -48,13 +40,13 @@ export interface KubeConfig {
   };
 }
 
-/** Transport inputs — where the client points and how it authenticates. */
 export interface KubeConnection {
-  /** API base; omit to auto-detect the in-cluster server. */
+  /** Omit to auto-detect the in-cluster server. */
   apiBase?: string;
-  /** ServiceAccount bearer token (in-cluster: the mounted file's contents). */
+  /** The ServiceAccount bearer token; in-cluster this is the mounted token
+   * file's contents. */
   token?: string;
-  /** Cluster CA (PEM). In-cluster the mounted CA; tests pass their k3d CA. */
+  /** The cluster CA certificate, as PEM. */
   caCert?: string;
 }
 
@@ -63,7 +55,7 @@ const LABEL_VALUE = "p0rt1on";
 const LABEL_SELECTOR = `${LABEL_KEY}=${LABEL_VALUE}`;
 const FIELD_MANAGER = "p0rt1on";
 
-/** Resource names derived from the instance name (already a DNS label). */
+/** Resource names derived from the instance name, which is already a DNS label. */
 function resourceNames(instance: string) {
   return {
     statefulSet: instance,
@@ -80,9 +72,6 @@ function httpCode(err: unknown): number | undefined {
   return (err as { httpCode?: number })?.httpCode;
 }
 
-/** Build a RestClient from explicit connection info, or auto-detect
- * in-cluster. Handles both the bearer token and the cluster CA — this is what
- * replaces the old manual `DENO_CERT` + token-file + fetch-with-CA plumbing. */
 export function buildRestClient(conn: KubeConnection): Promise<RestClient> {
   if (!conn.token && !conn.apiBase) return KubeConfigRestClient.forInCluster();
   const kc = new ClientKubeConfig({
@@ -119,11 +108,9 @@ export class KubernetesRuntime implements InstanceRuntime {
   async ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
     const names = resourceNames(spec.name);
     const labels = this.labels(spec.name);
-    // Server-side apply = create-or-adopt in one idempotent call. PVCs are
-    // applied directly (not volumeClaimTemplates) so teardown gates their
-    // deletion exactly like docker volume deletion. Data comes from the pantry
-    // class; tailscale state uses the cluster default so it stays off the
-    // pantry, mirroring the docker split.
+    // Server-side apply is create-or-adopt in one idempotent call. PVCs are
+    // applied directly rather than via volumeClaimTemplates so teardown gates
+    // their deletion explicitly.
     await this.applyPvc(
       names.dataPvc,
       labels,
@@ -131,8 +118,8 @@ export class KubernetesRuntime implements InstanceRuntime {
       this.config.pantryStorageClass,
     );
     await this.applyPvc(names.statePvc, labels, this.config.stateSize);
-    // The Secret carries the root cred + enrollment key — a failed apply must
-    // never echo it, so map the error to a redacted one.
+    // The Secret carries the root cred and enrollment key; a failed apply must
+    // never echo it, so the error is mapped to a redacted one.
     await this.redacting(() =>
       this.core.patchSecret(names.secret, "apply-patch", {
         metadata: { name: names.secret, labels },
@@ -211,8 +198,8 @@ export class KubernetesRuntime implements InstanceRuntime {
   }
 
   async stopInstance(instanceName: string): Promise<void> {
-    // Suspend = scale to 0: kubelet owns restarts, so deleting the pod would
-    // just resurrect it. Data + Secret stay. "Already absent" is success.
+    // Scale to 0: a deleted pod would just be resurrected by the controller.
+    // Data and Secret stay. "Already absent" is success.
     await this.scale(instanceName, 0).catch((err) => {
       if (httpCode(err) === 404) return;
       throw err;
@@ -230,10 +217,8 @@ export class KubernetesRuntime implements InstanceRuntime {
     await this.deleteTolerant(() => this.core.deleteService(names.service));
     await this.deleteTolerant(() => this.core.deleteSecret(names.secret));
     if (opts.removeData) {
-      // Gated exactly like docker volume deletion. With the shipped pantry class
-      // (reclaimPolicy Delete) this reclaims the PV and the data, matching
-      // docker's `rm -rf`; a Retain class would orphan the PV for manual
-      // recovery instead.
+      // With a reclaimPolicy Delete pantry class this reclaims the PV and the data;
+      // a Retain class would orphan the PV for manual recovery instead.
       await this.deleteTolerant(() =>
         this.core.deletePersistentVolumeClaim(names.dataPvc)
       );
@@ -281,7 +266,6 @@ export class KubernetesRuntime implements InstanceRuntime {
     return { fieldManager: FIELD_MANAGER, force: true };
   }
 
-  /** Pod readiness → InstanceHealth (shared by health + diagnostics). */
   private healthOf(pod: Pod): InstanceHealth {
     const container = pod.status?.containerStatuses?.[0];
     if (container?.ready) return "healthy";
@@ -292,8 +276,6 @@ export class KubernetesRuntime implements InstanceRuntime {
     return "starting";
   }
 
-  /** Container `resources` from config — only the set fields; undefined when
-   * none are configured (no caps, the default). */
   private containerResources() {
     const r = this.config.resources;
     const requests = {
@@ -322,7 +304,7 @@ export class KubernetesRuntime implements InstanceRuntime {
       spec: {
         accessModes: ["ReadWriteOnce"],
         resources: { requests: { storage: toQuantity(size) } },
-        // Unset = the cluster default class (the tailscale-state PVC).
+        // Left unset, the PVC gets the cluster default class.
         ...(storageClass ? { storageClassName: storageClass } : {}),
       },
     }, this.applyOpts);
@@ -338,9 +320,8 @@ export class KubernetesRuntime implements InstanceRuntime {
       spec: {
         replicas: 1,
         serviceName: names.service,
-        // Suspend = scale to 0; deleting the StatefulSet must NOT delete a
-        // friend's data. Only an explicit offboard deletes the PVCs (gated).
-        // Set explicitly so a default flip can never silently drop backups.
+        // Deleting the StatefulSet must NOT delete a friend's data — only offboard
+        // deletes PVCs. Set explicitly so a default flip can never drop backups.
         persistentVolumeClaimRetentionPolicy: {
           whenScaled: "Retain",
           whenDeleted: "Retain",
@@ -352,10 +333,9 @@ export class KubernetesRuntime implements InstanceRuntime {
             // Instance pods never talk to the k8s API — a compromised
             // (friend-facing) pod must find no API credential inside.
             automountServiceAccountToken: false,
-            // The full PSA `restricted` set — the namespace enforces it, so
-            // omitting any means the pod is REJECTED, not degraded. Explicit
-            // uid: the image defaults to root and runAsNonRoot alone fails at
-            // start; fsGroup makes the PVCs writable for that uid.
+            // The full PSA `restricted` set: the namespace enforces it, and
+            // omitting any field gets the pod rejected. The image defaults to
+            // root, hence the explicit uid; fsGroup makes the PVCs writable.
             securityContext: {
               runAsNonRoot: true,
               runAsUser: 1000,
@@ -369,8 +349,8 @@ export class KubernetesRuntime implements InstanceRuntime {
               resources: this.containerResources(),
               envFrom: [{ secretRef: { name: names.secret } }],
               env: [
-                // Userspace tailscaled: zero capabilities, no /dev/net/tun —
-                // the namespace can enforce PSA `restricted`.
+                // Userspace tailscaled needs zero capabilities and no
+                // /dev/net/tun, letting the namespace enforce PSA `restricted`.
                 { name: "TS_USERSPACE", value: "true" },
                 { name: "TAILSCALE_HOSTNAME", value: spec.name },
                 { name: "MINIO_PORT", value: String(spec.minioPort) },
@@ -378,8 +358,8 @@ export class KubernetesRuntime implements InstanceRuntime {
                   .map(([name, value]) => ({ name, value })),
               ],
               ports: [{ containerPort: spec.minioPort }],
-              // Same script as the docker HEALTHCHECK (tailscale up AND MinIO
-              // live) — shared, not duplicated.
+              // The same script as the docker HEALTHCHECK: tailscale up AND
+              // MinIO live.
               readinessProbe: {
                 exec: { command: ["/healthcheck.sh"] },
                 initialDelaySeconds: 20,
@@ -413,8 +393,9 @@ export class KubernetesRuntime implements InstanceRuntime {
   }
 
   private async scale(instanceName: string, replicas: number): Promise<void> {
-    // json-patch the MAIN resource (not the `/scale` subresource, which would
-    // need its own RBAC verb) — typed as an array, so no partial-spec issue.
+    // json-patch the main resource rather than the `/scale` subresource, which
+    // would need its own RBAC verb; a json-patch is typed as an array, so there
+    // is no partial-spec issue.
     await this.apps.patchStatefulSet(
       resourceNames(instanceName).statefulSet,
       "json-patch",
@@ -422,7 +403,7 @@ export class KubernetesRuntime implements InstanceRuntime {
     );
   }
 
-  /** Run a getter, mapping 404 → null (absence is a normal state). */
+  /** Maps 404 to null — absence is a normal state. */
   private async getOrNull<T>(fn: () => Promise<T>): Promise<T | null> {
     try {
       return await fn();
@@ -432,7 +413,7 @@ export class KubernetesRuntime implements InstanceRuntime {
     }
   }
 
-  /** Run a delete, tolerating 404 (teardown idempotency house rule). */
+  /** Tolerates 404: teardown is idempotent, so already absent is success. */
   private async deleteTolerant(fn: () => Promise<unknown>): Promise<void> {
     try {
       await fn();
@@ -457,7 +438,7 @@ export class KubernetesRuntime implements InstanceRuntime {
     }
   }
 
-  /** `pods/{name}/log --tail 50` equivalent; "" on failure (best-effort). */
+  /** Returns "" on failure — logs are best-effort. */
   private async logs(podName: string): Promise<string> {
     try {
       const log = await this.core.getPodLog(podName, { tailLines: 50 });
@@ -467,7 +448,6 @@ export class KubernetesRuntime implements InstanceRuntime {
     }
   }
 
-  /** Recursive bounded poll of pod readiness (mirrors the docker runtime). */
   private async pollHealth(name: string, attemptsLeft: number): Promise<void> {
     const health = await this.instanceHealth(name);
     if (health === "healthy") return;

@@ -1,21 +1,14 @@
 import { containerNames } from "./names.ts";
 import type { McTarget } from "../minio/mc.ts";
 
-// Single source of the admin-plane MinIO endpoint (mc: provisioning, smoke
-// test, du, webhook config). Two addressing modes: a container publishing
-// `127.0.0.1:<port>` is unreachable from another container via the host
-// gateway, so a containerized manager must address instances by container NAME
-// over the shared docker network.
+// A `127.0.0.1:<port>` publish is unreachable from another container, so a
+// containerized manager addresses instances by container NAME.
 
-/**
- * `host` — the manager runs on the host and reaches the loopback-published
- * port. `network` — the manager is itself a container on the instances'
- * docker network and reaches them by container name (the friend-side path is
- * Tailscale either way and unaffected).
- */
+/** With `host` the manager runs on the host and reaches the loopback-published
+ * port; with `network` the manager is a container on the shared docker network
+ * and addresses by name. The friend path is Tailscale either way. */
 export type InstanceAddressing = "host" | "network";
 
-/** Compose the admin endpoint for one instance under the given mode. */
 export function adminEndpointComposer(
   mode: InstanceAddressing,
 ): (target: McTarget) => string {

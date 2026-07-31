@@ -1,14 +1,6 @@
-// The copy-paste snippet an admin adds to their Tailscale policy file when the
-// manager can't edit it programmatically (no `policy_file` write scope). Grants
-// the friend's tag access to ONLY its endpoint — the same rule ensureFriendAcl
-// would have written. Shared by TailscaleHttpApi (auto-mode 403) and the
-// provisioning flow (manual mode) so the instructions never drift.
+// Copy-paste policy snippets for when the manager lacks the `policy_file` write scope.
 
-/**
- * The offboard twin: what the admin should remove from their policy once the
- * friend is gone. Advisory only — the offboard has already completed. Names
- * the same entries manualAclInstructions told them to add, keyed by tag.
- */
+/** Advisory only: the offboard has already completed. */
 export function manualAclRemovalInstructions(src: string): string {
   return [
     `Remove from your Tailscale policy (https://login.tailscale.com/admin/acls):`,

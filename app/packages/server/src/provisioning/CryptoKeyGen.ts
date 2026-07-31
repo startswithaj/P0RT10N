@@ -2,16 +2,14 @@ import { createHmac } from "node:crypto";
 import type { S3Credential } from "../minio/mc.ts";
 import type { KeyGen } from "./deps.ts";
 
-// Friend S3 keys are random (CSPRNG); root creds are HMAC-SHA256-derived from
-// master key + instance host, so an instance always yields the same root cred —
-// stable across recreation, recoverable after a wipe, nothing per-instance stored.
-// Alphabets (32/64) divide 256 evenly → unbiased byte→char map.
+// Both alphabet sizes (32 and 64) divide 256, so `byte % length` maps without
+// bias.
 
-/** Access key ID: base32-ish, MinIO/AWS-style (uppercase, no ambiguous 0/1/8/9). */
+/** MinIO/AWS-style access-key alphabet: uppercase base32 without the ambiguous
+ * 0/1/8/9. */
 const ACCESS_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // 32 chars
 const ACCESS_KEY_LENGTH = 20;
 
-/** Secret: 64-char URL-safe alphabet. */
 const SECRET_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; // 64
 const SECRET_KEY_LENGTH = 40;
@@ -22,7 +20,8 @@ function randomString(length: number, alphabet: string): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
 
-/** 64 deterministic bytes = two HMAC-SHA256 blocks (enough for a 40-char secret). */
+/** Two HMAC-SHA256 blocks give 64 deterministic bytes — enough for a 40-char
+ * secret. */
 function deriveBytes(masterKey: string, info: string): Uint8Array {
   const b0 = createHmac("sha256", masterKey).update(`${info}:0`).digest();
   const b1 = createHmac("sha256", masterKey).update(`${info}:1`).digest();
@@ -66,12 +65,8 @@ export class CryptoKeyGen implements KeyGen {
     };
   }
 
-  /**
-   * Audit-webhook bearer token, derived like the root creds: the
-   * same master key always yields the same token, so it's never stored or
-   * configured. Both the manager's listener and every instance's
-   * audit_webhook config consume this.
-   */
+  /** Derived like root creds: the same master key always yields the same
+   * token, so it is never stored or configured. */
   auditWebhookToken(): string {
     return deriveString(
       this.masterKey,

@@ -1,10 +1,8 @@
-// User-invite onboarding — the OPTIONAL half of friend enrollment. Needs a
-// USER-OWNED personal API token (OAuth clients are tailnet-owned and Tailscale
-// refuses invite creation for them: "operation only permitted for user-owned
-// keys"). Separate interface + credential, injected only when the token is
-// configured; absent → manual console-instruction fallback.
+// Needs a USER-OWNED personal API token: Tailscale refuses invite creation for
+// tailnet-owned OAuth clients. Without a token, the flow falls back to manual
+// instructions.
 
-/** A tailnet user-invite (subset we act on). `inviteUrl` is not a secret. */
+/** `inviteUrl` is not a secret. */
 export interface UserInvite {
   id: string;
   email: string;
@@ -12,27 +10,25 @@ export interface UserInvite {
   lastEmailSentAt: string | null;
 }
 
-/** A tailnet user (subset). `role` gates offboard deletion. */
+/** `role` gates whether offboard may delete the user. */
 export interface TailnetUser {
   id: string;
   loginName: string;
   role: string;
 }
 
-/**
- * Tailscale user-management operations that require a user-owned token. Every
- * method throws a ServiceError on failure; deletes tolerate 404.
- */
+/** The delete methods tolerate a 404. */
 export interface UserInviteApi {
   readonly configured: boolean;
   createUserInvite(email: string): Promise<UserInvite>;
-  /** Null once the invite is gone (accepted / expired / revoked all read alike). */
+  /** Returns null once the invite is gone; accepted, expired, and revoked all
+   * read alike. */
   getUserInvite(id: string): Promise<UserInvite | null>;
-  /** Rate-limited 1/min — surfaced as TOO_MANY_REQUESTS. */
+  /** Rate-limited to one per minute, surfaced as TOO_MANY_REQUESTS. */
   resendUserInvite(id: string): Promise<void>;
   deleteUserInvite(id: string): Promise<void>;
   findUserByEmail(email: string): Promise<TailnetUser | null>;
-  /** Callers MUST guard: never a non-member, never when another portion shares
-   * the email. */
+  /** Callers MUST guard this: never delete a non-member, and never delete while
+   * another portion shares the email. */
   deleteUser(userId: string): Promise<void>;
 }

@@ -1,24 +1,17 @@
 import { isAbsolute, join, relative, SEPARATOR } from "@std/path";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// The pantry: one admin-chosen host directory holding every friend's MinIO
-// data, one subdir per instance ($PANTRY/<instance>). Tailscale node state
-// lives elsewhere (docker named volume), so `du -sh $PANTRY/*` is true
-// per-friend usage. Docker-runtime only; nothing above the InstanceRuntime
-// seam knows it exists.
+// Tailscale state lives outside the pantry, so `du -sh $PANTRY/*` is true
+// per-friend usage; the host pantry is docker-only.
 
 export interface Pantry {
-  /** Absolute host path bind-mounted at /data for this instance. */
+  /** The absolute host path bind-mounted at /data for this instance. */
   dataDir(instanceHost: string): string;
-  /** Create the instance's directory before `docker run`; idempotent. */
+  /** Creates the instance's directory before `docker run`; idempotent. */
   ensure(instanceHost: string): Promise<void>;
-  /** `rm -rf` the instance's directory; "already absent" is success. */
+  /** `rm -rf`s the instance's directory; "already absent" is success. */
   remove(instanceHost: string): Promise<void>;
-  /**
-   * Does the instance's directory exist AND hold data? Drives boot recovery:
-   * present ⇒ recreate the instance over it; absent/empty ⇒ the data is gone,
-   * so surface it rather than fabricate an empty instance over lost backups.
-   */
+  /** Does the directory exist AND hold data? */
   exists(instanceHost: string): Promise<boolean>;
 }
 
@@ -29,11 +22,8 @@ function escapes(root: string, name: string): boolean {
     rel.includes(SEPARATOR);
 }
 
-/**
- * friendNameSchema already constrains instance names — this is the
- * belt-and-braces assertion run before any mount or recursive delete, so a
- * name like `..` or `/etc` can never resolve outside the pantry root.
- */
+/** Belt-and-braces over friendNameSchema, run before any mount or recursive
+ * delete, so a name like `..` or `/etc` can never resolve outside the pantry. */
 function scoped(root: string, instanceHost: string): string {
   if (escapes(root, instanceHost)) {
     throw new ServiceError(
@@ -52,7 +42,8 @@ export class HostPantry implements Pantry {
   }
 
   ensure(instanceHost: string): Promise<void> {
-    // 0700: the instance image's MinIO (running as root) is the only reader.
+    // 0700 because the instance image's MinIO, running as root, is the only
+    // reader.
     return Deno.mkdir(this.dataDir(instanceHost), {
       recursive: true,
       mode: 0o700,
@@ -70,7 +61,7 @@ export class HostPantry implements Pantry {
   async exists(instanceHost: string): Promise<boolean> {
     try {
       // Non-empty, not just present: a MinIO data dir always holds `.minio.sys`,
-      // so an empty dir means no data survived (contents wiped) — treat as gone.
+      // so an empty dir means the contents were wiped and is treated as gone.
       const entries = await Array.fromAsync(
         Deno.readDir(this.dataDir(instanceHost)),
       );

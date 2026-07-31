@@ -21,21 +21,12 @@ import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
-// ContainerRuntime over the `docker` (or compatible) CLI. Each instance is ONE
-// container (MinIO + tailscaled). Every container carries a `p0rt1on=1` label
-// so `list()` (reconcile sweep) and teardown can find them.
-
 const LABEL = "p0rt1on=1";
 
-/**
- * The docker network the manager and every instance join, so a containerized
- * manager can reach an instance by container name. Created out-of-band
- * (`docker network create p0rt1on-net`) and shared by both sides — a name only
- * both halves of this repo need to agree on.
- */
+/** The docker network the manager and every instance join. It is created
+ * out-of-band (`docker network create p0rt1on-net`). */
 export const DOCKER_NETWORK = "p0rt1on-net";
 
-/** `docker run` resource flags for the set fields only (native values). */
 function resourceArgs(r: ContainerRunSpec["resources"]): string[] {
   return [
     ...(r?.cpuShares ? ["--cpu-shares", r.cpuShares] : []),
@@ -47,19 +38,18 @@ function resourceArgs(r: ContainerRunSpec["resources"]): string[] {
   ];
 }
 
-/** docker `State.Status` → our coarse ContainerState. */
 function mapState(status: string): ContainerState {
   return status.trim() === "running" ? "running" : "stopped";
 }
 
-/** docker `State.Health.Status` → InstanceHealth ("" = no healthcheck yet). */
+/** "" (no healthcheck result yet) maps to "unknown". */
 function mapHealth(status: string): InstanceHealth {
   const s = status.trim();
   if (s === "healthy" || s === "unhealthy" || s === "starting") return s;
   return "unknown";
 }
 
-/** Shape of `docker inspect --format '{{json .State}}'` (subset we read). */
+/** The subset of `docker inspect --format '{{json .State}}'` output we read. */
 interface RawState {
   Status?: string;
   ExitCode?: number;
@@ -67,7 +57,6 @@ interface RawState {
   Health?: { Status?: string; Log?: Array<{ Output?: string }> };
 }
 
-/** Parse the `.State` JSON into the fields InstanceDiagnostics needs. */
 function parseState(json: string): {
   status: string;
   exitCode: number | null;
@@ -96,7 +85,7 @@ function parseState(json: string): {
       healthReason: last.length > 0 ? last : null,
     };
   } catch (_err) {
-    return empty; // unparseable inspect output — return blanks, not a throw
+    return empty; // unparseable inspect output: return blanks rather than throwing
   }
 }
 
@@ -106,15 +95,8 @@ export class DockerRuntime implements ContainerRuntime {
     private readonly bin = "docker",
   ) {}
 
-  /**
-   * Run the instance container: the combined image brings tailscaled up, serves
-   * MinIO over the tailnet, and runs MinIO — all inside one container. When
-   * `publishHostPort` is set (host-run manager), MinIO is published to the host
-   * loopback (`127.0.0.1:<port>`) so the manager reaches it for admin without
-   * joining the container's network; a networked manager skips the publish and
-   * reaches it by container name. Friends reach it only over Tailscale. Root
-   * creds come from a mounted env-file (path only — no secret in args).
-   */
+  /** One container runs tailscaled + `tailscale serve` + MinIO; friends reach
+   * it only over Tailscale. */
   ensureInstance(spec: ContainerRunSpec): Promise<ContainerHandle> {
     return this.ensure(spec.name, () => [
       "run",
@@ -125,16 +107,14 @@ export class DockerRuntime implements ContainerRuntime {
       LABEL,
       "--network",
       spec.network,
-      // Survive host reboots / docker restarts without the manager's help
-      // (boot reconcile covers the cases this can't).
+      // Survives host reboots and docker restarts without the manager's help;
+      // boot reconcile covers the cases this can't.
       "--restart",
       "unless-stopped",
-      // So MinIO's audit webhook can reach the manager on the host (Linux too).
+      // Lets MinIO's audit webhook reach a host-run manager; host-gateway makes
+      // host.docker.internal resolve on Linux too.
       "--add-host",
       "host.docker.internal:host-gateway",
-      // Loopback publish only for a host-run manager; a networked manager
-      // reaches MinIO by container name, so binding host ports there just
-      // invites collisions across managers/leftovers (see publishHostPort).
       ...(spec.publishHostPort
         ? ["-p", `127.0.0.1:${spec.minioPort}:${spec.minioPort}`]
         : []),
@@ -142,8 +122,8 @@ export class DockerRuntime implements ContainerRuntime {
       `${spec.dataSource}:/data`,
       "-v",
       `${spec.stateSource}:/var/lib/tailscale`,
-      // The env-file also carries TAILSCALE_AUTHKEY — an enrollment credential
-      // must never ride the argv (visible to every process via `ps`).
+      // The env-file also carries TAILSCALE_AUTHKEY: an enrollment credential
+      // must never ride the argv, which is visible to every process via `ps`.
       "--env-file",
       spec.rootCredSecretRef,
       "-e",
@@ -167,8 +147,6 @@ export class DockerRuntime implements ContainerRuntime {
         `container ${name} not found — cannot adopt a container that does not exist`,
       );
     }
-    // Adopting always converges the restart policy — pre-existing containers
-    // may predate the `--restart unless-stopped` run flag.
     await this.retrofitRestartPolicy(name);
     if (found.state === "stopped") await this.checked(["start", name]);
   }
@@ -214,14 +192,14 @@ export class DockerRuntime implements ContainerRuntime {
     };
   }
 
-  /** `docker logs --tail 50` (stdout+stderr); "" on failure. */
+  /** Returns "" on failure — logs are best-effort. */
   private async logs(name: string): Promise<string> {
     const res = await this.runner.run(this.bin, ["logs", "--tail", "50", name]);
     return res.code === 0 ? res.stdout.trim() : "";
   }
 
   async stop(name: string): Promise<void> {
-    if ((await this.status(name)) === "stopped") return; // no-op if not running
+    if ((await this.status(name)) === "stopped") return;
     await this.checked(["stop", name]);
   }
 
@@ -234,7 +212,8 @@ export class DockerRuntime implements ContainerRuntime {
 
   async removeVolumes(names: string[]): Promise<void> {
     if (names.length === 0) return;
-    // Best-effort: `volume rm` errors on an absent volume; ignore (already gone).
+    // Best-effort: `volume rm` errors on an absent volume, but already gone is
+    // success, so the result is ignored.
     await this.runner.run(this.bin, ["volume", "rm", "-f", ...names]);
   }
 
@@ -255,7 +234,6 @@ export class DockerRuntime implements ContainerRuntime {
 
   // ---- helpers ----
 
-  /** Adopt if present (start if stopped); otherwise run via `makeRunArgs`. */
   private async ensure(
     name: string,
     makeRunArgs: () => string[],
@@ -274,15 +252,12 @@ export class DockerRuntime implements ContainerRuntime {
     return { name, id, state: "running" };
   }
 
-  /**
-   * Adopted containers may predate the `--restart unless-stopped` run flag —
-   * apply it in place so every adopt converges on the same policy. Idempotent.
-   */
+  /** Adopted containers may predate the `--restart unless-stopped` run flag,
+   * so apply it in place on every adopt. Idempotent. */
   private async retrofitRestartPolicy(name: string): Promise<void> {
     await this.checked(["update", "--restart", "unless-stopped", name]);
   }
 
-  /** `docker inspect` for id + state; absent (not found) → state "absent". */
   private async inspect(
     name: string,
   ): Promise<{ state: ContainerState | "absent"; id: string }> {
@@ -297,12 +272,8 @@ export class DockerRuntime implements ContainerRuntime {
     return { state: mapState(status ?? ""), id: id ?? "" };
   }
 
-  /**
-   * Run a docker subcommand; throw on non-zero exit. Returns stdout.
-   * Same redaction rules as McShellClient.exec (lib/redact.ts): declared
-   * `secrets` are masked and argv after `--` is never interpolated — no
-   * docker failure can put a secret into an error/log.
-   */
+  /** Declared `secrets` are masked, and argv after `--` is never interpolated
+   * (lib/redact.ts), so no docker failure can leak a secret. */
   private async checked(
     args: string[],
     secrets: string[] = [],
@@ -321,17 +292,8 @@ export class DockerRuntime implements ContainerRuntime {
   }
 }
 
-/**
- * Instance-level operations over a DockerRuntime, addressing the instance
- * container by its hostname (so provisioning/offboard don't build names).
- * Owns every docker-ism the domain `InstanceSpec` no longer carries: derived
- * container/volume names, the docker network, and the secret transport (a
- * temp env-file written before `docker run`, removed in `finally`).
- *
- * MinIO data lives in the pantry (a host directory on the admin's chosen disk);
- * tailscale node state stays in a docker named volume, off the pantry, so the
- * pantry holds friend backup data only.
- */
+/** MinIO data lives in the pantry; tailscale state stays in a named volume so
+ * the pantry holds backup data only. */
 export class DockerInstanceRuntime implements InstanceRuntime {
   constructor(
     private readonly runtime: ContainerRuntime,
@@ -354,13 +316,9 @@ export class DockerInstanceRuntime implements InstanceRuntime {
 
   async ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
     const names = containerNames(spec.name);
-    // Create the friend's pantry directory before the container mounts it.
     await this.config.pantry.ensure(spec.name);
-    // MinIO root creds + the serve auth key ride a short-lived env-file for
-    // `docker run` (baked into the container, file removed after) — an
-    // enrollment credential must never ride the argv (host-visible via ps).
-    // Non-secret tailscale extras (login server / serve mode) ride the same
-    // file — it's already the per-run env transport.
+    // Secrets ride a short-lived env-file (removed in the finally) rather than
+    // the ps-visible argv; non-secret tailscale extras ride the same file.
     const extraEnv = Object.entries(tailscaleEnv(this.config.tailscale))
       .map(([k, v]) => `${k}=${v}\n`).join("");
     const envFile = await this.tempFiles.write(
@@ -376,15 +334,10 @@ export class DockerInstanceRuntime implements InstanceRuntime {
         tsHostname: spec.name,
         tag: spec.tag,
         minioPort: spec.minioPort,
-        // Data mounts the pantry directory; tailscale state stays a named
-        // volume, deliberately off the pantry.
         dataSource: this.config.pantry.dataDir(spec.name),
         stateSource: names.stateVolume,
         rootCredSecretRef: envFile,
         network: this.config.network,
-        // Host-run manager reaches MinIO via the loopback publish; a networked
-        // one reaches it by container name, so skip the publish (and its
-        // collisions). Same signal as app.ts's probePort gate.
         publishHostPort: this.config.addressing === "host",
         resources: this.config.resources,
       });
@@ -401,7 +354,7 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     await this.runtime.ensureStarted(containerNames(instanceName).container);
   }
 
-  /** Poll health every 2s (recursive, to satisfy no-imperative-loops). */
+  /** Polls health every 2s; recursive to satisfy the no-imperative-loops rule. */
   private async pollHealth(name: string, attemptsLeft: number): Promise<void> {
     const health = await this.runtime.health(name);
     if (health === "healthy") return;
@@ -452,10 +405,8 @@ export class DockerInstanceRuntime implements InstanceRuntime {
       removeVolume: opts.removeData,
     });
     if (!opts.removeData) return;
-    // Tailscale state is a named volume; MinIO data is the pantry directory,
-    // deleted separately. The current + legacy named DATA volume names are
-    // reaped too so a pre-pantry instance still tears down fully;
-    // removeVolumes ignores absent names.
+    // Current and legacy named DATA volumes are reaped too, so a pre-pantry
+    // instance still tears down fully; removeVolumes ignores absent names.
     await this.runtime.removeVolumes([
       names.stateVolume,
       names.dataVolume,

@@ -1,11 +1,8 @@
-// Advisory instructions shown when the personal API token is unset or expired,
-// so the invite flow degrades instead of failing. Mirrors manualAcl.ts: the
-// manager can't act, so it tells the admin exactly what to do in the console.
-// Plain text — never a secret.
+// When the personal API token is unset or expired, the invite flow degrades to
+// these manual instructions instead of failing. They contain no secrets.
 
 const ADMIN_USERS = "https://login.tailscale.com/admin/users";
 
-/** No-token add: how to invite the friend by hand (rides the bundle). */
 export function manualInviteInstructions(email: string): string {
   return [
     `No Tailscale API token is configured, so no invite was sent.`,
@@ -17,7 +14,7 @@ export function manualInviteInstructions(email: string): string {
   ].join("\n");
 }
 
-/** No-token offboard: how to remove a joined friend by hand (advisory). */
+/** Advisory: returned when the manager could not remove the tailnet user itself. */
 export function manualUserRemovalInstructions(email: string): string {
   return [
     `No Tailscale API token is configured, so the tailnet user was not removed.`,

@@ -83,8 +83,8 @@ mc CLI           │  McShellClient               │
 
 ### Runtimes — `src/runtime/`
 
-`InstanceRuntime` is the only seam; callers speak domain language (a tripwire
-test bans docker literals outside `runtime/`). Selected by
+`InstanceRuntime` is the only boundary; callers speak domain language (a
+tripwire test bans docker literals outside `runtime/`). Selected by
 `P0RT1ON_RUNTIME=docker|kubernetes` (default docker) in `app.ts` only.
 
 - **docker** (`DockerRuntime.ts`) — one container per instance; volume

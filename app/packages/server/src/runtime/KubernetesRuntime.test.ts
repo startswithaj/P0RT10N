@@ -5,7 +5,7 @@ import { INSTANCE_SPEC } from "../test-helpers/mocks.ts";
 import type { RestClient } from "@cloudydeno/kubernetes-client";
 
 // The typed @cloudydeno api layer sits between the runtime and the wire, so we
-// mock its seam — `RestClient.performRequest` — and assert on the STRUCTURED
+// mock its entry point — `RestClient.performRequest` — and assert on the STRUCTURED
 // request (path, method, patch content-type, body) the api layer produces,
 // rather than hand-built URL strings.
 interface Recorded {

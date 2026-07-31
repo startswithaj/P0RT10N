@@ -8,55 +8,42 @@ import type { FetchLike } from "./TailscaleHttpApi.ts";
 import { splitHostPort } from "./TailscaleHttpApi.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// TailscaleApi over the headscale v1 REST API — the test-tier backend (real
-// tailscaled + WireGuard, no Tailscale account). Diffs from Tailscale: plain
-// API-key bearer; USER-scoped preauth keys expired by string not id; real
-// online boolean; classic acls policy (no grants) requiring policy.mode:database,
-// no ETag. No HTTPS certs → serve is HTTP-only.
-
 export interface HeadscaleConfig {
-  /** Headscale base URL, e.g. `http://headscale.p0rt1on.svc:8080`. */
   baseUrl: string;
-  /** API key from `headscale apikeys create`. Env/secret only, never persisted. */
+  /** The key arrives via env or secret and is never persisted. */
   apiKey: string;
-  /** Headscale user that owns all minted preauth keys. */
+  /** The headscale user that owns all minted preauth keys. */
   user: string;
-  /** Owner for friend tags in tagOwners (default `<user>@`). */
   tagOwner?: string;
-  /** MagicDNS base domain (headscale's `base_domain`), e.g. `p0rt1on.test`.
-   * Headscale's API doesn't expose it — unlike Tailscale, where it's read from
-   * a node's FQDN — so the test harness supplies it via config. */
+  /** Headscale's `base_domain`; its API doesn't expose it, so config supplies it. */
   baseDomain: string;
 }
 
-/** Node shape (subset) from GET /api/v1/node. */
 interface HsNode {
   id: string;
   givenName: string;
   ipAddresses?: string[];
-  /** 0.29+ reports one resolved `tags`; older servers split the same set
-   * across forcedTags/validTags. */
+  /** Headscale 0.29+ reports one resolved `tags` list; older servers split the
+   * same set across `forcedTags`/`validTags`. */
   tags?: string[];
   forcedTags?: string[];
   validTags?: string[];
   online?: boolean;
 }
 
-/** Preauth key shape (subset) from POST /api/v1/preauthkey and its list. */
 interface HsPreAuthKey {
   id: string;
   key: string;
   expiration: string;
 }
 
-/** One classic ACL rule: src tags → `host:port` destinations. */
 interface AclRule {
   action: "accept";
   src: string[];
   dst: string[];
 }
 
-/** The policy document (loose — preserves fields we don't touch). */
+/** Deliberately loose so any policy fields we don't touch are preserved. */
 interface AclPolicy {
   tagOwners?: Record<string, string[]>;
   acls?: AclRule[];
@@ -73,7 +60,6 @@ export class HeadscaleHttpApi implements TailscaleApi {
   constructor(
     private readonly config: HeadscaleConfig,
     private readonly fetchFn: FetchLike = globalThis.fetch,
-    /** Injectable clock for computing key expiry timestamps (testability). */
     private readonly now: () => number = () => Date.now(),
   ) {}
 
@@ -95,8 +81,9 @@ export class HeadscaleHttpApi implements TailscaleApi {
     };
   }
 
-  /** Headscale expires by key STRING: list the user's keys, match ours by id.
-   * An id no longer listed means already expired/consumed — success. */
+  /** Headscale expires keys by their secret STRING, so list the user's keys and
+   * match ours by id. An id no longer listed means the key was already expired
+   * or consumed, which counts as success. */
   async revokeAuthKey(keyId: string): Promise<void> {
     const userId = await this.userId();
     const json = await this.request(
@@ -138,7 +125,7 @@ export class HeadscaleHttpApi implements TailscaleApi {
   }
 
   /** Headscale has no FQDN field on nodes, so compose it from the node's
-   * givenName and the configured base domain. Null if the node isn't enrolled. */
+   * givenName and the configured base domain. */
   async nodeFqdn(hostname: string): Promise<string | null> {
     const node = (await this.listNodes()).find((n) => n.givenName === hostname);
     return node ? `${node.givenName}.${this.config.baseDomain}` : null;
@@ -148,9 +135,7 @@ export class HeadscaleHttpApi implements TailscaleApi {
     await this.request("DELETE", `/api/v1/node/${nodeId}`);
   }
 
-  /** Grant `src` (tag or user email) access to ONLY its endpoint via a classic
-   * acls rule; own the tag when `src` is one. Idempotent; a stale same-src rule
-   * is replaced, never accumulated. */
+  /** Idempotent; a stale same-src rule is replaced, never accumulated. */
   async ensureFriendAcl(src: string, endpointHostPort: string): Promise<void> {
     const ownsTag = src.startsWith("tag:");
     const { host, port } = splitHostPort(endpointHostPort);
@@ -180,8 +165,7 @@ export class HeadscaleHttpApi implements TailscaleApi {
     });
   }
 
-  /** Declare `tag` in tagOwners (owned by the configured tagOwner) when absent.
-   * Idempotent — a no-op once present, so it's cheap on every provision. */
+  /** Idempotent. */
   async ensureTagOwner(tag: string): Promise<void> {
     await this.updatePolicy((policy) => {
       if (policy.tagOwners?.[tag]) return null; // already declared
@@ -192,7 +176,7 @@ export class HeadscaleHttpApi implements TailscaleApi {
     });
   }
 
-  /** Drop the friend's rule (and tag ownership, if a tag). Idempotent. */
+  /** Idempotent. */
   async removeFriendAcl(src: string): Promise<void> {
     await this.updatePolicy((policy) => {
       const acls = (policy.acls ?? []).filter((r) => !sameSrc(r, src));
@@ -202,21 +186,20 @@ export class HeadscaleHttpApi implements TailscaleApi {
     });
   }
 
-  /** Headscale mints no HTTPS certs, so serve runs HTTP-only and MagicDNS cert
-   * provisioning is moot — report false (the preflight only gates on this when
-   * serveMode is https, which headscale never uses). */
+  /** Headscale mints no HTTPS certs, so the MagicDNS cert prerequisite is moot
+   * and this reports false. */
   magicDnsEnabled(): Promise<boolean> {
     return Promise.resolve(false);
   }
 
-  /** Headscale mints no HTTPS certs — serve runs HTTP-only against it. */
+  /** Headscale mints no HTTPS certs, so serve runs HTTP-only against it. */
   httpsCertsEnabled(): Promise<boolean> {
     return Promise.resolve(false);
   }
 
-  /** Whether `tag` is declared in the policy's tagOwners — read-only. */
   async isTagOwned(tag: string): Promise<boolean> {
-    // A never-written policy GETs a 500 "acl policy not found" → treat as empty.
+    // A never-written policy GETs a 500 "acl policy not found", which we treat
+    // as an empty policy.
     const json = await this.request("GET", "/api/v1/policy").catch((err) => {
       if (err instanceof Error && /acl policy not found/.test(err.message)) {
         return { policy: "" };
@@ -234,8 +217,8 @@ export class HeadscaleHttpApi implements TailscaleApi {
     return this.config.tagOwner ?? `${this.config.user}@`;
   }
 
-  /** The preauthkey endpoints take the NUMERIC user id (uint64), not the
-   * name — resolve it from the user list on every call (homelab-scale). */
+  /** The preauthkey endpoints take the NUMERIC user id (uint64), not the name,
+   * so it is resolved from the user list on every call — fine at homelab scale. */
   private async userId(): Promise<string> {
     const json = await this.request("GET", "/api/v1/user");
     const users = (json as { users?: { id: string; name: string }[] })
@@ -257,7 +240,7 @@ export class HeadscaleHttpApi implements TailscaleApi {
   }
 
   private tagsOf(node: HsNode): string[] {
-    // A tag can appear in more than one field — dedupe across all of them.
+    // A tag can appear in more than one of these fields.
     return [
       ...new Set([
         ...(node.tags ?? []),
@@ -267,14 +250,13 @@ export class HeadscaleHttpApi implements TailscaleApi {
     ];
   }
 
-  /** Read-modify-write on the policy. The policy rides as a JSON string inside
-   * the response/request envelope; empty string = no policy yet. No ETag/CAS —
-   * headscale has none; the manager is the only writer in this deployment. */
+  /** The policy rides as a JSON string inside the request/response envelope.
+   * Headscale has no ETag/CAS, but the manager is the only writer here. */
   private async updatePolicy(
     mutate: (policy: AclPolicy) => AclPolicy | null,
   ): Promise<void> {
-    // A never-written policy GETs a 500 "acl policy not found" (database
-    // mode) — that's "empty", not an error; the first friend creates it.
+    // A never-written policy GETs a 500 "acl policy not found", which we treat
+    // as an empty policy.
     const json = await this.request("GET", "/api/v1/policy").catch((err) => {
       if (err instanceof Error && /acl policy not found/.test(err.message)) {
         return { policy: "" };
@@ -290,7 +272,6 @@ export class HeadscaleHttpApi implements TailscaleApi {
     });
   }
 
-  /** Authenticated request; throws ServiceError on non-2xx. Returns parsed JSON. */
   private async request(
     method: string,
     path: string,
