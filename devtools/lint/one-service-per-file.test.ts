@@ -25,7 +25,6 @@ Deno.test("keeps the service named after the file, flags the other", () => {
   const src =
     `export class UsageServiceImpl {}\nexport class AuditServiceImpl {}\n`;
   const d = Deno.lint.runPlugin(plugin, "AuditService.ts", src);
-  // AuditServiceImpl matches the file → kept; UsageServiceImpl is flagged.
   assertEquals(d.length, 1);
   assertEquals(d[0].message.includes("UsageServiceImpl"), true);
 });

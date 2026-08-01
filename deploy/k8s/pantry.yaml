@@ -1,22 +1,10 @@
-# The pantry on Kubernetes — the one storage location for all portion DATA.
+# Each portion's data lands in its own sub-directory under the pantry path, kubelet-mounted into only that pod, the same per-instance isolation as the docker bind mount.
 #
-# On docker the pantry is a host directory the manager bind-mounts. On k8s it is
-# a StorageClass every portion's data PVC is provisioned from; point the standard
-# local-path provisioner at your chosen directory and each portion's data lands
-# under it as its own sub-directory, kubelet-mounted into only that pod (same
-# per-instance isolation as the docker bind mount).
+# Requires the local-path provisioner (k3s ships it; otherwise install rancher.io/local-path-provisioner).
+# Tailscale node state doesn't use this StorageClass, so the pantry holds friend data only.
 #
-#   kubectl apply -f deploy/k8s/pantry.yaml
-#   # then set P0RT1ON_PANTRY=p0rt1on-pantry in the manager (deploy/k8s/p0rt1on.yaml)
-#
-# Requires the local-path provisioner (k3s ships it; otherwise install
-# rancher.io/local-path-provisioner). Tailscale node state is NOT stored here —
-# its PVC uses the cluster default class, so the pantry holds friend data only.
-#
-# reclaimPolicy Delete matches docker's `rm -rf`: an offboard that removes data
-# deletes the PVC, and the bytes go with it. There is no orphaned-PV recovery
-# window — the offboard gates (confirm-by-name, tombstone-after-teardown) are the
-# safety net. Switch to Retain if you want deletes to be manually reversible.
+# reclaimPolicy Delete matches docker's `rm -rf`: offboarding deletes the PVC and the bytes with it, with no orphaned-PV recovery window; the offboard confirm-by-name and tombstone-after-teardown gates are the safety net.
+# Switch to Retain if deletes should be manually reversible instead.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -39,6 +27,5 @@ metadata:
   name: p0rt1on-pantry
 provisioner: rancher.io/local-path
 reclaimPolicy: Delete
-# Bind the PV only once a pod needs it, so it lands on the node that runs the
-# portion (local-path volumes are node-local).
+# volumeBindingMode WaitForFirstConsumer binds the PV only once a pod needs it, so it lands on the node that runs the portion, since local-path volumes are node-local.
 volumeBindingMode: WaitForFirstConsumer

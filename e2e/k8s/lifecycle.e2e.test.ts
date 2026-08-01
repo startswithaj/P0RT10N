@@ -11,10 +11,6 @@ import {
   until,
 } from "../helpers.ts";
 
-// The shipped containers only: the real manager Deployment driven over its
-// HTTP API, the real instance image on a headscale tailnet, a real Kopia
-// backup from a friend pod. Imports no app code — it sees what an admin and a
-// friend see. Runs in-cluster (needs `mc`, cluster DNS, the mounted SA).
 describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
   const PORTION = "k8sit";
   const INSTANCE = `p0rt1on-${PORTION}`;
@@ -43,8 +39,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
       "/var/run/secrets/kubernetes.io/serviceaccount/token",
     ).trim();
 
-  // The cluster API is a public surface; the SA token is mounted, CA via
-  // DENO_CERT.
+  // fetch trusts the cluster CA via DENO_CERT, set on the runner pod, so no
+  // explicit HTTP client is needed here.
   const k8s = async (
     method: string,
     path: string,
@@ -82,8 +78,7 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
     return `http://${INSTANCE}.${namespace()}.svc:${port}`;
   };
 
-  // `mc` as the FRIEND, creds in env not argv. Returns the raw result:
-  // refusals are assertions here.
+  // Runs `mc` as the friend with credentials in env, never argv.
   const asFriend = async (
     cred: { s3AccessKeyId: string; s3SecretKey: string },
     args: (alias: string) => string[],
@@ -106,16 +101,15 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
       stdout: dec.decode(out.stdout),
       stderr: dec.decode(out.stderr),
     };
-    // Log rather than throw: some calls are meant to fail, and a bare exit
-    // code is not evidence.
+    // Logs rather than throws, since some calls are meant to fail and a
+    // bare exit code alone is not evidence.
     if (res.code !== 0) console.error(`mc exit ${res.code}: ${res.stderr}`);
     return res;
   };
 
   const trpc = trpcClient(env("MANAGER_URL"));
 
-  // A backup-client pod, given ONLY the bundle, joins the tailnet under its
-  // friend tag and runs Kopia through serve. Its exit status is Kopia's.
+  // The client pod gets only the bundle, exactly like a real friend.
   const backupOverTailnet = async (bundle: ClaimedBundle): Promise<void> => {
     await k8s("POST", `/api/v1/namespaces/${CLIENT_NS}/pods`, {
       apiVersion: "v1",
@@ -135,7 +129,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
       },
     });
 
-    // Kopia is one-shot; the 2min budget covers enrollment + repo + snapshot.
+    // Kopia is one-shot, and the two-minute budget covers enrollment, the
+    // repo, and the snapshot.
     const phase = await until("client pod terminal phase", async () => {
       const p = await podPhase(CLIENT_NS, CLIENT_POD);
       return p === "Succeeded" || p === "Failed" ? p : null;
@@ -153,7 +148,6 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
     }
     expect(phase).toBe("Succeeded");
 
-    // The blobs landed — listed as the friend, with the bundle keys.
     const ls = await asFriend(bundle, (a) => ["ls", `${a}/${bundle.bucket}`]);
     expect(ls.code).toBe(0);
     expect(ls.stdout.trim().length).toBeGreaterThan(0);
@@ -179,7 +173,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
   it(
     "add → backup → suspend/resume → rotate → offboard, all via the API",
     async () => {
-      // No readiness probe, and boot runs migrations + preflight first.
+      // Polls /health since there is no readiness probe, and boot runs
+      // migrations and preflight checks first.
       await until("manager /health", async () => {
         const res = await fetch(`${env("MANAGER_URL")}/health`)
           .catch(() => null);
@@ -188,13 +183,13 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
         return ok || null;
       }, 30);
 
-      // Auth is mandatory: the e2e manager binds non-loopback.
+      // Auth is mandatory, since the e2e manager binds non-loopback.
       await trpc("auth.login", {
         username: env("P0RT1ON_ADMIN_USERNAME"),
         password: env("P0RT1ON_ADMIN_PASSWORD"),
       });
 
-      // The mutation detaches a job; retrying claimBundle IS the wait.
+      // friends.addStart detaches a job, so retrying claimBundle is the wait.
       const { jobId } = await trpc("friends.addStart", {
         name: PORTION,
         isolationMode: "dedicated",
@@ -211,7 +206,7 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
       );
 
       // http mode addresses the node by tailnet IP, so friends need no
-      // MagicDNS. headscale mints from 100.64.0.0/10.
+      // MagicDNS; headscale mints addresses from 100.64.0.0/10.
       expect(bundle.s3Endpoint).toMatch(/^http:\/\/100\./);
       expect(bundle.s3SecretKey.length).toBeGreaterThan(0);
       expect((bundle.tsAuthKey ?? "").length).toBeGreaterThan(0);
@@ -225,13 +220,10 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
       const friendId = friends[0].id;
       expect(friends[0].status).toBe("active");
 
-      // The friend backs up for real over the tailnet.
       await backupOverTailnet(bundle);
 
-      // Ransomware guard: `rm` only writes a delete marker; destroying
-      // versions needs s3:DeleteObjectVersion (never granted) plus
-      // BypassGovernanceRetention (denied). The canary is written after
-      // retention is armed — Kopia's own churn proves nothing.
+      // `rm` only marks-delete, since friend creds are denied DeleteObjectVersion
+      // and BypassGovernanceRetention; the canary goes in after retention arms, so Kopia's own churn cannot be mistaken for the proof.
       const canary = `ransom-canary-${crypto.randomUUID().slice(0, 8)}`;
       const canaryFile = await Deno.makeTempFile();
       await Deno.writeTextFile(canaryFile, canary);
@@ -252,7 +244,7 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
         ]);
         expect(purge.code).not.toBe(0);
 
-        // The refusal is only half of it — prove the bytes survive.
+        // The refusal alone is not proof; the bytes must still be readable.
         const read = await asFriend(bundle, (a) => [
           "cat",
           `${a}/${bundle.bucket}/${canary}`,
@@ -284,7 +276,7 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
         await Deno.remove(canaryFile).catch(() => undefined);
       }
 
-      // Quota: a write past the 10 MiB set at addStart must be refused.
+      // A write past the 10 MiB quota set at addStart must be refused.
       const oversizeFile = await Deno.makeTempFile();
       await Deno.writeTextFile(oversizeFile, "x".repeat(11 * 1024 * 1024));
       try {
@@ -298,7 +290,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
         await Deno.remove(oversizeFile).catch(() => undefined);
       }
 
-      // A different key is not a revoked key: prove old dead, new live.
+      // Rotation must prove the old key is dead and the new key is live,
+      // not just that a new key exists.
       const rotated = await trpc("friends.rotateKey", { friendId }) as {
         s3AccessKeyId: string;
         s3SecretKey: string;
@@ -319,8 +312,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
         return left.length === 0 || null;
       }, 60);
 
-      // Leak check, by name because the SA has `get` but not `list`.
-      // Deletion is async, so Terminating counts as gone.
+      // Checks by name, since the SA has `get` but not `list`; a resource
+      // with a deletionTimestamp counts as gone, since deletion is async.
       const cleanedUp = async (kind: string, name: string) => {
         const res = await k8s(
           "GET",

@@ -1,52 +1,32 @@
-# p0rt1on manager — SHARED base config. This file does NOT run on its own (it
-# has no build target); combine it with exactly one overlay:
-#   dev:  docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-#   prod: docker compose -f docker-compose.yml -f docker-compose.prod.yml up
-#
-# The manager launches the combined instance containers against the host's
-# Docker daemon (socket mounted). Because it is itself a container, it reaches
-# each instance's MinIO admin plane by CONTAINER NAME over the shared
-# `p0rt1on-net` network (P0RT1ON_INSTANCE_ADDRESSING=network) — a loopback-
-# published port is unreachable from another container. Instances POST the audit
-# webhook back via the host gateway.
-#
-# The p0rt1on-net network is created out-of-band (shared with the instances the
-# manager launches over the docker socket):
-#   docker network create p0rt1on-net
-#
-# Needs a .env with at least P0RT1ON_MASTER_KEY and
-# P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET.
+# This file has no build target and does not run standalone; combine it with exactly one overlay (dev or prod).
+# The manager reaches each instance's MinIO admin plane by container name over `p0rt1on-net`, since a loopback-published port is unreachable from another container.
 services:
   manager:
     env_file: .env
-    # Root so it can use the mounted docker socket + write the volumes.
+    # Runs as root so it can use the mounted docker socket and write the volumes.
     user: root
     environment:
-      # Reach instances by container name over p0rt1on-net (see networks below).
       P0RT1ON_INSTANCE_ADDRESSING: "network"
       P0RT1ON_DB_PATH: "/app/data/p0rt1on.db"
       # Forward every MinIO event to your own webhook (optional, byte-identical):
       # P0RT1ON_MINIO_FORWARD_URL: "https://example.com/minio-events"
       # P0RT1ON_MINIO_FORWARD_AUTHORIZATION: "Bearer your-token"
     ports:
-      # Manager admin surface: prod serves the SPA here from Deno; dev's Vite
-      # dev server proxies to it. Loopback-only on the host.
+      # Port 8080 is loopback-only: prod serves the SPA directly from Deno here, while dev's Vite server proxies to it.
       - "127.0.0.1:8080:8080"
-      - "8081:8081" # audit webhook — instances POST via the host gateway
+      - "8081:8081" # Published (not loopback) so instances can POST the audit webhook via the host gateway.
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # launch instance containers
-      - p0rt1on-db:/app/data # metadata DB
-      - p0rt1on-mc:/root/.mc # mc aliases (per-instance admin creds)
-      # The pantry, bind-mounted at the SAME path inside the manager as on the
-      # host: the manager creates each friend's directory here, and the instance
-      # containers (launched on the host daemon) bind-mount the same host path —
-      # they must resolve to identical bytes. Set P0RT1ON_PANTRY in .env.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - p0rt1on-db:/app/data
+      - p0rt1on-mc:/root/.mc # mc aliases store per-instance admin credentials.
+      # The pantry must be bind-mounted at the same path inside the manager as on the host, so the manager's friend directories and the instance containers' host-daemon bind mounts resolve to identical bytes; set P0RT1ON_PANTRY in .env.
       - ${P0RT1ON_PANTRY:-/srv/p0rt1on}:${P0RT1ON_PANTRY:-/srv/p0rt1on}
     extra_hosts:
-      - "host.docker.internal:host-gateway" # reach the host on Linux
+      # host.docker.internal isn't defined on Linux by default; this makes it resolve to the host gateway.
+      - "host.docker.internal:host-gateway"
     networks:
-      - default # keep host-published admin/audit ports
-      - p0rt1on-net # resolve p0rt1on-instance-<host> by container name
+      - default # Keeps the host-published admin and audit ports reachable.
+      - p0rt1on-net # Resolves p0rt1on-instance-<host> names by container name.
     restart: unless-stopped
 
 volumes:
@@ -54,8 +34,6 @@ volumes:
   p0rt1on-mc:
 
 networks:
-  # The network instances join (DOCKER_NETWORK in DockerRuntime.ts). Created
-  # out-of-band:
-  #   docker network create p0rt1on-net
+  # p0rt1on-net is the network instance containers join (DOCKER_NETWORK in DockerRuntime.ts); since it's external, create it out-of-band first: `docker network create p0rt1on-net`.
   p0rt1on-net:
     external: true

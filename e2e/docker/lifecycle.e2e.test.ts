@@ -13,17 +13,12 @@ import {
   until,
 } from "../helpers.ts";
 
-// E2E: the SHIPPED containers over a REAL tailnet — the manager mints a key
-// from the OAuth secret, the instance enrolls, and a friend container writes
-// a real Kopia backup through `tailscale serve`. Only this suite proves HTTPS
-// serve with real certs. No app code is imported. Missing config fails, never
-// skips — run via deno task test:e2e:docker (loads .env).
 describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
   const REQUIRED = [
     "P0RT1ON_MASTER_KEY",
     "P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET",
-    // Required on the real Tailscale backend — the OAuth client can only mint
-    // keys for tags it owns (see Env.tagOwner).
+    // Required on the real Tailscale backend, since the OAuth client can
+    // only mint keys for tags it owns (see Env.tagOwner).
     "P0RT1ON_TAILSCALE_TAG_OWNER",
   ];
 
@@ -39,17 +34,15 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
   const managerName = `p0rt1on-e2e-manager-${id}`;
   const friendName = `p0rt1on-e2e-friend-${id}`;
   const portion = `dockere2e${id}`;
-  // Instances join this fixed runtime network (DOCKER_NETWORK); the manager
-  // must be on it too or it cannot reach them by name.
+  // Instances always join the fixed DOCKER_NETWORK, so the manager must be
+  // on it too to reach them by name.
   const network = "p0rt1on-net";
   const port = 18080;
   const base = `http://127.0.0.1:${port}`;
-  // Not a real secret: the non-loopback bind requires auth, so the test mints
-  // its own ephemeral creds.
   const adminUser = "e2e-admin";
   const adminPass = crypto.randomUUID();
-  // Throwaway pantry dir, bind-mounted at the same absolute path inside the
-  // manager (as compose does) so instance data dirs resolve identically.
+  // Bind-mounts the pantry at the same absolute path inside the manager as
+  // compose does, so instance data dirs resolve identically.
   const tmpDir = `${Deno.cwd()}/.p0rt1on-e2e-tmp`;
   const pantry = `${tmpDir}/pantry-${id}`;
   const env = (k: string) => Deno.env.get(k) ?? "";
@@ -69,8 +62,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
       // Secrets ride an env-file, never argv (`ps` is world-readable).
       const managerEnv = await writeEnvFile(
         REQUIRED.map((k) => `${k}=${env(k)}`).join("\n") +
-          // Auth must be on for the non-loopback bind. Throwaway DB under
-          // /tmp — /app/data only exists under compose.
+          // The DB lives under /tmp because /app/data only exists when the
+          // manager runs under compose.
           `\nP0RT1ON_ADMIN_BIND_HOST=0.0.0.0` +
           `\nP0RT1ON_ADMIN_USERNAME=${adminUser}` +
           `\nP0RT1ON_ADMIN_PASSWORD=${adminPass}` +
@@ -82,17 +75,16 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
           }\n`,
       );
       let friendId = "";
-      // Both env-files hold live secrets — remove them even if the test
-      // throws mid-flow.
+      // Both env files hold live secrets, so they must be removed even if
+      // the test throws mid-flow.
       let friendEnv: string | null = null;
 
       const trpc = trpcClient(base);
 
       try {
-        // Instances bind-mount the same host path the manager writes friend
-        // dirs under, so it must exist before the run.
+        // The pantry dir must exist before the run, since instances
+        // bind-mount the same host path the manager writes friend dirs under.
         await Deno.mkdir(pantry, { recursive: true });
-        // 1. The REAL manager image, launching instances via the host socket.
         const run = await docker([
           "run",
           "-d",
@@ -121,14 +113,13 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
           return ok || null;
         }, 30);
 
-        // 2. Auth is REQUIRED for the non-loopback bind — log in for real.
+        // Auth is required for the non-loopback bind, so the test logs in
+        // for real.
         await trpc("auth.login", {
           username: adminUser,
           password: adminPass,
         });
 
-        // 3. Create the portion. The manager mints the tailnet key from the
-        //    OAuth secret; the instance container enrolls for real.
         const { jobId } = await trpc("friends.addStart", {
           name: portion,
           isolationMode: "dedicated",
@@ -137,8 +128,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
           lockMode: "GOVERNANCE",
         }) as { jobId: string };
 
-        // The bundle is claimable once provisioning finishes; claimBundle
-        // errors until then, so retrying it IS the wait.
+        // claimBundle errors until provisioning finishes, so retrying it
+        // is the wait.
         const bundle = await until(
           "provisioning to finish + bundle claim",
           () =>
@@ -147,8 +138,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
           90,
         );
 
-        // A real HTTPS endpoint with a real cert — always the node's MagicDNS
-        // FQDN (<host>.<tailnet>.ts.net).
+        // The endpoint is the node's MagicDNS FQDN (<host>.<tailnet>.ts.net)
+        // with a real Tailscale-issued cert, not a mock.
         expect(bundle.s3Endpoint).toContain(".ts.net");
         expect(bundle.s3Endpoint.startsWith("https://")).toBe(true);
         expect(bundle.tsAuthKey ?? "").not.toBe("");
@@ -156,8 +147,6 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         const friends = await trpc("friends.list") as { id: string }[];
         friendId = friends[0].id;
 
-        // 4. The point: a friend container joins the tailnet with the minted
-        //    key and writes a real Kopia backup through `tailscale serve`.
         friendEnv = await writeEnvFile(
           Object.entries(friendClientEnv(bundle, { PAYLOAD: "p0rt1on-canary" }))
             .map(([k, v]) => `${k}=${v}`).join("\n") + "\n",
@@ -180,8 +169,8 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         // Exit 0 means Kopia connected over the tailnet and wrote a snapshot.
         expect(backup.code).toBe(0);
 
-        // 5. Offboard, and WAIT for it: tearing down while the job runs can
-        //    leak a node on the REAL tailnet.
+        // Waits for offboard to finish, because tearing down while the job
+        // runs can leak a node on the real tailnet.
         const off = await trpc("friends.offboardStart", { friendId }) as {
           jobId: string;
         };

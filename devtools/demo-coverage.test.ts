@@ -1,7 +1,5 @@
-// Enforces that the demo accounts for EVERY procedure on the real router. Lives
-// in devtools so it can import both the server router (for the real paths) and
-// the client's demo handler maps. Add or remove a procedure anywhere and this
-// fails until it is handled. GATED is empty — every path must have a handler.
+// Lives in devtools so it can import both the server router (for the real
+// paths) and the client's demo handler maps.
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

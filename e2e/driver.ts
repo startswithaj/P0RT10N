@@ -1,5 +1,4 @@
-// Shared plumbing for the integration DRIVERS (the run.ts files) — suites use
-// helpers.ts. Spawning goes through dax, which quotes interpolated values.
+// Spawning goes through dax, which quotes interpolated values.
 import $ from "@david/dax";
 
 export function requireBinaries(...bins: string[]): void {

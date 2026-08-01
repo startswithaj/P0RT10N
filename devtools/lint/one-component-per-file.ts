@@ -2,26 +2,20 @@
  * Deno lint plugin: `one-component-per-file`.
  *
  * A SolidJS component is a top-level PascalCase function whose body contains
- * JSX. Each file has one "main" component and the rule keeps every file honest
- * about it:
+ * JSX, and each file may have one main component.
  *
- * 1. The main component is the *exported* one; if nothing is exported, it's the
- *    *largest* by line count.
- * 2. The main component's name must match the filename (`Bundle.tsx` → `Bundle`).
- * 3. Any *other* exported component is flagged — each public component gets its
- *    own file so it can be imported, tested, and diffed on its own.
- * 4. A private (non-exported) helper component is allowed to sit alongside the
- *    main one only while it stays small (<= LIMIT lines); past that it's really
- *    its own component and must move out. This is what stops a file quietly
- *    growing back into the App.tsx pile-of-components smell.
+ * The main component is the exported one, or the largest by line count if
+ * none is exported, and its name must match the filename. Any other exported
+ * component is flagged, since each public component should get its own file.
+ * A private helper component may sit alongside the main one only while it
+ * stays at or under LIMIT lines; past that it must move to its own file.
  *
- * Non-component helpers (camelCase, or PascalCase factory hooks that return no
- * JSX) and arrows nested inside a component (e.g. a JSX prop callback) are
+ * A camelCase helper, a PascalCase function that returns no JSX, and an arrow
+ * function nested inside a component (such as a JSX prop callback) are all
  * ignored.
  *
- * Exemptions:
- * - `components/ui/` and `styled-system/` are generated.
- * - test files may define whatever fixtures they need.
+ * Exemptions: `components/ui/` and `styled-system/` are generated, and test
+ * files may define whatever fixtures they need.
  */
 
 const LIMIT = 40;
@@ -43,10 +37,10 @@ function basename(filename: string): string {
   return file.replace(/\.(tsx|ts|jsx|js)$/, "");
 }
 
-// Deno lint AST nodes are lazily materialised, so a generic key-walk can't find
-// nested JSX. Instead we collect the top-level PascalCase functions with their
-// source ranges, let the JSX visitors flip a flag on whichever range encloses
-// the JSX, and classify the components at Program:exit.
+// Deno lint's AST nodes are lazily materialised, so a generic key-walk cannot
+// find nested JSX; instead this collects the top-level PascalCase functions
+// by source range, lets the JSX visitors flag whichever range encloses the
+// JSX, and classifies the components at `Program:exit`.
 type Candidate = {
   name: string;
   node: Deno.lint.Node;
@@ -94,7 +88,6 @@ export default {
 
         return {
           "FunctionDeclaration"(node: Deno.lint.FunctionDeclaration) {
-            // Any top-level function — `function Foo` or `export function Foo`.
             const parent = node.parent?.type;
             if (
               node.id &&
@@ -112,9 +105,8 @@ export default {
             }
           },
           "VariableDeclarator"(node: Deno.lint.VariableDeclarator) {
-            // Only top-level bindings — a `const Foo = () => <x/>` component, not
-            // an arrow nested inside another component (e.g. a JSX prop callback).
-            const declaration = node.parent; // VariableDeclaration
+            // `declaration` is a `VariableDeclaration` node.
+            const declaration = node.parent;
             const grandparent = declaration?.parent;
             const gpType = grandparent?.type;
             if (gpType !== "Program" && gpType !== "ExportNamedDeclaration") {
@@ -141,8 +133,6 @@ export default {
             if (comps.length === 0) return;
 
             const exported = comps.filter((c) => c.exported);
-            // Main = the exported component (prefer the one named after the file),
-            // else the largest by line count.
             const main = exported.length > 0
               ? (exported.find((c) => c.name === base) ?? exported[0])
               : comps.reduce((a, b) => (lines(b) > lines(a) ? b : a));

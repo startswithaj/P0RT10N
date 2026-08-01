@@ -1,28 +1,22 @@
 /**
  * Deno lint plugin: `blank-line-around-multiline`.
  *
- * Within a statement list (a Program body or any block body), require a blank
- * line between two adjacent statements when EITHER of them is a MULTI-LINE
- * FUNCTION declaration — an arrow/function `const foo = () => { … }` or a
- * `function foo() { … }` that spans multiple lines. Such blocks should be
- * visually separated from their neighbours so they don't run together into one
- * dense wall.
+ * Requires a blank line between two adjacent statements in a statement list
+ * (a Program body or any block body) when either one is a multi-line function
+ * declaration, so the block doesn't run together with its neighbours.
  *
- * At MODULE TOP LEVEL the same air is required around a multi-line OBJECT-DATA
- * declaration — `export const x = css({ … })`, `const y = { … } as const` — so
- * a file of stacked style/config defs (e.g. `bundle-styles.ts`) doesn't run
- * together. This does NOT apply inside a function/component body: a multi-line
- * DATA declaration there (a `createSignal<…>(…)`, whether its arg wraps or
- * carries a multi-line object) is left alone — tight groups of related
- * state/assignments stay tight.
+ * At module top level only, the same blank line is required around a
+ * multi-line object-data declaration, so a file of stacked style/config defs
+ * doesn't run together; inside a function or component body a multi-line data
+ * declaration is left alone, so tight groups of related state stay tight.
  *
  * A leading comment stays glued to the statement it documents: the required
- * blank line goes ABOVE the comment, never between the comment and its
+ * blank line goes above the comment, never between the comment and its
  * statement.
  *
  * Autofixable: `deno lint --fix` inserts the missing blank line.
  *
- * Exemptions: `components/ui/` and `styled-system/` are generated.
+ * Exempts `components/ui/` and `styled-system/` because they are generated.
  */
 
 const EXEMPT = ["/components/ui/", "/styled-system/"];
@@ -47,8 +41,9 @@ export default {
           }
           return line;
         };
-        // Start of the line containing `offset` — the blank line is inserted
-        // here so the block's indentation is preserved, not split.
+        // Returns the start of the line containing `offset`, so the blank
+        // line is inserted before the line's indentation instead of
+        // splitting it.
         const lineStartOf = (offset: number): number => {
           let i = offset;
           while (i > 0 && text[i - 1] !== "\n") i--;
@@ -57,15 +52,14 @@ export default {
         const isMultiline = (node: Deno.lint.Node): boolean =>
           lineAt(node.range[1]) > lineAt(node.range[0]);
 
-        // `export function foo` / `export const foo` wrap the declaration.
+        // An `export function foo` or `export const foo` declaration is
+        // wrapped in an `ExportNamedDeclaration` node, so this unwraps it to
+        // get the underlying declaration.
         const unwrap = (node: Deno.lint.Node): Deno.lint.Node =>
           node.type === "ExportNamedDeclaration" && node.declaration
             ? node.declaration
             : node;
 
-        // A statement that DECLARES a function: `function foo() {}` or a
-        // `const foo = () => …` / `= function () {}`. Data declarations (a
-        // `createSignal(…)` call) and bare expression statements are not.
         const isFnDecl = (node: Deno.lint.Node): boolean => {
           const n = unwrap(node);
           if (n.type === "FunctionDeclaration") return true;
@@ -78,10 +72,11 @@ export default {
           return false;
         };
 
-        // A multi-line object literal anywhere in the initializer: `= { … }`,
-        // `= css({ … })`, `= foo(base, { … }) as const`. This — not a call
-        // whose args merely wrap onto extra lines (a `createSignal<…>(…)`) —
-        // is what makes a data declaration a wall.
+        // Recognises a multi-line object literal anywhere in the
+        // initializer, including nested inside an `as const` expression or a
+        // call's arguments; a call whose arguments merely wrap onto extra
+        // lines without containing an object literal, such as
+        // `createSignal(…)`, does not count as a wall.
         const hasMultilineObject = (
           node: Deno.lint.Node | null | undefined,
         ): boolean => {
@@ -95,17 +90,12 @@ export default {
           }
           return false;
         };
-        // A data declaration built from a multi-line object literal — a stack
-        // of style/config defs that reads as a wall.
         const isObjectDecl = (node: Deno.lint.Node): boolean => {
           const n = unwrap(node);
           return n.type === "VariableDeclaration" &&
             n.declarations.some((d) => hasMultilineObject(d.init));
         };
 
-        // The trigger: a multi-line function declaration always wants air; a
-        // multi-line object-data declaration wants it only at module top level
-        // (`atTop`) — inside a component body, tight state groups stay tight.
         const isBig = (node: Deno.lint.Node, atTop: boolean): boolean =>
           isMultiline(node) &&
           (isFnDecl(node) || (atTop && isObjectDecl(node)));
@@ -116,9 +106,6 @@ export default {
             const cur = statements[i];
             if (!isBig(prev, atTop) && !isBig(cur, atTop)) continue;
 
-            // Walk up from `cur` through the comment block glued directly above
-            // it (each line adjacent, no blank gap) — that's where the required
-            // blank line belongs, not between the comment and its statement.
             const comments = sc.getCommentsBefore(cur);
             let blockStart = cur.range[0];
             let anchorLine = lineAt(cur.range[0]);
@@ -133,8 +120,9 @@ export default {
               } else break;
             }
 
-            // A blank line between prev's end and the block start means the gap
-            // holds two-or-more newlines (end-of-prev-line + the empty line).
+            // A blank line between `prev`'s end and the block start means the
+            // gap contains two or more newlines: one that ends `prev`'s
+            // line, and one for the empty line itself.
             const gap = text.slice(prev.range[1], blockStart);
             if ((gap.match(/\n/g) ?? []).length >= 2) continue;
 

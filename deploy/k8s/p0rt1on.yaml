@@ -1,18 +1,4 @@
-# p0rt1on on Kubernetes — everything lives in ONE namespace; the manager's
-# ServiceAccount has a single namespace-scoped Role (least privilege). PSA
-# `restricted` is enforced on the namespace: instance pods run userspace
-# tailscaled (TS_USERSPACE=true), so nothing needs capabilities or devices —
-# the cluster itself refuses privileged pods, even from a compromised manager.
-#
-#   kubectl apply -f deploy/k8s/pantry.yaml    # the portion-data StorageClass
-#   kubectl apply -f deploy/k8s/p0rt1on.yaml
-#
-# Prereqs: build/push the manager + instance images somewhere the cluster can
-# pull; fill in the `p0rt1on-manager-secrets` Secret below (master key, OAuth
-# client secret, tag owner, tailnet domain); apply deploy/k8s/pantry.yaml for
-# the `p0rt1on-pantry` StorageClass that portion DATA is provisioned from
-# (P0RT1ON_PANTRY below). The manager's own PVC deliberately does NOT use that
-# class — the pantry holds friend data only.
+# The manager's ServiceAccount has a single namespace-scoped Role (least privilege); PSA `restricted` is enforced so instance pods (userspace tailscaled) need no capabilities or devices, and the cluster refuses privileged pods even from a compromised manager.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -26,8 +12,7 @@ metadata:
   name: p0rt1on-manager
   namespace: p0rt1on
 ---
-# The manager's ENTIRE permission surface. Nothing cluster-scoped; it cannot
-# escalate itself (no RBAC verbs) and is powerless outside this namespace.
+# This Role is the manager's entire permission surface: nothing cluster-scoped, no RBAC verbs to self-escalate, and no access outside this namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -61,7 +46,6 @@ subjects:
     name: p0rt1on-manager
     namespace: p0rt1on
 ---
-# Fill in before applying (or create via kubectl create secret).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -78,8 +62,7 @@ metadata:
   name: p0rt1on-manager-data
   namespace: p0rt1on
 spec:
-  # No storageClassName: the manager's DB uses the cluster default, never the
-  # pantry — the pantry is friend data only, with a different lifecycle.
+  # No storageClassName here: the manager's DB uses the cluster default, never the pantry, because the pantry is friend data only with a different lifecycle.
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
@@ -101,15 +84,14 @@ spec:
       serviceAccountName: p0rt1on-manager
       securityContext:
         runAsNonRoot: true
-        # Matches the image's `deno` user; fsGroup makes the mounted /data PVC
-        # writable for it.
+        # runAsUser 1993 matches the image's `deno` user; fsGroup makes the mounted /data PVC writable for it.
         runAsUser: 1993
         runAsGroup: 1993
         fsGroup: 1993
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: manager
-          image: p0rt1on-manager:latest # pin before production use
+          image: p0rt1on-manager:latest # Pin this image tag before production use.
           envFrom:
             - secretRef: { name: p0rt1on-manager-secrets }
           env:
@@ -117,9 +99,7 @@ spec:
               value: kubernetes
             - name: P0RT1ON_K8S_NAMESPACE
               value: p0rt1on
-            # The pantry: the StorageClass every portion's DATA PVC is
-            # provisioned from (deploy/k8s/pantry.yaml). Tailscale state uses the
-            # cluster default, so it stays off the pantry.
+            # P0RT1ON_PANTRY is the StorageClass every portion's data PVC is provisioned from (see pantry.yaml); tailscale state uses the cluster default instead, so it stays off the pantry.
             - name: P0RT1ON_PANTRY
               value: p0rt1on-pantry
             - name: P0RT1ON_DB_PATH
@@ -128,9 +108,9 @@ spec:
             - name: DENO_CERT
               value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
           ports:
-            - containerPort: 8080 # admin UI/API (loopback-only by design;
-            # reach it via `kubectl port-forward` — do NOT expose it)
-            - containerPort: 8081 # audit webhook listener
+            # Admin UI/API is loopback-only by design; reach it via `kubectl port-forward`, never expose it.
+            - containerPort: 8080
+            - containerPort: 8081
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

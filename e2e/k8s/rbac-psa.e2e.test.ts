@@ -2,9 +2,8 @@ import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { requireConfig, until } from "../helpers.ts";
 
-// Black-box, as the p0rt1on-manager ServiceAccount against a real k8s API:
-// the shipped Role contains it, and PSA `restricted` refuses privileged pods
-// even from a compromised manager.
+// Proves the manager is contained even if it is compromised, via
+// least-privilege RBAC and PSA `restricted` blocking privileged pods.
 describe("Manager RBAC containment + PSA rejection (e2e)", () => {
   const server = () => Deno.env.get("K8S_E2E_SERVER") ?? "";
   const token = () => Deno.env.get("K8S_E2E_TOKEN") ?? "";
@@ -36,12 +35,14 @@ describe("Manager RBAC containment + PSA rejection (e2e)", () => {
   };
 
   it("the manager ServiceAccount is contained by its Role", async () => {
-    // Cross-namespace secret read → 403 (namespace-scoped Role).
+    // A cross-namespace secret read must return 403, since the Role is
+    // namespace-scoped.
     const crossNs = await asManager("/api/v1/namespaces/kube-system/secrets");
     expect(crossNs.status).toBe(403);
     await crossNs.body?.cancel();
 
-    // Self-escalation (editing its own Role) → 403 (no RBAC verbs).
+    // Self-escalation must return 403 too, since the Role grants no RBAC
+    // verbs.
     const escalate = await asManager(
       "/apis/rbac.authorization.k8s.io/v1/namespaces/p0rt1on/roles/p0rt1on-manager",
       {
@@ -53,12 +54,12 @@ describe("Manager RBAC containment + PSA rejection (e2e)", () => {
     expect(escalate.status).toBe(403);
     await escalate.body?.cancel();
 
-    // Cluster-scoped listing (nodes) → 403.
+    // Listing cluster-scoped nodes must return 403 too.
     const nodes = await asManager("/api/v1/nodes");
     expect(nodes.status).toBe(403);
     await nodes.body?.cancel();
 
-    // The leak-check contract: `get` on named PVCs is allowed, `list` is not.
+    // The leak-check contract allows `get` on named PVCs but denies `list`.
     const list = await asManager(
       "/api/v1/namespaces/p0rt1on/persistentvolumeclaims",
     );
@@ -69,8 +70,8 @@ describe("Manager RBAC containment + PSA rejection (e2e)", () => {
   it(
     "PSA restricted rejects a privileged pod in the namespace",
     async () => {
-      // The Role can't create pods, so rejection is proven through a
-      // StatefulSet it can create: admitted, but its pod never appears.
+      // Proves PSA rejection via a StatefulSet, since the Role cannot
+      // create pods directly; it is admitted, but its pod never appears.
       const res = await asManager(
         "/apis/apps/v1/namespaces/p0rt1on/statefulsets/it-priv?fieldManager=p0rt1on&force=true",
         {
@@ -101,7 +102,8 @@ describe("Manager RBAC containment + PSA rejection (e2e)", () => {
       try {
         expect(res.status).toBeLessThan(500);
         await res.body?.cancel();
-        // Positive evidence: the FailedCreate event names the violation.
+        // The FailedCreate event names the violation, giving positive
+        // evidence of the rejection.
         const rejection = await until(
           "PSA FailedCreate event",
           async () => {
@@ -119,7 +121,6 @@ describe("Manager RBAC containment + PSA rejection (e2e)", () => {
         );
         expect(rejection).toContain("violates PodSecurity");
 
-        // ...and the pod never materialised.
         const pod = await asManager(
           "/api/v1/namespaces/p0rt1on/pods/it-priv-0",
         );

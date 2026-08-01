@@ -1,12 +1,3 @@
-// Docker + REAL tailnet portion tier. Unlike the k8s tiers (secretless), this
-// needs a real Tailscale OAuth client — it is the only tier proving
-// `tailscale serve` over HTTPS with real certs.
-//
-//   deno task test:e2e:docker          # build images + run
-//   deno task test:e2e:docker run      # run (images built)
-//
-// Locally reads .env (the same file `docker compose` uses); in CI the vars
-// are injected as secrets.
 import $ from "@david/dax";
 import { loadSync } from "@std/dotenv";
 import { requireBinaries } from "../driver.ts";
@@ -25,21 +16,19 @@ if (!(MODES as readonly string[]).includes(mode)) {
   Deno.exit(2);
 }
 
-// All paths below are repo-root relative.
 Deno.chdir(new URL("../..", import.meta.url));
 requireBinaries("docker");
 
-// Images come from the REAL environment (CI) or the integration defaults —
-// resolved BEFORE .env loads, because .env's P0RT1ON_INSTANCE_IMAGE is the
-// DEV image (stale for tests). .env is only for the tailnet secrets.
+// Images resolve before .env loads, because .env's P0RT1ON_INSTANCE_IMAGE
+// is the stale dev image; .env is only used here for tailnet secrets.
 const MANAGER_IMAGE = Deno.env.get("MANAGER_IMAGE") ?? DEFAULT_MANAGER_IMAGE;
 const INSTANCE_IMAGE = Deno.env.get("P0RT1ON_INSTANCE_IMAGE") ??
   DEFAULT_INSTANCE_IMAGE;
 const CLIENT_IMAGE = Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE;
 loadSync({ export: true });
 
-// Fixed in the runtime (DOCKER_NETWORK) — instances always join this one,
-// and the manager container must be on it too.
+// Instances always join the fixed DOCKER_NETWORK, so the manager
+// container must be on it too.
 const NETWORK = "p0rt1on-net";
 const net = await $`docker network inspect ${NETWORK}`.noThrow().quiet();
 if (net.code !== 0) await $`docker network create ${NETWORK}`;

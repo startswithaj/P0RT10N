@@ -56,7 +56,6 @@ Deno.test("flags a PLAN section reference", () => {
 });
 
 Deno.test("allows a hex-like #fff only outside comments (no comment ref)", () => {
-  // A comment mentioning a CSS token by name, no #digits — must not trip REFS.
   assertEquals(run(`// uses the accent color token\nconst x = 1;\n`).length, 0);
 });
 

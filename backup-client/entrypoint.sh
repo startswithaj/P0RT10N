@@ -1,17 +1,10 @@
 #!/bin/sh
-# p0rt1on backup-client — one-shot backup runner.
-#
-# Flow: validate env -> bring up Tailscale (userspace) -> route Kopia's S3 traffic
-# through the tailnet -> connect (or create) the Kopia repo -> snapshot the mounted
-# directory -> tear down. Exits with the snapshot's status so cron / k8s sees
-# pass/fail. Everything is configured by env vars (see .env.example).
+# Exits with the snapshot's status so cron / k8s sees pass/fail.
 set -eu
 
 log() { echo "[p0rt1on-backup] $*"; }
 die() { echo "[p0rt1on-backup] ERROR: $*" >&2; exit 1; }
 
-# --- 1. Validate env ---------------------------------------------------------
-# Required regardless of mode.
 : "${S3_ENDPOINT:?S3_ENDPOINT is required (your bucket endpoint from the bundle)}"
 : "${S3_BUCKET:?S3_BUCKET is required (your bucket name from the bundle)}"
 : "${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required (from the bundle)}"
@@ -19,31 +12,25 @@ die() { echo "[p0rt1on-backup] ERROR: $*" >&2; exit 1; }
 : "${KOPIA_PASSWORD:?KOPIA_PASSWORD is required (YOUR encryption password — keep it safe, it is never sent to the server)}"
 : "${BACKUP_PATH:?BACKUP_PATH is required (path inside the container to back up, e.g. /data)}"
 
-# Optional, with defaults.
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
-# Defaults to the bucket name so every cron run shares one stable identity — both
-# as the tailnet node name and as the Kopia snapshot source (see overrides below).
-# Without this each fresh container gets a random hostname and snapshot history
-# fragments across sources.
+# Defaults to the bucket name so every cron run shares one stable identity, both as the tailnet node name and the Kopia snapshot source.
+# Without this default each fresh container gets a random hostname and snapshot history fragments across sources.
 TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-$S3_BUCKET}"
 TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
-# Alternative control plane, e.g. http://headscale:8080 (empty = Tailscale SaaS).
 TAILSCALE_LOGIN_SERVER="${TAILSCALE_LOGIN_SERVER:-}"
 # SKIP_TAILSCALE=1 talks to S3_ENDPOINT directly (local testing without a tailnet).
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-}"
 
 [ -d "$BACKUP_PATH" ] || die "BACKUP_PATH '$BACKUP_PATH' is not a directory — did you mount your data into the container?"
 
-# Kopia's S3 --endpoint wants host[:port], not a full URL (same as the manager's
-# kopiaQuickstart, which strips the scheme). Derive the host; if the endpoint was
-# plain http, disable TLS.
+# Kopia's S3 --endpoint wants host[:port], not a full URL, matching the manager's kopiaQuickstart which also strips the scheme.
+# If the endpoint was plain http, disable TLS for the Kopia client too.
 S3_HOST=$(printf '%s' "$S3_ENDPOINT" | sed -e 's#^https://##' -e 's#^http://##' -e 's#/$##')
 KOPIA_TLS_ARGS=""
 case "$S3_ENDPOINT" in
   http://*) KOPIA_TLS_ARGS="--disable-tls" ;;
 esac
 
-# --- 2 & 3. Bring up Tailscale (userspace) -----------------------------------
 TAILSCALED_PID=""
 cleanup() {
   if [ -n "$TAILSCALED_PID" ]; then
@@ -68,8 +55,7 @@ else
     >/tmp/tailscaled.log 2>&1 &
   TAILSCALED_PID=$!
 
-  # `tailscale up` is idempotent: if a persisted state volume already authenticated
-  # this node, it comes up without re-redeeming the (single-use) key.
+  # `tailscale up` is idempotent: a node with a persisted, already-authenticated state volume comes up without re-redeeming the single-use key.
   log "joining tailnet as '$TAILSCALE_HOSTNAME'"
   # shellcheck disable=SC2086
   tailscale up \
@@ -88,16 +74,13 @@ else
   done
   log "tailnet is up"
 
-  # Route Kopia's S3 client through tailscaled so the MagicDNS endpoint resolves
-  # and connects over the tailnet. The SOCKS5 proxy does remote DNS resolution.
+  # Kopia's S3 client is routed through tailscaled's SOCKS5 proxy so the MagicDNS endpoint resolves and connects over the tailnet; the proxy does remote DNS resolution.
   export HTTPS_PROXY="http://localhost:1055"
   export HTTP_PROXY="http://localhost:1055"
   export ALL_PROXY="socks5://localhost:1055"
 fi
 
-# --- 4 & 5. Connect or create the Kopia repo ---------------------------------
-# KOPIA_PASSWORD is read from the environment by kopia itself — never passed on the
-# command line, never logged.
+# KOPIA_PASSWORD is read from the environment by kopia itself; it is never passed on the command line or logged.
 KOPIA_CACHE_ARGS=""
 if [ -n "${KOPIA_CACHE_DIRECTORY:-}" ]; then
   KOPIA_CACHE_ARGS="--cache-directory=$KOPIA_CACHE_DIRECTORY"
@@ -128,18 +111,14 @@ else
     $KOPIA_TLS_ARGS $KOPIA_CACHE_ARGS
 fi
 
-# --- 6. Snapshot -------------------------------------------------------------
-# Capture the status without aborting (set -e) so maintenance still runs and we
-# exit with the snapshot's real result.
 log "backing up $BACKUP_PATH"
+# set +e/-e brackets the snapshot command so a failure doesn't abort the script; STATUS captures the real exit code so maintenance still runs and the run exits with the true result.
 set +e
 kopia snapshot create "$BACKUP_PATH"
 STATUS=$?
 set -e
 
-# --- 7. Maintenance (best-effort) --------------------------------------------
-# Object Lock holds objects for the retention window; full maintenance must run
-# within that window to reclaim space. Best-effort: never fail the run on it.
+# Object Lock holds objects for the retention window, so maintenance must run within that window to reclaim space; it is best-effort and never fails the run.
 kopia maintenance run >/dev/null 2>&1 || log "maintenance skipped/failed (non-fatal)"
 
 log "done (snapshot exit=$STATUS)"

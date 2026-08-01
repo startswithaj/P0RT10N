@@ -1,12 +1,4 @@
-# Dev stack for p0rt1on. MinIO is the dependency the `mc` integration tests run
-# against. The manager normally launches per-friend MinIO + tailscaled at
-# runtime; this file provides a single shared MinIO for local dev / IT.
-#
-#   docker compose -f deploy/docker-compose.yml up -d minio
-#   # then point mc at it and run the integration suite:
-#   export MINIO_ENDPOINT=http://127.0.0.1:9000
-#   export MINIO_ROOT_USER=p0rtadmin MINIO_ROOT_PASSWORD=p0rtadmin123
-#   deno task test:integration
+# This file provides one shared MinIO for local dev and the `mc` integration tests; in production the manager launches a separate MinIO + tailscaled per friend at runtime.
 
 services:
   minio:
@@ -16,12 +8,11 @@ services:
       MINIO_ROOT_USER: p0rtadmin
       MINIO_ROOT_PASSWORD: p0rtadmin123
     ports:
-      - "127.0.0.1:9000:9000" # S3 API
-      - "127.0.0.1:9001:9001" # console
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
 
-  # The p0rt1on manager (web UI + API). Bundles `mc`. Local-only admin surface.
   manager:
     build:
       context: ..
@@ -29,13 +20,9 @@ services:
     environment:
       P0RT1ON_DB_PATH: /data/p0rt1on.db
       P0RT1ON_PORT: "8080"
-      # The pantry: friend data on the host. Must be the SAME path inside the
-      # manager and on the host (see the bind mount below) so the manager's
-      # mkdir and the instances' host-daemon bind mounts agree.
+      # The pantry path must be identical inside the manager and on the host (matching the bind mount below), so the manager's mkdir and the instances' host-daemon bind mounts resolve to the same directory.
       P0RT1ON_PANTRY: ${P0RT1ON_PANTRY:-/srv/p0rt1on}
-      # Containerized manager: reach instances by container name over the
-      # shared docker network — their loopback-published ports are unreachable
-      # cross-container on Linux (host.docker.internal included).
+      # The manager reaches instances by container name over the shared docker network, because on Linux their loopback-published ports (including host.docker.internal) are unreachable cross-container.
       P0RT1ON_INSTANCE_ADDRESSING: network
     ports:
       - "127.0.0.1:8080:8080"
@@ -49,9 +36,7 @@ services:
       - minio
 
 networks:
-  # The network instances join (DOCKER_NETWORK in DockerRuntime.ts). Created
-  # out-of-band:
-  #   docker network create p0rt1on-net
+  # p0rt1on-net is the network instances join (DOCKER_NETWORK in DockerRuntime.ts); since it's external, create it out-of-band first: `docker network create p0rt1on-net`.
   p0rt1on-net:
     external: true
 

@@ -1,6 +1,6 @@
-// Dev-only: seed a few friends (+ activity + usage) into a persistent DB so the
-// dashboard has something to show. Bypasses the not-yet-wired provisioning flow
-// by writing rows directly via the repo. Run: deno task seed
+// Dev-only: seeds friends with activity and usage data so the dashboard has
+// something to show; bypasses the provisioning flow and writes rows directly
+// via the repo.
 import { openDatabase } from "../app/packages/server/src/db/Database.ts";
 import { runMigrations } from "../app/packages/server/src/db/MigrationRunner.ts";
 import { DrizzleProvisioningRepo } from "../app/packages/server/src/db/ProvisioningRepo.ts";
@@ -97,9 +97,9 @@ const carol = await seed(
   14,
 );
 
-// Lifecycle events so the Status-page "Recent events" panel isn't empty in dev
-// (the seed bypasses the provision flow that writes these for real). Timestamps
-// use SQLite's `datetime` format (space-separated, UTC).
+// Lifecycle events so the Status-page "Recent events" panel isn't empty in
+// dev; the seed bypasses the provisioning flow that writes these for real.
+// Timestamps use SQLite's `datetime` format (space-separated, UTC).
 db.insert(audit).values([
   {
     friendId: alice,

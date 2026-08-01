@@ -1,14 +1,5 @@
-// k8s e2e driver — the SHIPPED containers on k3d with an in-cluster headscale
-// control plane (no Tailscale account or secrets needed).
-//
-//   deno task test:e2e:k8s            # build images + rbac-psa + lifecycle
-//   deno task test:e2e:k8s build      # (re)build + import images only
-//   deno task test:e2e:k8s rbac-psa   # security checks (images built)
-//   deno task test:e2e:k8s lifecycle  # portion lifecycle vs the real manager
-//   deno task test:e2e:k8s clean      # delete the k3d cluster
-//
-// A cluster this run CREATED is deleted on exit (K8S_E2E_KEEP=1 keeps it); a
-// pre-existing cluster is the user's and is left alone.
+// A cluster this run creates is deleted on exit, unless K8S_E2E_KEEP=1; a
+// pre-existing cluster belongs to the user and is left alone.
 import $ from "@david/dax";
 import { parseKeyOutput, requireBinaries } from "../driver.ts";
 import { DEFAULT_HEADSCALE_URL, until } from "../helpers.ts";
@@ -20,14 +11,13 @@ if (!(MODES as readonly string[]).includes(mode)) {
   Deno.exit(2);
 }
 
-// All paths below are repo-root relative.
 Deno.chdir(new URL("../..", import.meta.url));
 requireBinaries("docker", "k3d", "kubectl");
 
 const CLUSTER = Deno.env.get("K8S_E2E_CLUSTER") ?? "p0rt1on-e2e";
 const CTX = `k3d-${CLUSTER}`;
-// NOT :latest — that would default imagePullPolicy to Always, and these
-// images only ever exist locally.
+// Tags avoid :latest, since that would default imagePullPolicy to
+// Always, and these images only ever exist locally.
 const INSTANCE_IMAGE = "p0rt1on-instance:e2e";
 const MANAGER_IMAGE = "p0rt1on-manager:e2e";
 const CLIENT_IMAGE = "p0rt1on-backup-client:e2e";
@@ -37,8 +27,8 @@ const MANAGER_SECRET = "p0rt1on-manager-secrets";
 const MANAGER_URL = "http://p0rt1on-manager-admin.p0rt1on.svc:8080";
 const RUNNER = "p0rt1on-e2e-runner";
 
-// Every kubectl call is PINNED to the k3d context — never the user's current
-// context (which may be a real cluster this driver must not touch).
+// Every kubectl call pins the k3d context, never the user's current
+// context, since that could be a real cluster this driver must not touch.
 const kc = (args: string[]) => $`kubectl --context ${CTX} ${args}`;
 
 const headscale = (args: string[]) =>
@@ -60,8 +50,8 @@ async function teardown(): Promise<void> {
   }
 }
 
-// Idempotent across reruns. Polls because there is no readiness probe: a
-// finished rollout can still precede the CLI socket.
+// Polls because there is no readiness probe; a finished rollout can still
+// precede the CLI socket being ready.
 async function ensureHeadscaleUser(): Promise<void> {
   const users = await until(
     "headscale CLI to answer",
@@ -80,8 +70,8 @@ async function ensureHeadscaleUser(): Promise<void> {
 async function setup(): Promise<void> {
   const exists = await $`k3d cluster list ${CLUSTER}`.noThrow().quiet();
   if (exists.code !== 0) {
-    // --kubeconfig-switch-context=false: never clobber the user's current
-    // kubectl context (kc pins --context anyway).
+    // Never switches the user's current kubectl context on cluster
+    // creation, though kc already pins --context on every call.
     await $`k3d cluster create ${CLUSTER} --wait --timeout 120s --kubeconfig-switch-context=false`;
     state.createdCluster = true;
   }
@@ -106,7 +96,6 @@ async function buildImages(): Promise<void> {
   await $`k3d image import ${INSTANCE_IMAGE} ${MANAGER_IMAGE} ${CLIENT_IMAGE} ${RUNNER_IMAGE} -c ${CLUSTER}`;
 }
 
-// ---- rbac-psa: black-box security checks as the manager SA -----------------
 async function rbacPsa(): Promise<void> {
   const server = await kc([
     "config",
@@ -146,11 +135,9 @@ async function rbacPsa(): Promise<void> {
   }
 }
 
-// ---- lifecycle: the real manager Deployment, driven over HTTP --------------
 async function lifecycle(): Promise<void> {
-  // Clean control plane per run (state is an emptyDir, a restart wipes it):
-  // stale nodes make headscale rename new ones (hostname collision), which
-  // breaks offboard's hostname-matched cleanup.
+  // Restarts headscale each run, because a stale node makes it rename the
+  // new one on hostname collision, which breaks offboard's cleanup.
   await kc(["rollout", "restart", "deployment/headscale", "-n", "p0rt1on"]);
   await kc([
     "rollout",
@@ -178,9 +165,8 @@ async function lifecycle(): Promise<void> {
   }
 }
 
-// Fresh DB per run: a kept cluster (K8S_E2E_KEEP=1) otherwise carries the last
-// run's friend rows, and `add` fails on the unique name before it provisions
-// anything. Safe while the Deployment is scaled to 0.
+// Wipes the manager's PVC before each run; a kept cluster would otherwise
+// carry stale friend rows and fail addStart on the unique name.
 async function resetManagerState(): Promise<void> {
   await kc([
     "delete",
@@ -193,8 +179,8 @@ async function resetManagerState(): Promise<void> {
   await kc(["apply", "-f", "deploy/k8s/p0rt1on.yaml"]);
 }
 
-// The manager's whole e2e config, in the Secret its Deployment envFrom's.
-// Deleted first, not applied over: the shipped placeholders must not survive.
+// Deletes the Secret before recreating it, so the shipped manifest's
+// placeholder values can't survive a merge.
 async function writeManagerSecret(): Promise<void> {
   const apiKey = parseKeyOutput(
     await headscale(["apikeys", "create", "--expiration", "1h"]).text(),
@@ -229,8 +215,8 @@ async function writeManagerSecret(): Promise<void> {
   }));
 }
 
-// Scale the SHIPPED Deployment up on the imported image. IfNotPresent is
-// required: k3d-imported images can never be pulled.
+// imagePullPolicy must be IfNotPresent, since k3d-imported images can
+// never be pulled from a registry.
 async function startManager(): Promise<void> {
   await kc([
     "patch",
@@ -287,8 +273,8 @@ async function startManager(): Promise<void> {
   }
 }
 
-// Holds no secrets inline — admin creds and the headscale key come from the
-// Secret by reference.
+// The pod manifest holds no secrets inline; admin creds and the headscale
+// key come from the Secret by reference.
 function runnerPodManifest(): unknown {
   const secretEnv = (name: string, key = name) => ({
     name,
@@ -357,8 +343,8 @@ async function podPhase(): Promise<string> {
   ]).text();
 }
 
-// The pod's terminal phase is the verdict, not the log stream — a dropped
-// stream re-attaches (--tail=0 after the first) instead of failing the run.
+// The pod's terminal phase is the verdict, not the log stream, since a
+// dropped stream re-attaches with --tail=0 instead of failing the run.
 async function runRunnerPod(): Promise<void> {
   await kc(["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"]);
   try {
@@ -411,7 +397,8 @@ async function runRunnerPod(): Promise<void> {
   }
 }
 
-// `clean` must not run setup — that would create a cluster just to delete it.
+// `clean` skips setup, since running it would create a cluster only to
+// immediately delete it.
 if (mode === "clean") {
   const del = await $`k3d cluster delete ${CLUSTER}`.noThrow().quiet();
   if (del.code === 0) {

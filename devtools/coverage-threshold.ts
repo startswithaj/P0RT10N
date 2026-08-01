@@ -1,7 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env
-// Fails (exit 1) when line coverage is below THRESHOLD. Deno has no built-in
-// coverage gate, so check:all calls this after generating coverage/lcov.info.
-// Run via: deno task coverage:check. Override the gate with COVERAGE_THRESHOLD.
+// Deno has no built-in coverage gate; check:all runs this after generating
+// coverage/lcov.info.
 
 const THRESHOLD = Number(Deno.env.get("COVERAGE_THRESHOLD") ?? 95);
 const LCOV_PATH = "coverage/lcov.info";
@@ -15,7 +14,6 @@ const text = await Deno.readTextFile(LCOV_PATH).catch(() => {
 
 const allLines = text.split("\n");
 
-/** Sum the numeric suffix of every `<prefix>N` record (e.g. "LF:" / "LH:"). */
 const sumField = (prefix: string): number =>
   allLines
     .filter((line) => line.startsWith(prefix))

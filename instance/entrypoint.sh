@@ -1,10 +1,5 @@
 #!/bin/sh
-# p0rt1on instance — long-running MinIO + tailscaled in one container.
-#
-# Flow: start tailscaled (userspace) -> join the tailnet (tagged) -> `tailscale
-# serve` MinIO over HTTPS -> run MinIO. tailscaled + minio run as background
-# children; the script waits on minio (tini is PID 1, reaping + forwarding
-# signals). If minio exits, the container stops.
+# The script waits on minio (tini is PID 1, reaping/forwarding signals); the container stops when minio exits.
 set -eu
 
 log() { echo "[p0rt1on-instance] $*"; }
@@ -13,10 +8,8 @@ die() {
   exit 1
 }
 
-# --- env ---------------------------------------------------------------------
-# TAILSCALE_DISABLED=1: MinIO-only mode for INTEGRATION TESTS (CI clusters
-# have no tailnet). Never set in production — without tailscaled no friend
-# can reach the instance.
+# TAILSCALE_DISABLED=1: MinIO-only mode for integration tests (CI has no tailnet).
+# Never set in production, because without tailscaled friends cannot reach the instance.
 TAILSCALE_DISABLED="${TAILSCALE_DISABLED:-}"
 if [ "$TAILSCALE_DISABLED" != "1" ]; then
   : "${TAILSCALE_AUTHKEY:?TAILSCALE_AUTHKEY is required (the instance's serve auth key)}"
@@ -26,34 +19,23 @@ fi
 : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
 export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
 
-# Alternative control plane, e.g. http://headscale:8080 (empty = Tailscale SaaS).
 TAILSCALE_LOGIN_SERVER="${TAILSCALE_LOGIN_SERVER:-}"
-# http = control planes without cert issuance (headscale); default https.
+# HTTP mode is for control planes without cert issuance, like headscale; default is HTTPS.
 TAILSCALE_SERVE_MODE="${TAILSCALE_SERVE_MODE:-https}"
 MINIO_PORT="${MINIO_PORT:-9000}"
 DATA_DIR="${DATA_DIR:-/data}"
-# MinIO's single-drive mode (SNSD) fully supports versioning + Object Lock
-# (verified against this image 2026-07-07: locked bucket, inherited retention,
-# WORM delete denial). The old ">=4 drives for lock" rule died with the legacy
-# FS backend in 2022 — so one drive, no erasure parity overhead. Note: SNSD
-# has zero parity, so bitrot is detected (checksums) but not self-healed; the
-# real redundancy is the friend's client re-uploading.
+# Single-drive mode (SNSD) fully supports Object Lock and versioning; the old >=4-drives requirement died with the legacy FS backend in 2022.
+# SNSD has no parity, so bitrot is detected but not self-healed; redundancy relies on the friend's client re-uploading.
 MINIO_DRIVES="${MINIO_DRIVES:-$DATA_DIR}"
-# tailscaled state + socket live in a SUBDIR of the state volume, created by
-# whatever uid runs this script: tailscaled chmods its state dir to 0700, and
-# under k8s PSA `restricted` (uid 1000, fsGroup) the volume MOUNT POINT is
-# root-owned — chmod on it fails. A freshly created subdir is ours to chmod.
-# The default socket dir /var/run/tailscale is root-only for the same reason.
-# Same paths in healthcheck.sh.
+# A fresh subdir under the state volume is created here because tailscaled chmods it to 0700, and under k8s PSA restricted the volume mount point is root-owned so chmod on it fails.
+# healthcheck.sh uses the same paths, so keep them in sync.
 TS_STATE_DIR="/var/lib/tailscale/state"
 TS_SOCKET="$TS_STATE_DIR/tailscaled.sock"
 mkdir -p "$TS_STATE_DIR"
-# The healthcheck reads this to report a `tailscale serve` failure as the real
-# reason; clear it each boot so a past failure never sticks.
+# healthcheck.sh reads this file to report a `tailscale serve` failure as the real reason; cleared each boot so a stale failure never sticks.
 SERVE_FAILED="$TS_STATE_DIR/serve-failed"
 rm -f "$SERVE_FAILED"
-# Pre-subdir instances (docker, root) kept state at the volume root — move it
-# so they keep their node identity instead of re-enrolling.
+# Older instances (pre-subdir, docker/root) kept state at the volume root; migrate it here so they keep their tailnet node identity instead of re-enrolling.
 if [ -f /var/lib/tailscale/tailscaled.state ] &&
   [ ! -f "$TS_STATE_DIR/tailscaled.state" ]; then
   mv /var/lib/tailscale/tailscaled.state "$TS_STATE_DIR/tailscaled.state"
@@ -71,19 +53,12 @@ shutdown() {
 }
 trap shutdown TERM INT
 
-# --- tailscaled --------------------------------------------------------------
 if [ "$TAILSCALE_DISABLED" = "1" ]; then
   log "TAILSCALE_DISABLED=1 — skipping tailscaled/serve (integration tests only)"
 else
 log "starting tailscaled (userspace networking)"
-# --statedir (a var root), NOT just --state (a file): `tailscale serve --https`
-# stores its issued cert under the state dir's var root. tailscaled only derives
-# a var root from --statedir, or from --state at the WELL-KNOWN default path;
-# our non-default subdir (the non-root/fsGroup fix) left it with none, so cert
-# issuance failed ("no TailscaleVarRoot") and serve returned TLS "internal
-# error" to every friend. --statedir keeps the state file at
-# $TS_STATE_DIR/tailscaled.state (what the migration above produces) AND gives
-# serve a place for its cert.
+# --statedir (not --state) is required: tailscale serve's HTTPS cert needs a var root, which tailscaled only derives from --statedir or the default --state path.
+# Our non-default state subdir left it without one, so cert issuance failed and serve returned TLS errors to every friend.
 tailscaled \
   --tun=userspace-networking \
   --statedir="$TS_STATE_DIR" \
@@ -91,11 +66,8 @@ tailscaled \
   >/tmp/tailscaled.log 2>&1 &
 TAILSCALED_PID=$!
 
-# `tailscale up` is idempotent: a persisted state volume re-authenticates without
-# re-redeeming the single-use key.
-# The tag comes from the auth key (the manager mints it tagged), NOT from
-# --advertise-tags: headscale 0.29+ rejects a tagged key that also advertises
-# tags, and Tailscale ignores the flag for tagged keys anyway.
+# `tailscale up` is idempotent, so a persisted state volume re-authenticates without re-redeeming the single-use key.
+# The auth key already carries the tag; --advertise-tags is omitted because headscale 0.29+ rejects a tagged key that also advertises tags.
 extra=""
 [ -n "$TAILSCALE_LOGIN_SERVER" ] && extra="--login-server=$TAILSCALE_LOGIN_SERVER"
 log "joining tailnet as '$TAILSCALE_HOSTNAME'"
@@ -113,18 +85,12 @@ until tailscale --socket="$TS_SOCKET" status --json 2>/dev/null |
 done
 log "tailnet is up"
 
-# --- serve MinIO over the tailnet (https:443 -> localhost:MINIO_PORT) ---------
-# On failure we do NOT die: dying here exits before MinIO starts, so the
-# healthcheck would report a misleading "minio not live". Instead we record the
-# real reason for the healthcheck to surface (the manager reads it as
-# healthReason). HTTPS serve needs a cert, which Tailscale only issues when
-# MagicDNS + HTTPS certificates are enabled on the tailnet.
 log "publishing MinIO via tailscale serve (${TAILSCALE_SERVE_MODE})"
+# Serve failures don't stop the script: exiting here would prevent MinIO from starting, so healthcheck would misreport "minio not live" instead of the real cause.
+# The real reason is written to $SERVE_FAILED for healthcheck.sh to surface; HTTPS serve requires MagicDNS and HTTPS certificates enabled on the tailnet.
 if [ "$TAILSCALE_SERVE_MODE" = "http" ]; then
-  # No cert issuance on this control plane (headscale) — forward raw TCP on
-  # :80 instead of HTTP-proxying: serve's HTTP mode routes by Host header and
-  # 404s bare-IP requests, and http mode's friend endpoint IS the tailnet IP
-  # (works with MagicDNS off). WireGuard is the encryption on this path.
+  # Headscale forwards raw TCP on :80 instead of HTTP-proxying because serve's HTTP mode 404s bare-IP requests and needs Host-header routing; the tailnet IP endpoint still works with MagicDNS off.
+  # WireGuard still encrypts this path even though no cert is issued.
   serve_port="--tcp=80"
   serve_target="tcp://localhost:${MINIO_PORT}"
 else
@@ -132,7 +98,7 @@ else
   serve_target="http://localhost:${MINIO_PORT}"
 fi
 serve_rc=0
-# timeout guards against serve blocking on a cert that will never issue.
+# Timeout guards against serve blocking on a cert that will never issue.
 serve_out=$(timeout 30 tailscale --socket="$TS_SOCKET" serve --bg "$serve_port" \
   "$serve_target" 2>&1) || serve_rc=$?
 if [ "$serve_rc" -ne 0 ]; then
@@ -144,7 +110,6 @@ if [ "$serve_rc" -ne 0 ]; then
 fi
 fi
 
-# --- MinIO -------------------------------------------------------------------
 log "starting minio on :${MINIO_PORT} (drives: ${MINIO_DRIVES})"
 # shellcheck disable=SC2086
 minio server $MINIO_DRIVES --address ":${MINIO_PORT}" &

@@ -1,20 +1,19 @@
 /**
  * Deno lint plugin: `one-service-per-file`.
  *
- * A "service" is a top-level class whose name ends in `Service` or
- * `ServiceImpl` (e.g. FriendServiceImpl, ProvisioningService, AuditServiceImpl).
- * A file may declare at most ONE service class, so each service can be found,
- * imported, tested, and diffed on its own — no "pile of services in one file"
- * (the old DbServices.ts, which stacked an orchestrator on top of three thin
- * query wrappers). This holds even for one-line wrappers: each gets its file.
+ * A service is a top-level class whose name ends in `Service` or
+ * `ServiceImpl`. A file may declare at most one service class, even a
+ * one-line wrapper, so each service can be found, imported, tested, and
+ * diffed on its own, rather than piling up as DbServices.ts once did.
  *
- * The file's kept service is the one whose name matches the filename
- * (`AuditService.ts` → `AuditServiceImpl`), else the first declared; every other
- * service class is flagged and must move to its own file. Non-service classes (a
- * name not ending in Service/ServiceImpl) are ignored, so a service may sit next
- * to a small helper class.
+ * The kept service is the one whose name matches the filename (the `Impl`
+ * suffix is optional in that match), else the first one declared; every
+ * other service class is flagged and must move to its own file. A class
+ * whose name doesn't end in Service/ServiceImpl is ignored, so a service may
+ * sit next to a small helper class.
  *
- * Exemptions: test files and test-helpers may define whatever fakes they need.
+ * Exemptions: test files and test-helpers may define whatever fakes they
+ * need.
  */
 
 const EXEMPT = [".test.", "/test-helpers/"];
@@ -43,7 +42,6 @@ export default {
 
         return {
           "ClassDeclaration"(node: Deno.lint.ClassDeclaration) {
-            // Top-level classes only — `class X` or `export class X`.
             const parent = node.parent?.type;
             if (
               !node.id ||
@@ -57,8 +55,6 @@ export default {
           },
           "Program:exit"() {
             if (services.length < 2) return;
-            // Keep the service named after the file (Impl suffix optional); else
-            // the first declared. Every other service must move to its own file.
             const kept =
               services.find((sv) =>
                 sv.name === base || sv.name.replace(/Impl$/, "") === base

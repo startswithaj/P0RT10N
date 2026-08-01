@@ -1,9 +1,8 @@
-// Shared plumbing for the e2e suites. No app runtime logic here — these
-// helpers speak only the public surfaces the suites are allowed to use.
+// Shared plumbing for the e2e suites. It imports no app code, so the
+// suites exercise only the public surfaces an admin or friend can reach.
 import { retry } from "@std/async";
 import type { FriendBundle } from "@p0rt1on/shared/domain";
 
-// The once-shown provisioning bundle as a friend receives it.
 export type ClaimedBundle = Pick<
   FriendBundle,
   "bucket" | "s3Endpoint" | "s3AccessKeyId" | "s3SecretKey" | "tsAuthKey"
@@ -14,7 +13,6 @@ export const DEFAULT_INSTANCE_IMAGE = "p0rt1on-instance:e2e";
 export const DEFAULT_CLIENT_IMAGE = "p0rt1on-backup-client:e2e";
 export const DEFAULT_HEADSCALE_URL = "http://headscale.p0rt1on.svc:8080";
 
-// True when `bin` is runnable (on PATH). Requires --allow-run.
 function hasBinary(bin: string): boolean {
   try {
     return new Deno.Command(bin, {
@@ -23,12 +21,12 @@ function hasBinary(bin: string): boolean {
       stderr: "null",
     }).outputSync().code === 0;
   } catch {
-    return false; // not installed / not on PATH
+    return false;
   }
 }
 
-// FAIL (never skip) when required env/binaries are absent — running a suite
-// IS the opt-in.
+// Fails rather than skips when required env or binaries are missing,
+// because running a suite is itself the opt-in.
 export function requireConfig(
   opts: { env?: string[]; binaries?: string[]; hint: string },
 ): void {
@@ -40,9 +38,8 @@ export function requireConfig(
   }
 }
 
-// Bounded poll over @std/async retry: resolves with fn's first non-null
-// value; throws on timeout WITH the last error (a swallowed cause makes
-// timeouts undebuggable).
+// Polls until fn returns a value, then throws on timeout with the last
+// error attached, since a swallowed cause would make timeouts undebuggable.
 export async function until<T>(
   what: string,
   fn: () => Promise<T | null | undefined>,
@@ -75,8 +72,6 @@ export async function until<T>(
   }
 }
 
-// The bundle → backup-client env contract (one place, matching
-// backup-client/entrypoint.sh).
 export function friendClientEnv(
   bundle: ClaimedBundle,
   extra: Record<string, string> = {},
@@ -93,14 +88,12 @@ export function friendClientEnv(
   };
 }
 
-// Seed $PAYLOAD as a canary, then hand off to the real entrypoint — the
-// container's exit status is Kopia's.
+// Execs the real entrypoint after seeding the canary file, so the
+// container's exit status comes from Kopia, not the shell.
 export const SEED_THEN_BACKUP =
   'mkdir -p /backup && printf %s "$PAYLOAD" > /backup/canary.txt && ' +
   "exec /entrypoint.sh";
 
-// Cookie-aware tRPC-over-HTTP caller — drives a manager's PUBLIC API surface,
-// never its code. Throws on HTTP or tRPC errors with the message attached.
 export function trpcClient(base: string) {
   const jar = { cookie: "" };
   return async (proc: string, input?: unknown): Promise<unknown> => {
@@ -129,8 +122,8 @@ export function trpcClient(base: string) {
   };
 }
 
-// mc's documented per-alias env mechanism (MC_HOST_<alias>) — credentials in
-// env, never argv. Composed here, not imported: e2e uses public surfaces only.
+// Builds mc's documented per-alias env variable (MC_HOST_<alias>) so
+// credentials travel via env, never argv.
 export function mcHostEnvFor(
   alias: string,
   endpoint: string,

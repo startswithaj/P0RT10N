@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
-# Standalone smoke-test of the p0rt1on instance image: build it, boot ONE
-# container with a throwaway data dir + a real serve auth key, wait for the
-# HEALTHCHECK to report healthy, confirm MinIO is live, then tear it down.
-#
-# Usage:
-#   TAILSCALE_AUTHKEY=tskey-auth-... ./instance/boot-check.sh
-#
-# Mint TAILSCALE_AUTHKEY from the admin console tagged `tag:p0rt1on-serve`. Use an
-# EPHEMERAL key so the test node auto-removes from the tailnet when it stops.
-# Requires: Docker, and a tailnet with MagicDNS + HTTPS certificates enabled
-# (tailscale serve --https=443 fails without them).
+# Mint an EPHEMERAL TAILSCALE_AUTHKEY (tag:p0rt1on-serve) so the test node auto-removes when it stops.
+# Requires a tailnet with MagicDNS + HTTPS certificates enabled; tailscale serve --https=443 fails without them.
 set -euo pipefail
 
 : "${TAILSCALE_AUTHKEY:?set TAILSCALE_AUTHKEY (an ephemeral tag:p0rt1on-serve auth key)}"

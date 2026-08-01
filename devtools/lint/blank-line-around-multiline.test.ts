@@ -28,7 +28,6 @@ Deno.test("puts the blank line ABOVE a leading comment, not below it", () => {
 `;
   const d = Deno.lint.runPlugin(plugin, "f.ts", src);
   assertEquals(d.length, 1);
-  // The fix inserts a newline at the comment's start (above it).
   const fixed = d[0].fix?.[0];
   assertEquals(fixed?.text, "\n");
   assertEquals(
@@ -38,8 +37,6 @@ Deno.test("puts the blank line ABOVE a leading comment, not below it", () => {
 });
 
 Deno.test("leaves adjacent multi-line DATA declarations alone", () => {
-  // createSignal declarations that merely wrap onto several lines are not
-  // functions — a tight group of related state stays tight.
   const src = `function f() {
   const [a, setA] = createSignal<"x" | "y" | "z">(
     "x",
@@ -104,8 +101,6 @@ Deno.test("recognises a function-expression const", () => {
 });
 
 Deno.test("a comment detached by a blank line is not glued to the statement", () => {
-  // The comment sits a blank line above `b`, so it belongs to nobody — the
-  // block already has its separation and nothing is flagged.
   const src = `function f() {
   const a = () => {
     return 1;
@@ -122,8 +117,6 @@ Deno.test("a comment detached by a blank line is not glued to the statement", ()
 });
 
 Deno.test("flags a wall of top-level multi-line style declarations (bundle-styles before)", () => {
-  // The state bundle-styles.ts was in: multi-line `css({…})` exports packed
-  // against their neighbours with no separating blank lines.
   const src = `import { css } from "styled-system/css";
 
 export const section = css({ mb: "6" });
@@ -134,7 +127,8 @@ export const eyebrow = css({
 export const codeWrap = css({ position: "relative" });
 `;
   const d = Deno.lint.runPlugin(plugin, "bundle-styles.ts", src);
-  // section↔eyebrow and eyebrow↔codeWrap both straddle a multi-line block.
+  // Both the section-eyebrow gap and the eyebrow-codeWrap gap straddle a
+  // multi-line block, so each needs its own blank line.
   assertEquals(d.length, 2);
 });
 
@@ -163,7 +157,6 @@ export const merged = css(base, {
 });
 `;
   const d = Deno.lint.runPlugin(plugin, "bundle-styles.ts", src);
-  // base (object-as-const) ↔ merged (css(_, {…})) — both multi-line objects.
   assertEquals(d.length, 1);
 });
 

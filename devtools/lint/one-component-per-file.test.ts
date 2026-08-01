@@ -1,7 +1,6 @@
 import plugin from "./one-component-per-file.ts";
 import { assertEquals } from "jsr:@std/assert";
 
-// A private component padded past the 40-line limit.
 const bigPrivate = `function Big() {\n  return (\n    <div>\n${
   Array.from({ length: 45 }, (_, i) => `      <p>${i}</p>`).join("\n")
 }\n    </div>\n  );\n}\n`;
@@ -22,7 +21,6 @@ Deno.test("flags a second exported component", () => {
   const src =
     `export function Aperture() { return <svg />; }\nexport function Wordmark() { return <span>hi</span>; }\n`;
   const d = Deno.lint.runPlugin(plugin, "Aperture.tsx", src);
-  // Aperture matches the file (main, ok); Wordmark is a second public component.
   assertEquals(d.length, 1);
 });
 

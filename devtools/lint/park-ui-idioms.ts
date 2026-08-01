@@ -1,17 +1,17 @@
 /**
- * Deno lint plugin enforcing the client UI house rules (CODE.md / PRD 6.1):
+ * Deno lint plugin enforcing the client UI house rules from CODE.md.
  *
- * - `no-raw-elements`: JSX must not use raw `<button>` / `<input>` — use the
- *   Park UI `Button` / `Input` (+`Field`) wrappers from `components/ui/`.
- * - `no-hex-colors`: no hex color literals in styles — use semantic tokens
- *   from `panda.config.ts`.
+ * `no-raw-elements` flags a raw `<button>` or `<input>` JSX element in
+ * favour of the Park UI wrappers.
  *
- * Exemptions:
- * - `components/ui/` and `styled-system/` are generated (already excluded
- *   from lint in deno.json, guarded here too).
- * - `theme/` files and `panda.config.ts` are token DEFINITIONS — the one
- *   place hex values legitimately live.
- * - test files may assert on whatever markup they need.
+ * `no-hex-colors` flags a hex colour literal in favour of a semantic token
+ * from `panda.config.ts`.
+ *
+ * Both rules exempt `components/ui/` and `styled-system/` because they are
+ * generated (already excluded from lint in deno.json, guarded here too),
+ * `theme/` files and `panda.config.ts` because they are the one place hex
+ * values legitimately live as token definitions, and test files because
+ * they may assert on whatever markup they need.
  */
 
 const EXEMPT = [
@@ -24,9 +24,8 @@ const EXEMPT = [
 
 const RAW_ELEMENTS = new Set(["button", "input"]);
 
-// A color literal: the whole string is #rgb / #rgba / #rrggbb / #rrggbbaa.
-// Whole-string only, so DOM selectors like "#app" (non-hex letters) and URL
-// fragments never match.
+// The regex matches the whole string only, so a DOM selector like "#app" or
+// embedded hex-like text in a longer string never matches by accident.
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 function exempt(filename: string): boolean {
