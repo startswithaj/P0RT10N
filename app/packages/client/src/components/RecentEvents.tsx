@@ -7,9 +7,6 @@ import { Button } from "./ui/button.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
 import { pollMs, relativeTime } from "./helpers.ts";
 
-// Audit trail on the Status page: every lifecycle event (add, suspend, rotate,
-// offboard, boot-time instance_recovered/instance_data_lost), newest first.
-
 const section = css({ mb: "8" });
 
 const sectionTitle = css({
@@ -40,7 +37,6 @@ const eventDotRed = css({ ...eventDotBase, bg: "fg.error" });
 const eventDotAmber = css({ ...eventDotBase, bg: "warning" });
 const eventDotNeutral = css({ ...eventDotBase, bg: "cyan.9" });
 
-// The portion name leads as the subject (bold); the action follows, muted.
 const eventFriend = css({
   fontWeight: "bold",
   fontSize: "sm",
@@ -65,8 +61,8 @@ const eventDetail = css({
 
 const loadOlder = css({ mt: "3" });
 
-// Human label per audit action. Exhaustive: adding an AuditAction without a
-// label here is a compile error, so the UI can never show a raw code.
+// This record is exhaustive over AuditAction, so adding a new action without
+// a label here is a compile error, and the UI can never show a raw code.
 const ACTION_LABELS: Record<AuditAction, string> = {
   add_friend: "Added",
   resize: "Resized",
@@ -92,7 +88,7 @@ function eventDot(action: AuditAction): string {
   return eventDotNeutral;
 }
 
-// SQLite datetime('now') → "2026-07-22 10:30:00" (UTC, no timezone marker).
+// SQLite's datetime('now') returns UTC with no timezone marker, e.g. "2026-07-22 10:30:00".
 function parseWhen(when: string): number {
   return Date.parse(`${when.replace(" ", "T")}Z`);
 }
@@ -102,15 +98,14 @@ function whenAgo(when: string): string {
   return Number.isNaN(ms) ? when : relativeTime(Date.now() - ms);
 }
 
-/** The exact local timestamp for the hover tooltip. */
 function whenExact(when: string): string {
   const ms = parseWhen(when);
   return Number.isNaN(ms) ? when : new Date(ms).toLocaleString();
 }
 
 export function RecentEvents() {
-  // Grow the window rather than cursor-page: this panel tops out at the
-  // newest 100.
+  // This grows the window instead of using cursor pagination, and tops out
+  // at the newest 100 events.
   const [limit, setLimit] = createSignal(20);
   const events = createQuery(() => ({
     queryKey: ["audit", limit()],

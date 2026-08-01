@@ -18,9 +18,8 @@ type AddInput = MutationInput<"friends.addStart">;
 const GB = 1_000_000_000;
 const gb = (bytes: number): number => Math.round(bytes / GB);
 
-// crypto.randomUUID() only exists in a secure context — it throws over plain
-// http on a LAN IP, a common way to open the demo. getRandomValues works
-// anywhere and these are cosmetic mock IDs, so it's plenty.
+// crypto.randomUUID() requires a secure context and throws when the demo is
+// opened over plain HTTP on a LAN IP, so this uses getRandomValues instead.
 const randomHex = (n: number): string => {
   const bytes = new Uint8Array(Math.ceil(n / 2));
   crypto.getRandomValues(bytes);
@@ -33,8 +32,6 @@ const uid = (n: number): string => randomHex(n);
 
 const nowIso = (): string => new Date().toISOString();
 
-// pure state helpers (each returns a fresh state)
-
 const patchFriend = (
   s: DemoState,
   id: number,
@@ -44,7 +41,7 @@ const patchFriend = (
   friends: s.friends.map((f) => (f.id === id ? fn(f) : f)),
 });
 
-/** Prepend an audit row, consuming one seq id. */
+/** Consumes one id from the shared seq counter for the new audit row. */
 const appendAudit = (
   s: DemoState,
   action: AuditAction,
@@ -67,17 +64,15 @@ const detailAfter = (
   reducer: (s: DemoState) => DemoState,
 ): FriendDetail => toDetail(requireFriend(updateDemoState(reducer), id));
 
-/** offboard returns `{ ok: true } & OffboardResult`; teardown removes the friend. */
+/** The real offboard mutation returns `{ ok: true } & OffboardResult`; this
+ *  demo build just removes the friend, since there is no teardown to report. */
 const okAfter = (reducer: (s: DemoState) => DemoState): { ok: true } => {
   updateDemoState(reducer);
   return { ok: true as const };
 };
 
-// bundle / friend factories
-
-// Mirrors the server's kopia quickstart: join preamble, client-side password
-// warning, then a `repository create`/`connect` block (create adds GOVERNANCE
-// retention + snapshot line). Kept byte-for-byte so the demo reads like production.
+// This mirrors the server's private kopiaQuickstart method byte-for-byte, so
+// the demo reads exactly like production; keep the two in sync if either changes.
 
 const kopiaCreateTail = (retentionDays: number): string[] => [
   `  --retention-mode=GOVERNANCE --retention-period=${retentionDays}d`,
@@ -136,14 +131,14 @@ const joinLinesFor = (
   isInvite: boolean,
   upCommand: string,
 ): string[] => {
-  if (!includeEnrollment) return []; // rotate: node already enrolled
+  if (!includeEnrollment) return [];
   if (isInvite) return inviteJoinLines();
   return authKeyJoinLines(upCommand);
 };
 
 const bundleFor = (f: DemoFriend, includeEnrollment: boolean): FriendBundle => {
   const s3AccessKeyId = f.s3AccessKeyId ?? `AKIA${uid(8).toUpperCase()}`;
-  const s3SecretKey = `demo-secret-${uid(16)}`; // obviously fake
+  const s3SecretKey = `demo-secret-${uid(16)}`;
   const tsKey = `tskey-auth-demo-${uid(10)}`;
   const upCommand = `tailscale up --authkey=${tsKey}`;
   const isInvite = f.enrollmentMode === "invite";
@@ -159,11 +154,11 @@ const bundleFor = (f: DemoFriend, includeEnrollment: boolean): FriendBundle => {
       accessKeyId: s3AccessKeyId,
       secretKey: s3SecretKey,
       retentionDays: f.lockRetentionDays,
-      create: includeEnrollment, // add = create; rotate = connect
+      create: includeEnrollment,
       joinLines: joinLinesFor(includeEnrollment, isInvite, upCommand),
     }),
   };
-  if (!includeEnrollment) return base; // rotateKey: fresh S3 secret only
+  if (!includeEnrollment) return base;
   if (isInvite) {
     return {
       ...base,
@@ -219,8 +214,6 @@ const friendFromInput = (id: number, input: AddInput): DemoFriend => {
     inviteEmail: enroll.mode === "invite" ? enroll.email : undefined,
   };
 };
-
-// the total mutation map
 
 export const mutationHandlers: MutationHandlers = {
   "auth.login": () => ({ ok: true }),
@@ -352,7 +345,9 @@ export const mutationHandlers: MutationHandlers = {
   "friends.rotateKey": (input) => {
     const f = requireFriend(getDemoState(), input.friendId);
     updateDemoState((s) => appendAudit(s, "rotate_key", f.name, null));
-    return bundleFor(f, false); // rotate omits the Tailscale fields
+    // rotateKey omits the Tailscale fields here, matching how the real mutation
+    // only rotates the S3 secret and leaves Tailscale enrollment untouched.
+    return bundleFor(f, false);
   },
 
   "friends.reissueTsKey": (input) => {
@@ -373,7 +368,7 @@ export const mutationHandlers: MutationHandlers = {
         inviteEmailedAt: nowIso(),
       }))
     );
-    // returns void
+    // This mutation returns void in the real API, so there is nothing to return here.
   },
 
   "jobs.claimBundle": (input) => {

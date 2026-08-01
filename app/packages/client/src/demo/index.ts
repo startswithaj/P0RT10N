@@ -8,9 +8,8 @@ import {
 } from "./dispatch.ts";
 
 /**
- * Terminating tRPC link for demo mode. Queries/mutations resolve synchronously
- * from in-memory state; subscriptions push events over timers. Replaces the
- * http(Batch|Subscription) links — every call site is unchanged.
+ * Terminating tRPC link for demo mode: queries and mutations resolve synchronously from in-memory state, and subscriptions push events over timers.
+ * It replaces the real http batch and subscription links, so every call site elsewhere in the app stays unchanged.
  */
 export const demoLink = (): TRPCLink<AppRouter> => () => ({ op }) =>
   observable((observer) => {

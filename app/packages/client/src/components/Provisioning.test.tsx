@@ -3,9 +3,8 @@ import { render, screen } from "@solidjs/testing-library";
 import { PROVISION_STEPS } from "@p0rt1on/shared/steps";
 import { Provisioning, type ProvisionState } from "./Provisioning.tsx";
 
-// Covers the checklist: one row per streamed step; on failure the exact step is
-// marked errored. Icons asserted via lucide classes — circle-check=done,
-// loader-circle=active, circle-x=failed.
+// Covers one checklist row per streamed step, with the failing step marked errored,
+// asserted via lucide icon classes: circle-check=done, loader-circle=active, circle-x=failed.
 describe("Provisioning", () => {
   // Per-test helpers stay INSIDE describe (the no-test-globals lint plugin
   // forbids module-level const/function in *.test.* files).
@@ -21,20 +20,18 @@ describe("Provisioning", () => {
     ));
   };
 
-  // The row div wrapping a given step's label (label span → nearest div).
+  // The row div wraps a given step's label; from the label span it is the nearest ancestor div.
   const rowFor = (label: string) =>
     screen.getByText(label).closest("div") as HTMLElement;
 
   it("renders a checklist row per provision step", () => {
-    // Live on the 4th step (bucket): earlier steps done, this one active.
+    // The state is live on the 4th step (bucket), so the three earlier steps are done and this one is active.
     renderAt({ kind: "pending", step: "bucket" });
 
-    // One row per step key, in order, all labels present.
     PROVISION_STEPS.forEach((s) => {
       expect(screen.getByText(s.label)).toBeInTheDocument();
     });
 
-    // The three earlier steps show the done check; the live step spins.
     expect(document.querySelectorAll(".lucide-circle-check")).toHaveLength(3);
     expect(document.querySelectorAll(".lucide-loader-circle")).toHaveLength(1);
     expect(

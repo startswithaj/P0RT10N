@@ -1,7 +1,7 @@
 import { css } from "styled-system/css";
 
-// Brand wordmark. The letters use `logoInk` (flips cyan↔indigo with the theme);
-// the magenta `spark` digits never flip.
+// The letters use `logoInk`, which flips between cyan and indigo with the theme,
+// while the magenta `spark` digits never flip.
 export function Wordmark(props: { size?: number }) {
   const spark = css({ color: "spark" });
   return (

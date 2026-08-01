@@ -1,4 +1,5 @@
-// Central client test fixtures — shared across component tests (mocks/fixtures live in test-helpers, never inline).
+// Central client test fixtures, shared across component tests. Mocks and fixtures
+// live in test-helpers, never inline per test.
 import type {
   FriendBundle,
   FriendListItem,
@@ -6,7 +7,6 @@ import type {
   StatusView,
 } from "@p0rt1on/shared/domain";
 
-/** A dashboard friend row with sane defaults; override any field per test. */
 export function makeFriend(
   overrides: Partial<FriendListItem> = {},
 ): FriendListItem {
@@ -33,7 +33,8 @@ export function makeFriend(
 }
 
 /**
- * "Shown once" credentials bundle as friends.add returns it; override per test. Defaults include a Tailscale auth-key command (key enroll); omit `tailscaleUpCommand` for invite path.
+ * This is the "shown once" credentials bundle as friends.add returns it. It defaults to a
+ * Tailscale auth-key command for key enroll, so omit `tailscaleUpCommand` to test the invite path.
  */
 export function makeBundle(
   overrides: Partial<FriendBundle> = {},
@@ -51,9 +52,8 @@ export function makeBundle(
 }
 
 /**
- * A Status-page service row (a MinIO instance, node, or host daemon); override
- * any field per test. `state` maps the page's health: up = healthy,
- * provisioning = coming-up/unknown (warning), down = unhealthy.
+ * A Status-page service row (a MinIO instance, node, or host daemon). `state` maps to
+ * page health: up = healthy, provisioning = coming-up/unknown (warning), down = unhealthy.
  */
 export function makeService(
   overrides: Partial<ServiceStatus> = {},
@@ -67,7 +67,6 @@ export function makeService(
   };
 }
 
-/** A Status-page inventory grouped by service kind; override any group per test. */
 export function makeStatusView(
   overrides: Partial<StatusView> = {},
 ): StatusView {

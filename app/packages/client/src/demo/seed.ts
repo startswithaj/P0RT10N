@@ -1,6 +1,3 @@
-// Seed data — a few friends in varied states + a short audit trail. Real domain
-// shapes (reuses the view types); mutated copies flow through state.ts.
-
 import type { DemoFriend, DemoState } from "./state.ts";
 import type {
   ActivityView,
@@ -10,8 +7,8 @@ import type {
 
 const GB = 1_000_000_000;
 
-// Timestamps relative to load time so the demo always looks live ("minutes ago",
-// not a fixed date that drifts stale). Persisted with state; a new tab re-seeds fresh.
+// Timestamps are calculated relative to load time so the seed always looks live
+// rather than aging into a fixed stale date; a new tab re-seeds everything fresh.
 const minsAgo = (m: number): string =>
   new Date(Date.now() - m * 60_000).toISOString();
 
@@ -23,8 +20,6 @@ const usage = (usedGb: number, quotaGb: number): UsageView => ({
   checkedAt: minsAgo(9),
 });
 
-// `lastMins` = minutes since the friend's last request (varies per friend so
-// they don't all read "23 minutes ago"). Ignored when there's no activity.
 const activity = (
   total: number,
   last24: number,
@@ -67,15 +62,15 @@ export const seedFriends = (): DemoFriend[] => [
     id: 1,
     name: "alice",
     usage: usage(5, 100),
-    activity: activity(4800, 96, 41), // light-moderate; last backup 41m ago
+    activity: activity(4800, 96, 41),
   }),
   friend({
     id: 2,
     name: "bob",
     isolationMode: "shared",
     instanceKind: "shared",
-    usage: usage(80, 100), // near-quota → warning bar
-    activity: activity(50_000, 380, 4), // heavy; backing up right now
+    usage: usage(80, 100),
+    activity: activity(50_000, 380, 4),
   }),
   friend({
     id: 3,
@@ -83,7 +78,7 @@ export const seedFriends = (): DemoFriend[] => [
     status: "suspended",
     instanceStatus: "stopped",
     nodeOnline: false,
-    activity: activity(900, 0, 0), // suspended → no recent activity
+    activity: activity(900, 0, 0),
   }),
   friend({
     id: 4,
@@ -93,12 +88,12 @@ export const seedFriends = (): DemoFriend[] => [
     nodeOnline: false,
     s3AccessKeyId: null,
     usage: usage(0, 50),
-    activity: activity(0, 0, 0), // provisioning → not backing up yet
+    activity: activity(0, 0, 0),
   }),
 ];
 
-// Recent-events log, relative to load time (hours→days ago) so it reads as a
-// live trail, not a fixed date that ages.
+// Audit timestamps are also relative to load time, from hours to days ago, so
+// the log reads as a live trail rather than aging into a fixed date.
 const hoursAgo = (h: number): string =>
   new Date(Date.now() - h * 3_600_000).toISOString();
 
@@ -134,7 +129,7 @@ export const seedAudit = (): AuditEntryView[] => [
   { id: 1, when: hoursAgo(76), action: "login", friend: null, detail: null },
 ];
 
-/** Fresh seed state. `seq` starts above every seeded id so new ids never collide. */
+/** seq starts above every seeded id, so new friends and audit rows never collide with seed ids. */
 export const seedState = (): DemoState => ({
   friends: seedFriends(),
   audit: seedAudit(),

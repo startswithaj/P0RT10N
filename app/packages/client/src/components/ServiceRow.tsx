@@ -6,8 +6,6 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel.tsx";
 import { Sparkline } from "./Sparkline.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
 
-// One status list item. Rows with an `instance` expand into a DiagnosticsPanel.
-
 const row = css({
   display: "flex",
   alignItems: "center",
@@ -19,8 +17,8 @@ const row = css({
   rounded: "l2",
   px: "4",
   py: "3",
-  // `sm` (not `lg`): rows are dense list items — texture, not elevation, so
-  // they don't compete with the stat cards above.
+  // This uses `sm` rather than `lg` because rows are dense list items that
+  // want texture, not elevation, so they don't compete with the stat cards above.
   boxShadow: "sm",
 });
 
@@ -40,8 +38,8 @@ const rowRight = css({
   display: "flex",
   alignItems: "center",
   gap: "3",
-  // The sparkline's tooltip trigger is a <button>; its reset cursor overrides
-  // the row's clickable hand. Re-inherit so the whole row keeps one cursor.
+  // The sparkline's tooltip trigger is a button whose reset cursor overrides
+  // the row's clickable hand, so this re-inherits it to keep one cursor.
   "& button": { cursor: "inherit" },
 });
 
@@ -89,7 +87,7 @@ const provText = css({ color: "warning" });
 
 function stateColor(s: SvcState): string {
   if (s === "up") return upText;
-  // `pending` (reaping) is transient like provisioning — not a real "down".
+  // `pending` (reaping) is transient like provisioning, not a real down state.
   if (s === "provisioning" || s === "pending") return provText;
   return downText;
 }
@@ -100,8 +98,6 @@ function stateDot(s: SvcState): string {
   return dotDown;
 }
 
-/** Hover label for the activity sparkline — so a dashed (idle) baseline reads
- * as "no activity" rather than flatlined data. */
 function sparkLabel(data: number[]): string {
   const total = data.reduce((sum, n) => sum + n, 0);
   if (total === 0) return "No activity · last 24h";

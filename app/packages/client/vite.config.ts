@@ -16,15 +16,12 @@ function commitHash(): string {
   }
 }
 
-// Native FS events don't propagate reliably across a Docker bind mount on
-// macOS, so Vite misses edits and serves stale modules. In the container we set
-// P0RT1ON_DEV_POLLING=1 to make chokidar poll instead — reliable, at a small CPU
-// cost. Host dev leaves it unset and keeps fast native events.
+// Docker bind-mount FS events don't propagate reliably on macOS, so Vite
+// misses edits; P0RT1ON_DEV_POLLING=1 makes chokidar poll instead in the container.
 const usePolling = Deno.env.get("P0RT1ON_DEV_POLLING") === "1";
 
-// Solid SPA built by Vite. `@deno/vite-plugin` resolves the deno.json imports
-// (incl. the @p0rt1on/server workspace package for AppRouter types). Panda CSS
-// runs as a PostCSS plugin. During dev, /trpc is proxied to the local API server.
+// `@deno/vite-plugin` resolves the deno.json workspace imports, including
+// `@p0rt1on/server` for AppRouter types.
 export default defineConfig({
   define: { __COMMIT__: JSON.stringify(commitHash()) },
   plugins: [deno(), solid()],
@@ -40,7 +37,6 @@ export default defineConfig({
     port: 5173,
     // Bind all interfaces so the port works when published from the container.
     host: true,
-    // Poll for changes in the container (bind-mount FS events are unreliable).
     watch: usePolling ? { usePolling: true, interval: 250 } : undefined,
     proxy: {
       "/trpc": "http://127.0.0.1:8080",

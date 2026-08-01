@@ -1,10 +1,9 @@
-// Ambient module declarations for Vite's non-code imports so `tsc --noEmit`
-// (the client typecheck gate) can resolve them. Vite handles these at build
-// time; TypeScript needs the shims to not error on the side-effect import.
+// These ambient module declarations let `tsc --noEmit` resolve Vite's non-code imports,
+// which Vite itself handles at build time but TypeScript can't without a shim.
 declare module "*.css";
 
-// The demo-build flag; Vite statically replaces `import.meta.env.VITE_DEMO_MODE`.
-// Do NOT alias `import.meta` elsewhere — that breaks the static replacement.
+// This is the demo-build flag: Vite statically replaces `import.meta.env.VITE_DEMO_MODE`.
+// Do not alias `import.meta` elsewhere, since that breaks the static replacement.
 interface ImportMetaEnv {
   readonly VITE_DEMO_MODE?: string;
 }

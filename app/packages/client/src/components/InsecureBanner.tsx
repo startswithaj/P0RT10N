@@ -21,11 +21,8 @@ const banner = css({
 
 const icon = css({ color: "warning", flexShrink: 0 });
 
-// Shows when: no password is set AND you reached this page from another machine
-// (your browser's address isn't localhost). That URL check is what keeps it
-// accurate even in a container, where the app can't see its own exposure — the
-// boot log carries the same warning for whoever launched it. Dismissal is
-// remembered in localStorage (just a flag — no secret).
+// This is shown when no password is set and the page was reached from a non-localhost
+// address, since a containerized app can't otherwise tell it's exposed; dismissal is a non-secret localStorage flag.
 export function InsecureBanner(props: { noPassword: () => boolean }) {
   const fromNetwork = !LOCAL_HOSTS.includes(globalThis.location.hostname);
   const [dismissed, setDismissed] = createSignal(

@@ -1,8 +1,5 @@
-// The demo's in-memory "database". A canonical DemoFriend holds the union of the
-// FriendListItem and FriendDetail fields; the two views are pure projections of
-// it. Persisted to sessionStorage (survives reload, resets on tab close). All
-// module-load access is lazy so the graph is side-effect-free (→ tree-shaken out
-// of the real build, and importable under Deno for the coverage test).
+// DemoFriend holds every field that FriendListItem or FriendDetail needs; toListItem and toDetail below are pure projections and must stay in sync with those shared types.
+// State loads lazily on first access, keeping this module side-effect-free so it tree-shakes out of the production build and stays importable under Deno for the coverage test.
 
 import type {
   ActivityView,
@@ -21,7 +18,6 @@ import type {
 } from "@p0rt1on/shared/domain";
 import { seedState } from "./seed.ts";
 
-/** One friend, holding every field either view needs. */
 export interface DemoFriend {
   id: number;
   name: string;
@@ -33,7 +29,6 @@ export interface DemoFriend {
   activity: ActivityView;
   enrollmentMode: EnrollmentMode;
   inviteStatus: InviteStatus | null;
-  // detail-only facts
   bucket: string;
   s3AccessKeyId: string | null;
   tsNodeTag: string;
@@ -41,21 +36,19 @@ export interface DemoFriend {
   instanceKind: InstanceKind;
   instanceStatus: InstanceStatus;
   nodeOnline: boolean;
-  // invite detail (invite enrollment only)
   inviteEmail?: string;
   inviteUrl?: string;
   inviteEmailedAt?: string;
 }
 
-/** A background add/offboard job the progress subscription drives. */
 export interface DemoJob {
   id: string;
   kind: "add" | "offboard";
-  /** add: the pending friend to commit on done; offboard: the target to remove. */
+  /** For an add job this is the pending friend to commit once it finishes; for an offboard job it is the target to remove. */
   friend: DemoFriend;
-  /** add: the once-shown bundle, nulled on claim. */
+  /** For an add job this is the once-shown bundle; it becomes null once the client claims it. */
   bundle: FriendBundle | null;
-  /** step key to fail on (the `fail-smoke` demo), or null for the happy path. */
+  /** The step key to fail on, used by the fail-smoke demo scenario; null follows the happy path. */
   failStep: string | null;
   committed: boolean;
 }
@@ -64,13 +57,13 @@ export interface DemoState {
   friends: DemoFriend[];
   audit: AuditEntryView[];
   jobs: Record<string, DemoJob>;
-  /** Monotonic id source for new friends + audit rows. */
+  /** seq is a single monotonic id counter shared by new friends and audit rows. */
   seq: number;
 }
 
 const KEY = "p0rt1on-demo-state";
-// Bump when the seed shape/content changes so a stale persisted blob (from a
-// previous demo build) is discarded and re-seeded rather than shown.
+// Bump this whenever the seed shape or content changes, so a stale persisted
+// blob from a previous demo build is discarded and re-seeded instead of shown.
 const SCHEMA_VERSION = 3;
 type Persisted = Pick<DemoState, "friends" | "audit" | "seq"> & { v: number };
 
@@ -109,13 +102,15 @@ const save = (s: DemoState): void => {
   }
 };
 
-// Lazy session singleton via a const holder (no `let`, no lint suppression).
+// The store is a const object holder acting as a mutable singleton, avoiding a
+// `let` binding since lint disallows it and this codebase never suppresses lint.
 const store: { current: DemoState | null } = { current: null };
 const ensure = (): DemoState => (store.current ??= load() ?? seedState());
 
 export const getDemoState = (): DemoState => ensure();
 
-/** Apply a pure update (fn returns a fresh state — never mutates its arg), persist, return it. */
+/** Applies a pure update function that must return a fresh state without
+ *  mutating its argument, then persists and returns the result. */
 export const updateDemoState = (fn: (s: DemoState) => DemoState): DemoState => {
   const next = fn(ensure());
   store.current = next;
@@ -123,7 +118,6 @@ export const updateDemoState = (fn: (s: DemoState) => DemoState): DemoState => {
   return next;
 };
 
-/** Test-only: drop the singleton so the next access re-seeds. */
 export const resetDemoState = (): void => {
   store.current = null;
 };

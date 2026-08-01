@@ -4,7 +4,6 @@ import { Login } from "./Login.tsx";
 import { toastError } from "./action-dialog-shared.ts";
 import { queryClient, trpc } from "../trpc.ts";
 
-/** Auth gate: session state + the login/logout transitions the App renders on. */
 export function createAuthGate() {
   const auth = createQuery(() => ({
     queryKey: ["auth"],
@@ -15,8 +14,8 @@ export function createAuthGate() {
   return {
     ready: () => auth.data !== undefined,
     enabled: () => auth.data?.enabled ?? false,
-    // true only once loaded AND no password is configured (undefined while
-    // loading → false, so the insecure banner never flashes on first paint).
+    // This is true only once auth has loaded and no password is configured; while
+    // loading it stays false, so the insecure banner never flashes on first paint.
     noPassword: () => auth.data?.enabled === false,
     locked: () => {
       const d = auth.data;
@@ -37,8 +36,8 @@ export function createAuthGate() {
   };
 }
 
-/** Renders the login screen when locked, the app once authenticated (or auth
- * off). Nothing until the status query resolves, to avoid a dashboard flash. */
+/** Renders nothing until the status query resolves, so the dashboard never flashes
+ * before the auth state is known. */
 export function AuthGate(
   props: { gate: ReturnType<typeof createAuthGate>; children: JSX.Element },
 ) {

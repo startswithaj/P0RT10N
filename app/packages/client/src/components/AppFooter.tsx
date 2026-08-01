@@ -32,7 +32,7 @@ const footerNote = css({
 const dotUp = css({ w: "2", h: "2", rounded: "full", bg: "cyan.9" });
 const dotDown = css({ w: "2", h: "2", rounded: "full", bg: "fg.error" });
 
-// Offboarding: a pulsing warning dot — teardown in progress, not a fault.
+// Offboarding uses a pulsing warning dot because teardown is in progress, not a fault.
 const dotOffboarding = css({
   w: "2",
   h: "2",
@@ -41,9 +41,8 @@ const dotOffboarding = css({
   animation: "pulse 1.4s ease-in-out infinite",
 });
 
-// The footer health chip is a link to the Status page (which shows the issue).
-// Stays on variant=plain (it wants px:1, which `link` forces to 0!) — so all
-// of plain's gray washes are neutralised here, like segBtn.
+// This stays on variant=plain rather than link because plain allows px:1 while
+// link forces it to 0, so plain's gray hover and active washes are neutralized here.
 const footerStatusBtn = css({
   h: "auto",
   px: "1",
@@ -58,7 +57,6 @@ const footerStatusBtn = css({
   _on: { bg: "transparent" },
 });
 
-// The commit chip: git icon + short hash, aligned with the muted note text.
 const version = css({ display: "inline-flex", alignItems: "center", gap: "1" });
 
 function healthLabel(h: SystemHealth): string {

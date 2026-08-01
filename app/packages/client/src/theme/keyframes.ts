@@ -1,7 +1,6 @@
 import { defineKeyframes } from "@pandacss/dev";
 
 export const keyframes = defineKeyframes({
-  // collapse
   "expand-height": {
     from: { height: "0" },
     to: { height: "var(--height)" },
@@ -31,7 +30,6 @@ export const keyframes = defineKeyframes({
   "border-spin": {
     to: { "--p0-angle": "360deg" },
   },
-  // fade
   "fade-in": {
     from: { opacity: "0" },
     to: { opacity: "1" },
@@ -40,7 +38,6 @@ export const keyframes = defineKeyframes({
     from: { opacity: "1" },
     to: { opacity: "0" },
   },
-  // slide from (full)
   "slide-from-left-full": {
     from: { translate: "-100% 0" },
     to: { translate: "0 0" },
@@ -57,7 +54,6 @@ export const keyframes = defineKeyframes({
     from: { translate: "0 100%" },
     to: { translate: "0 0" },
   },
-  // slide to (full)
   "slide-to-left-full": {
     from: { translate: "0 0" },
     to: { translate: "-100% 0" },
@@ -74,7 +70,6 @@ export const keyframes = defineKeyframes({
     from: { translate: "0 0" },
     to: { translate: "0 100%" },
   },
-  // slide from
   "slide-from-top": {
     "0%": { translate: "0 -0.5rem" },
     to: { translate: "0" },
@@ -91,7 +86,6 @@ export const keyframes = defineKeyframes({
     "0%": { translate: "0.5rem 0" },
     to: { translate: "0" },
   },
-  // slide to
   "slide-to-top": {
     "0%": { translate: "0" },
     to: { translate: "0 -0.5rem" },
@@ -108,7 +102,6 @@ export const keyframes = defineKeyframes({
     "0%": { translate: "0" },
     to: { translate: "0.5rem 0" },
   },
-  // scale
   "scale-in": {
     from: { scale: "0.95" },
     to: { scale: "1" },

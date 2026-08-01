@@ -56,12 +56,9 @@ export const slate = defineSemanticTokens.colors({
   },
   surface: {
     bg: {
-      // BRAND OVERRIDE: dark surfaces (cards, panels, menus) are the synthwave
-      // indigo #1F1640, not Radix near-black gray.1 (stock value). The page
-      // canvas behind them is #160F2E (see the `canvas` token in panda.config).
-      // hover/active must LIGHTEN from that indigo — the stock gray.2/gray.3
-      // dark values are near-black, i.e. DARKER than the surface, which made
-      // menu-item highlights invisible.
+      // BRAND OVERRIDE: dark surfaces use synthwave indigo #1F1640, not Radix's
+      // near-black gray.1; hover/active must lighten from it, since the stock
+      // darker gray.2/gray.3 values made menu-item highlights invisible.
       DEFAULT: { value: { _light: "{colors.white}", _dark: "#1F1640" } },
       hover: { value: { _light: "{colors.gray.2}", _dark: "#2A2153" } },
       active: {

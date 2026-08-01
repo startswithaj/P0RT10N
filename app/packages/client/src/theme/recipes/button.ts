@@ -71,9 +71,8 @@ export const button = defineRecipe({
         },
       },
       outline: {
-        // Pin gray: outline buttons are neutral chrome (Cancel, back arrow,
-        // unselected quota pills), not accent — without the pin they inherit
-        // the global cyan palette.
+        // Pins gray — outline buttons are neutral chrome, not accent; without
+        // the pin they'd inherit the global cyan colorPalette.
         colorPalette: "gray",
         borderWidth: "1px",
         borderColor: "colorPalette.outline.border",
@@ -89,7 +88,7 @@ export const button = defineRecipe({
         },
       },
       plain: {
-        // Pin gray (neutral, like the ghost variant this replaces).
+        // Pins gray, same as `outline` — plain buttons are neutral chrome too.
         colorPalette: "gray",
         color: "colorPalette.plain.fg",
         _hover: {
@@ -103,9 +102,8 @@ export const button = defineRecipe({
         },
       },
       link: {
-        // Text-link button. The `!` marks override the size variant's
-        // h/minW/px; no background in any state, so call sites need not
-        // neutralise a hover wash.
+        // The `!` marks override the size variant's h/minW/px so link buttons
+        // aren't boxed; no variant paints a background, so no hover wash to neutralise.
         verticalAlign: "baseline",
         height: "auto!",
         minW: "0!",

@@ -8,9 +8,6 @@ import type { Svc } from "./status-types.ts";
 import { ServiceRow } from "./ServiceRow.tsx";
 import { RecentEvents } from "./RecentEvents.tsx";
 
-// System status, polled live from `status.get`. Instance rows expand into live
-// diagnostics (`status.diagnose`): state, health reason, exit, recent logs.
-
 type View = { minio: Svc[]; tailscale: Svc[]; host: Svc[] };
 
 const statGrid = css({
@@ -47,7 +44,6 @@ const statValue = css({
   lineHeight: "1.1",
 });
 
-// Muted suffix: Space Mono Regular at 2xl — lighter/rounder than the bold value is the look.
 const statValueMuted = css({ color: "fg.muted", fontWeight: "normal" });
 
 const section = css({ mb: "8" });
@@ -125,7 +121,7 @@ export function StatusPage() {
   const view = (): View =>
     status.data ?? { minio: [], tailscale: [], host: [] };
 
-  // Open diagnostics accordion (one at a time). Held at page scope so the 5s poll re-render can't snap it shut.
+  // This accordion state is held at page scope, not per-row, so the 5s poll's re-render can't snap it shut.
   const [expanded, setExpanded] = createSignal<string | null>(null);
 
   return (

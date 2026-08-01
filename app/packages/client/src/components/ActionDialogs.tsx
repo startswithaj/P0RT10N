@@ -9,9 +9,8 @@ import { OffboardDialog } from "./OffboardDialog.tsx";
 import type { AddBundle, Pending } from "./action-dialog-shared.ts";
 
 /**
- * Routes the pending burger-menu action to its own focused dialog. Each dialog
- * is mounted only while its action is active, so its state resets naturally on
- * every open — there's no shared state machine.
+ * Each dialog is mounted only while its action is active, so its state resets
+ * naturally every time it opens instead of needing a shared state machine.
  */
 export function ActionDialogs(props: {
   pending: Pending | null;

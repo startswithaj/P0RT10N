@@ -1,16 +1,13 @@
-// Shared status-service shape used by StatusPage and its ServiceRow.
-
-// `pending` = teardown-in-progress (reaping): the container is going away on
-// purpose, so a failing health probe is expected — shown as transient, not down.
-// `lost` = down AND the data is gone: the backups are unrecoverable.
+// `pending` means teardown is already in progress, so a failing health probe there
+// is expected rather than a real outage. `lost` means the service is down and its data is gone for good.
 export type SvcState = "up" | "provisioning" | "pending" | "down" | "lost";
 export type Svc = {
   name: string;
   detail: string;
   state: SvcState;
   instance?: string;
-  /** Last-24h hourly request counts (oldest→newest) driving the row sparkline;
-   * present on MinIO rows only (empty ⇒ flat baseline). */
+  /** Last 24h of hourly request counts, ordered oldest to newest, for the row's
+   * sparkline. Only present on MinIO rows; an empty array renders a flat baseline. */
   spark?: number[];
 };
 

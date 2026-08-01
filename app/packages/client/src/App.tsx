@@ -17,16 +17,11 @@ import { Toaster } from "./components/ui/toast.tsx";
 
 type AddBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
 
-/** Live state of the add job (observed via jobs.progress), driving the provisioning screen. */
 type AddState =
   | { kind: "pending"; step: ProvisionStepKey | null }
   | { kind: "done"; bundle: AddBundle }
   | { kind: "error"; message: string; step: ProvisionStepKey | null };
 
-// The "Add portion" flow: form → provisioning (friends.addStart job observed
-// via jobs.progress, bundle claimed once via jobs.claimBundle) → bundle.
-// Exported so the add-flow state machine (esp. the shown-once bundle clearing on
-// finishAdd) can be unit-tested without driving the whole App render tree.
 export function createAddFlow() {
   const [adding, setAdding] = createSignal(false);
   const [phase, setPhase] = createSignal<"form" | "provisioning" | "bundle">(
@@ -46,10 +41,8 @@ export function createAddFlow() {
   const finishAdd = () => {
     setAdding(false);
     setPhase("form");
-    // Zero-knowledge: the bundle is shown once. Drop the completed add's state so
-    // the S3 secret / Tailscale key held in `addState` isn't retained in memory
-    // after the hand-off screen closes. `pending` (name/quota — no secret) is
-    // cleared alongside it.
+    // Zero-knowledge: the bundle is shown once, so addState (holding the S3
+    // secret and Tailscale key) is cleared here rather than kept in memory.
     setAddState({ kind: "pending", step: null });
     setPending(null);
     invalidate();
@@ -62,16 +55,16 @@ export function createAddFlow() {
       step: prev.kind === "pending" ? prev.step : null,
     }));
 
-  // Claim the once-shown bundle exactly once (server wipes it on handover).
-  // Direct mutate — bundle secrets never enter the TanStack Query cache.
+  // The bundle is claimed with a direct mutate call, not a query, so bundle
+  // secrets never enter the TanStack Query cache.
   const claimBundle = (jobId: string) => {
     trpc.jobs.claimBundle.mutate({ jobId })
       .then((bundle) => setAddState({ kind: "done", bundle }))
       .catch((err) => fail(String(err)));
   };
 
-  // Observe the background job: replayed + live step events; failures arrive
-  // as `error` DATA events, so a reconnect can never re-run provisioning.
+  // Failures arrive as error data events rather than exceptions, so a
+  // reconnect can never re-run provisioning.
   const observeAdd = (jobId: string) => {
     trpc.jobs.progress.subscribe({ jobId }, {
       onData: (ev) => {
@@ -91,9 +84,6 @@ export function createAddFlow() {
     });
   };
 
-  // Start provisioning as a background job, then observe its progress; the
-  // screen reflects each step as the server reaches it and freezes on the
-  // exact step that fails.
   const startAdd = (input: NewPortion) => {
     setPending(input);
     setAddState({ kind: "pending", step: null });
@@ -127,7 +117,6 @@ export function createAddFlow() {
   };
 }
 
-/** Aggregate usage figures for the dashboard stat cards. */
 function createTotals(rows: () => FriendRow[]) {
   const totalUsed = () => rows().reduce((s, f) => s + f.usage.bytesUsed, 0);
   const totalQuota = () => rows().reduce((s, f) => s + f.usage.quotaBytes, 0);
@@ -140,21 +129,18 @@ function createTotals(rows: () => FriendRow[]) {
   return { totalUsed, totalQuota, overallPct };
 }
 
-// Footer health: the same query/key the Status page uses (deduped by TanStack
-// when both are mounted), so "Unhealthy" always agrees with what that page
-// shows. A failed fetch (backend down) also reads as unhealthy.
+// Shares the Status page's exact query key so TanStack dedupes the fetch and
+// "Unhealthy" here always agrees with what that page shows.
 function createStatusQuery(active: () => boolean) {
   return createQuery(() => ({
     queryKey: ["status"],
     queryFn: () => trpc.status.get.query(),
     refetchInterval: pollMs(5000),
     retry: false,
-    enabled: active(), // don't poll while gated to the login screen
+    enabled: active(),
   }));
 }
 
-/** Boot-preflight report — banners + gates portion creation on the tailnet
- * prerequisites. Polled slowly; an admin fixes these in the Tailscale console. */
 function createSystemHealthQuery(active: () => boolean) {
   return createQuery(() => ({
     queryKey: ["systemHealth"],
@@ -165,7 +151,6 @@ function createSystemHealthQuery(active: () => boolean) {
   }));
 }
 
-/** Static manager capabilities (e.g. whether email invites are wired). */
 function createCapabilitiesQuery(active: () => boolean) {
   return createQuery(() => ({
     queryKey: ["capabilities"],
@@ -174,7 +159,6 @@ function createCapabilitiesQuery(active: () => boolean) {
   }));
 }
 
-/** The dashboard friends list; only fetched once auth resolved and unlocked. */
 function createFriendsQuery(active: () => boolean) {
   return createQuery(() => ({
     queryKey: ["friends"],
@@ -183,8 +167,6 @@ function createFriendsQuery(active: () => boolean) {
   }));
 }
 
-/** All dashboard-scoped queries + derived state, so App stays orchestration.
- * A blocked preflight check disables "Add portion" (the banner explains why). */
 function createDashboardData(active: () => boolean) {
   const friends = createFriendsQuery(active);
   const capabilities = createCapabilitiesQuery(active);
@@ -198,8 +180,8 @@ function createDashboardData(active: () => boolean) {
       ? undefined
       : "Resolve the system-health issues above before adding a portion.";
 
-  // Re-run the boot preflight on demand (after fixing the Tailscale console),
-  // writing the fresh result straight into the cache so the banner updates.
+  // Writes the fresh result straight into the query cache, rather than
+  // invalidating, so the banner updates immediately.
   const recheckHealth = () =>
     trpc.status.recheckHealth.mutate().then((h) => {
       queryClient.setQueryData(["systemHealth"], h);
@@ -218,7 +200,6 @@ function createDashboardData(active: () => boolean) {
   };
 }
 
-/** Tab state; returning to Portions refetches the friends list. */
 function createViewState() {
   const [view, setView] = createSignal<"portions" | "status">("portions");
   return {
@@ -243,14 +224,14 @@ export function App() {
     doneBundle,
   } = createAddFlow();
   const { view, setView } = createViewState();
-  // A credentials bundle to show full-screen (rotate hands one back out-of-band
-  // of the add flow). App renders it over everything when set.
+  // Rotate hands back a credentials bundle out-of-band of the add flow; App
+  // renders it full-screen over everything when set.
   const [shownBundle, setShownBundle] = createSignal<AddBundle | null>(null);
-  // The burger-menu action awaiting confirmation in the ActionDialog.
   const [pendingAction, setPendingAction] = createSignal<Pending | null>(null);
 
   const gate = createAuthGate();
-  // Fetch dashboard data only once auth resolved and unlocked — no stray 401s.
+  // Dashboard data is only fetched once auth resolves and unlocks, avoiding
+  // stray 401s before then.
   const d = createDashboardData(() => gate.ready() && !gate.locked());
   return (
     <AuthGate gate={gate}>

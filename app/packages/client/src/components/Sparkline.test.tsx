@@ -13,8 +13,8 @@ describe("Sparkline", () => {
   };
 
   it("draws a dashed flat line on the mid baseline when the series is all zeros", () => {
-    // Idle instance: no shape to plot, so it sits flat on the mid baseline
-    // y = H/2 (9) — level with the row's status dot — dashed to read as "no data".
+    // An idle instance has no shape to plot, so it sits flat on the mid
+    // baseline at y = H/2 (9), level with the row's status dot, dashed to signal no data.
     const { points, dashed } = lineOf([0, 0, 0, 0]);
     expect(points).toBe("0,9 40,9");
     expect(dashed).toBe(true);
@@ -26,8 +26,8 @@ describe("Sparkline", () => {
   });
 
   it("anchors active volume to the bottom, solid line", () => {
-    // Two points [0, 8]: zero sits on the bottom baseline y=17, the peak reaches
-    // the 1px top inset y=1 — taller bars read as busier (volume, not variation).
+    // With two points [0, 8], zero sits on the bottom baseline y=17 and the peak
+    // reaches the 1px top inset y=1, so taller bars read as busier volume, not variation.
     const { points, dashed } = lineOf([0, 8]);
     expect(points).toBe("0.0,17.0 40.0,1.0");
     expect(dashed).toBe(false);

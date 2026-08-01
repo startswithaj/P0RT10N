@@ -37,7 +37,6 @@ describe("StatusPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
-    // Recent-events panel: default to empty; individual tests override.
     asMock(trpc.audit.list.query).mockResolvedValue([]);
   });
 
@@ -95,9 +94,9 @@ describe("StatusPage", () => {
       // Await the async audit content before the synchronous assertions.
       expect(await screen.findByText("Data lost")).toBeInTheDocument();
       expect(screen.getByText("Recent events")).toBeInTheDocument();
-      expect(screen.getByText("Offboarded")).toBeInTheDocument(); // humanized
+      expect(screen.getByText("Offboarded")).toBeInTheDocument();
       expect(screen.getByText("carol")).toBeInTheDocument();
-      expect(screen.getByText("system")).toBeInTheDocument(); // null friend
+      expect(screen.getByText("system")).toBeInTheDocument();
     });
 
     it("shows an empty note when the log has no entries", async () => {

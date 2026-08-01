@@ -1,6 +1,5 @@
 import { css } from "styled-system/css";
 
-// Brand tokens: cyan accent, spark magenta, indigo canvas.
 export const page = css({
   minH: "100dvh",
   bg: "bg.canvas",
@@ -18,7 +17,7 @@ export const nav = css({
 });
 
 export const lockup = css({ display: "flex", alignItems: "center", gap: "3" });
-// Plain text nav tabs. Active state via [data-active] to reliably override base colour.
+// [data-active] is used here instead of a conditional class so it reliably overrides the base color.
 export const tabs = css({ display: "flex", gap: "5" });
 
 // Sizing/bg from the button recipe's `link` variant; this class only sets nav colours.
@@ -32,7 +31,6 @@ export const tabLink = css({
 
 export const actions = css({ display: "flex", gap: "6", alignItems: "center" });
 
-// Segmented Dark | Light toggle (matches the website App.tsx header).
 export const segWrap = css({
   display: "inline-flex",
   borderWidth: "1px",
@@ -41,7 +39,8 @@ export const segWrap = css({
   p: "0.5",
 });
 
-// On Park Button (plain variant, needs px padding). Compact pill: overrides md height, neutralises plain's gray washes in all states; active pill re-pins cyan fill.
+// The plain Button variant applies gray washes on hover/active by default;
+// each state below re-pins its own color to neutralize that.
 export const segBtn = css({
   fontFamily: "body",
   fontSize: "xs",
@@ -64,7 +63,7 @@ export const segBtn = css({
   },
 });
 
-// Primary CTA: brand magenta spark + rounded-full pill + hover lift. _hover pins bg:spark so the recipe's cyan hover can't show.
+// _hover pins bg:spark so the recipe's cyan hover can't show.
 export const sparkBtn = css({
   rounded: "full",
   bg: "spark",
@@ -103,7 +102,6 @@ export const statTop = css({
   mb: "3",
 });
 
-// Space Mono regular weight — bold reads too heavy at 2xl.
 export const statValue = css({
   fontSize: "2xl",
   fontWeight: "normal",
@@ -133,7 +131,6 @@ export const cardGrid = css({
   gap: "4",
 });
 
-// Shown in place of cardGrid when the friends list loads empty.
 export const emptyState = css({
   display: "flex",
   flexDirection: "column",
@@ -242,7 +239,6 @@ export const menuItem = css({
 
 export const dangerItem = css({ color: "fg.error" });
 
-// Outline pills (a cyan fill reads murky on the dark canvas — outline is clean).
 export const badgeActive = css({ color: "cyan.11", borderColor: "cyan.8" });
 
 export const badgeFailed = css({
@@ -252,7 +248,6 @@ export const badgeFailed = css({
 
 export const badgeNeutral = css({ color: "fg.muted" });
 
-// Shared by AddPortion's ModePicker and EnrollPicker (radio-card grids).
 export const hint = css({ fontSize: "xs", color: "fg.muted" });
 
 export const modeGrid = css({
@@ -261,15 +256,12 @@ export const modeGrid = css({
   gap: "3",
 });
 
-// Each RadioGroup.Item as a selectable card; `_checked` marks the selected option (border + surface).
 export const modeCard = css({
   textAlign: "left",
   p: "4",
   rounded: "l2",
   borderWidth: "1px",
   borderColor: "border.default",
-  // Unselected cards recede: cool near-white in light (NOT the cream canvas),
-  // page-indigo in dark. Selected pops to the card surface via _checked.
   bg: { base: "gray.2", _dark: "bg.canvas" },
   cursor: "pointer",
   display: "flex",
@@ -289,5 +281,4 @@ export const modeHead = css({
 });
 
 export const modeIcon = css({ color: "cyan.9" });
-// The radio indicator sits at the far right of the card header.
 export const radioDot = css({ ml: "auto", flexShrink: "0" });

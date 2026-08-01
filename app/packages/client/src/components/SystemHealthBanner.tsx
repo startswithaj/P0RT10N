@@ -35,7 +35,7 @@ const header = css({
 
 const link = css({ color: "warning", textDecoration: "underline" });
 
-// Boot-preflight banner: unverified tailnet prereqs (MagicDNS, serve tag, HTTPS certs). Not dismissible — a `blocked` check also disables "Add portion". Header re-check button re-probes after a fix.
+// This banner isn't dismissible, and a `blocked` check also disables the Add portion button elsewhere.
 export function SystemHealthBanner(
   props: {
     report: () => SystemHealth | undefined;

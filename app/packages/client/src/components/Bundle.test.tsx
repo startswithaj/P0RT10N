@@ -4,10 +4,8 @@ import { Bundle } from "./Bundle.tsx";
 import { toaster } from "./ui/toast.tsx";
 import { makeBundle } from "../test-helpers/fixtures.ts";
 
-// Covers the shown-once bundle hand-off: the S3 secret must stay masked until
-// the user reveals it, and the Tailscale section must render the up-command
-// only when an auth key is present (key enroll), swapping to the invite note
-// otherwise.
+// This suite covers the shown-once bundle hand-off: the S3 secret must stay masked
+// until revealed, and the Tailscale section shows the up-command only for key enroll, an invite note otherwise.
 describe("Bundle", () => {
   // Per-test helpers stay INSIDE describe (the no-test-globals lint plugin
   // forbids module-level const/function in *.test.* files).
@@ -30,7 +28,6 @@ describe("Bundle", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
 
-      // Reveal flips the Show; raw secret now on screen.
       expect(await screen.findByText(bundle.s3SecretKey)).toBeInTheDocument();
     });
   });
@@ -64,21 +61,18 @@ describe("Bundle", () => {
 
       expect(writeText).toHaveBeenCalledTimes(1);
       const text = writeText.mock.calls[0][0] as unknown as string;
-      // S3 credentials…
       expect(text).toContain(bundle.s3AccessKeyId);
       expect(text).toContain(bundle.s3SecretKey);
       expect(text).toContain(bundle.s3Endpoint);
       expect(text).toContain(bundle.bucket);
-      // …plus the Tailscale command, ACL lines, and Kopia quickstart.
       expect(text).toContain(bundle.tailscaleUpCommand as string);
       expect(text).toContain(bundle.manualAclInstructions as string);
       expect(text).toContain(bundle.kopiaQuickstart);
       vi.unstubAllGlobals();
     });
 
-    // A denied clipboard permission must not fail silently — the "Copied"
-    // indicator only appears on success, so without the toast the button
-    // looks dead.
+    // A denied clipboard permission must not fail silently. The "Copied" indicator only
+    // appears on success, so without the toast the button would look dead.
     it("toasts when the clipboard write is rejected", async () => {
       const writeText = vi.fn(() => Promise.reject(new Error("denied")));
       vi.stubGlobal("navigator", { clipboard: { writeText } });
@@ -100,7 +94,6 @@ describe("Bundle", () => {
     it("renders the up-command when an auth key is present (key enroll)", () => {
       const bundle = renderBundle({}, "key");
 
-      // Tailscale eyebrow + up-command block both render.
       expect(screen.getByText("Tailscale")).toBeInTheDocument();
       expect(
         screen.getByText(bundle.tailscaleUpCommand as string),
@@ -145,7 +138,7 @@ describe("Bundle", () => {
       expect(screen.getByText(/invite manually/i)).toBeInTheDocument();
       expect(screen.getByText(/Open the Tailscale users console/i))
         .toBeInTheDocument();
-      // The header must NOT claim an invite was created — none was sent.
+      // The header must not claim an invite was created, since none was sent.
       expect(screen.getByText(/No invite was sent automatically/i))
         .toBeInTheDocument();
       expect(screen.queryByText(/Invite created/i)).toBeNull();

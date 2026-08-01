@@ -6,8 +6,8 @@ import { queryHandlers } from "./handlers/queries.ts";
 import { mutationHandlers } from "./handlers/mutations.ts";
 import { subscriptionHandlers } from "./handlers/subscriptions.ts";
 
-// The wire delivers an untyped string path; per-path typing lives in the total
-// handler maps. Widen to one uniform signature at this dynamic boundary.
+// The wire delivers only an untyped string path; the real per-path typing lives
+// in the total handler maps, so this widens to one uniform signature here.
 const queryFns = queryHandlers as unknown as Record<
   string,
   (input: unknown, state: DemoState) => unknown
@@ -19,7 +19,6 @@ export const resolveDemoQuery = (path: string, input: unknown): unknown => {
   return handler(input, getDemoState());
 };
 
-// Untyped wire path; per-path typing lives in the total map. Widen at the dispatch boundary.
 const mutationFns = mutationHandlers as unknown as Record<
   string,
   (input: unknown) => unknown

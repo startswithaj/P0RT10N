@@ -50,7 +50,7 @@ describe("demo state", () => {
 
   it("reloads persisted state after the singleton is dropped (reload)", () => {
     updateDemoState((s) => ({ ...s, friends: s.friends.slice(0, 1) }));
-    resetDemoState(); // storage kept — simulates a page reload
+    resetDemoState(); // sessionStorage is kept intact, which simulates a page reload.
     expect(getDemoState().friends).toHaveLength(1);
   });
 

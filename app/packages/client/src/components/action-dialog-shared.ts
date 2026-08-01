@@ -4,12 +4,6 @@ import { OFFBOARD_STEPS, type OffboardStepKey } from "@p0rt1on/shared/steps";
 import { queryClient, trpc } from "../trpc.ts";
 import { toaster } from "./ui/toast.tsx";
 
-// Shared types, styles and runtime helpers for the per-action dialogs
-// (SuspendDialog, ResizeDialog, OffboardDialog, …) and their DialogShell /
-// ConfirmActions frame. The dialog shell recipe styles the frame; these are the
-// inner bits each dialog composes.
-
-/** Refetch the friends list after a mutation changes it. */
 export const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
 
@@ -19,12 +13,6 @@ export const toastSuccess = (title: string) =>
 export const toastError = (title: string, description: string) =>
   toaster.create({ title, description, type: "error" });
 
-/**
- * The confirm flow shared by the plain mutate-then-close dialogs (suspend,
- * resume, resize): run the mutation, toast success + refetch and close on
- * success, or surface the error inline AND as a toast. Tracks `busy`/`err` for
- * the dialog's button + error line.
- */
 export function createConfirmAction(opts: {
   run: () => Promise<unknown>;
   success: string;
@@ -67,13 +55,13 @@ export type ActionKind =
   | "offboard";
 export type Pending = { friend: FriendRow; kind: ActionKind };
 
-/** Live state of the offboard teardown stream (offboard streams; others mutate). */
+/** Offboard streams progress; the other dialogs' actions just mutate. */
 export type OffboardState =
   | { kind: "idle" }
   | { kind: "running"; step: OffboardStepKey | null }
   | { kind: "error"; message: string; step: OffboardStepKey | null }
-  // Manual ACL mode: teardown finished; the admin should remove the friend's
-  // policy entries by hand (advisory, dismissible — never blocking).
+  // Manual ACL mode: teardown is already finished; this is advisory and
+  // dismissible, never blocking.
   | { kind: "advice"; cleanup: string };
 
 export const OFFBOARD_LABELS = OFFBOARD_STEPS.map((s) => s.label);
@@ -87,8 +75,6 @@ export const body = css({
   maxW: "440px",
 });
 
-// Wider frame for dialogs with code blocks (offboard advice), so paste-in
-// snippets don't wrap mid-token.
 export const bodyWide = css({
   display: "flex",
   flexDirection: "column",
@@ -101,7 +87,6 @@ export const bodyWide = css({
 // Softer backdrop than the recipe default (`!` = Panda !important so it wins).
 export const dimBackdrop = css({ background: "rgba(0, 0, 0, 0.35)!" });
 
-// Lift the panel off the dimmed page — modals should float (shadow > hard border).
 export const contentShadow = css({
   boxShadow:
     "0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.4)!",
@@ -131,7 +116,6 @@ export const codeBlock = css({
   color: "fg.default",
 });
 
-// Copy sits in the code block's top-right; IconButton supplies the box + hover.
 export const copyPos = css({ position: "absolute", top: "2", right: "2" });
 
 export const actionsRow = css({
@@ -141,8 +125,6 @@ export const actionsRow = css({
   mt: "1",
 });
 
-// Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
-// Button recipe still supplies sizing, radius and typography.
 export const sparkBtn = css({
   bg: "spark",
   borderColor: "spark",

@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { makeFriend } from "../test-helpers/fixtures.ts";
 
-// Mock the trpc/query module so the dialogs' mutations and cache invalidation
-// are observable spies instead of real network calls.
 vi.mock("../trpc.ts", () => ({
   trpc: {
     friends: {
@@ -30,7 +28,7 @@ import { ResendInviteDialog } from "./ResendInviteDialog.tsx";
 import { OffboardDialog } from "./OffboardDialog.tsx";
 
 const { mutateOf } = vi.hoisted(() => ({
-  // deno-lint-ignore no-explicit-any -- the mocked mutate is a vi.fn under a real tRPC type
+  // deno-lint-ignore no-explicit-any -- The mocked mutate is a vi.fn under a real tRPC type.
   mutateOf: (fn: unknown) => fn as any,
 }));
 

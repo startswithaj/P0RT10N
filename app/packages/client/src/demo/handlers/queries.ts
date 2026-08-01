@@ -28,8 +28,8 @@ const pageAudit = (
   return rows.slice(0, limit ?? 20);
 };
 
-// instanceStatus → Status-page health. reaping is a transient teardown (pending),
-// everything else that isn't up/coming-up reads as down.
+// This maps instance status to status-page health: reaping is a transient
+// teardown so it reads as pending, and anything else not up or coming up reads as down.
 const MINIO_STATE: Record<InstanceStatus, ServiceStatus["state"]> = {
   active: "up",
   provisioning: "provisioning",
@@ -41,10 +41,8 @@ const MINIO_STATE: Record<InstanceStatus, ServiceStatus["state"]> = {
 const minioState = (s: InstanceStatus): ServiceStatus["state"] =>
   MINIO_STATE[s];
 
-// Last-24h hourly request counts for the row sparkline. Only "up" instances plot
-// one. Up-but-idle returns all-zeros (dashed baseline); active friends get
-// deterministic per-friend/per-hour variation (stable across reloads, non-zero
-// newest bucket) so no two rows look alike.
+// Sparkline values are deterministic per friend and hour, using a hashed sine
+// wave so they stay stable across reloads, with the newest bucket boosted so recent activity stands out.
 const sparkFor = (f: DemoFriend): number[] | undefined => {
   if (f.instanceStatus !== "active") return undefined;
   const per = f.activity.requests24h;
@@ -52,8 +50,8 @@ const sparkFor = (f: DemoFriend): number[] | undefined => {
   const avg = per / 24;
   return Array.from({ length: 24 }, (_, h) => {
     const noise = Math.sin((h + 1) * 12.9898 + f.id * 78.233) * 43758.5453;
-    const frac = noise - Math.floor(noise); // deterministic 0..1
-    const scale = h === 23 ? 1.3 : 0.35 + 1.2 * frac; // recent bucket stands out
+    const frac = noise - Math.floor(noise);
+    const scale = h === 23 ? 1.3 : 0.35 + 1.2 * frac;
     return Math.max(1, Math.round(avg * scale));
   });
 };
@@ -77,8 +75,8 @@ const buildStatus = (state: DemoState): StatusView => ({
   host: [{ name: "manager", detail: "manager daemon", state: "up" }],
 });
 
-// Return type pinned to the router's inferred output (InstanceDiagnostics), so a
-// server-side shape change is a compile error here rather than a silent drift.
+// The return type is pinned to the router's inferred InstanceDiagnostics output,
+// so a server-side shape change becomes a compile error here rather than a silent drift.
 const diagnose = (
   instanceName: string,
 ): QueryOutput<"status.diagnose"> => ({
@@ -92,8 +90,8 @@ const diagnose = (
     "API: SYSTEM\nMinIO Object Storage Server\nStatus: 1 Online, 0 Offline.",
 });
 
-// TOTAL over every query path; each handler's input + output are the router's
-// inferred types, so a wrong shape is a compile error (see QueryHandlers).
+// This map must cover every query path with input and output types inferred
+// from the actual router, so a wrong shape is a compile error, not a runtime bug.
 export const queryHandlers: QueryHandlers = {
   "auth.status": () => ({ enabled: false, authenticated: true }),
   "friends.list": (_input, state) => state.friends.map(toListItem),

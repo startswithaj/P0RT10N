@@ -19,15 +19,9 @@ import {
   radioDot,
 } from "./styles.ts";
 
-// "Add a portion" form. Collects a full AddFriendInput (+ enrollment choice) and
-// hands it up; App runs the real friends.add mutation.
-
 const GB = 1_000_000_000;
-/** Pause before an invalid name shows its error (don't flash mid-word). */
 const NAME_ERROR_DEBOUNCE_MS = 500;
 
-/** The form's output — an AddFriendInput plus the (frontend-only) enroll choice.
- * `enroll` drives the provisioning/bundle screens; `enrollment` is the payload. */
 export type NewPortion = {
   name: string;
   quotaBytes: number;
@@ -76,14 +70,11 @@ const actions = css({
   mt: "2",
 });
 
-// Why the CTA is disabled — a disabled button always states its reason.
 const blockHint = css({ fontSize: "sm", color: "fg.muted", mr: "auto" });
 
-// Soft-isolation trade-off note, shown at the decision point.
 const sharedBanner = css({
   fontSize: "sm",
   color: "fg.default",
-  // Same recessed gray as the unselected mode cards above it — one gray, not two.
   bg: { base: "gray.2", _dark: "bg.canvas" },
   borderWidth: "1px",
   borderColor: "border.default",
@@ -92,8 +83,6 @@ const sharedBanner = css({
   mt: "3",
 });
 
-// Primary CTA keeps the brand magenta spark (Park's solid is accent-cyan); the
-// Button recipe still supplies sizing, radius and typography.
 const sparkBtn = css({
   bg: "spark",
   borderColor: "spark",
@@ -128,8 +117,6 @@ function issueFor(issues: FormIssue[], field: string): string | null {
   return issues.find((i) => i.path[0] === field)?.message ?? null;
 }
 
-// A disabled button must say WHY. First blocking problem wins;
-// the untouched-form case gets a friendlier prompt than a zod message.
 function blockReasonFor(name: string, issues: FormIssue[]): string | null {
   if (name.trim() === "") return "Enter a friend name to continue";
   const first = issues[0];
@@ -145,10 +132,6 @@ function blockReasonFor(name: string, issues: FormIssue[]): string | null {
   }: ${first.message}`;
 }
 
-/**
- * Debounced "settled" flag: false while the user is actively typing, true
- * after a pause of `delayMs` (or immediately via settleNow, e.g. on blur).
- */
 function createSettled(delayMs: number) {
   const [settled, setSettled] = createSignal(true);
   const box = { timer: 0 };
@@ -167,11 +150,6 @@ function createSettled(delayMs: number) {
   return { settled, touch, settleNow, dispose: () => clearTimeout(box.timer) };
 }
 
-/**
- * The friend-name field's state: the name signal plus its debounced error
- * visibility. `settled` is false while typing and true after a pause (or blur
- * via `settleNow`), so the error only shows once the user stops mid-word.
- */
 function createNameField() {
   const [name, setName] = createSignal("");
   const settle = createSettled(NAME_ERROR_DEBOUNCE_MS);
@@ -190,8 +168,6 @@ function createNameField() {
   };
 }
 
-/** Enrollment state: the key/invite choice, the invite email, and the derived
- * `Enrollment` payload (email trimmed). */
 function createEnrollField() {
   const [enroll, setEnroll] = createSignal<"key" | "invite">("key");
   const [email, setEmail] = createSignal("");
@@ -204,8 +180,6 @@ function createEnrollField() {
   return { enroll, setEnroll, email, setEmail, enrollment };
 }
 
-/** Submit gate: form-valid, no name clash, AND not preflight-blocked. Precedence
- * for the hint text: preflight block (hardest) > name clash > first form issue. */
 function submitGate(
   props: { gated?: () => boolean; gateReason?: () => string | undefined },
   issues: () => FormIssue[],
@@ -228,16 +202,13 @@ function submitGate(
   };
 }
 
-/** True when the trimmed name already belongs to an existing portion. Names are
- * lowercase-enforced (friendNameSchema), so an exact match mirrors the
- * friends.name UNIQUE constraint the server would otherwise trip. */
+/** Names are lowercase-enforced by friendNameSchema, so an exact match here
+ * mirrors the friends.name UNIQUE constraint the server enforces. */
 function isNameTaken(name: string, taken?: () => string[]): boolean {
   const trimmed = name.trim();
   return trimmed !== "" && (taken?.() ?? []).includes(trimmed);
 }
 
-/** The name field's error: a clash (already well-formed) takes the slot over a
- * format issue. Returns null while the field is unsettled (mid-word typing). */
 function nameFieldError(
   settled: boolean,
   taken: boolean,
@@ -284,7 +255,6 @@ function RetentionField(
         formatOptions={{ maximumFractionDigits: 0 }}
         onValueChange={(d) => props.setRetention(d.valueAsNumber)}
       >
-        {/* Input is a sibling of Control (see QuotaField). */}
         <NumberInput.Input />
         <NumberInput.Control>
           <NumberInput.IncrementTrigger />
@@ -348,21 +318,21 @@ export function AddPortion(
   props: {
     onBack: () => void;
     onSubmit: (data: NewPortion) => void;
-    /** Whether the manager has an invite API token. Undefined = still loading
-     * (treat as configured — the warning is a hint, never a submit gate). */
+    /** Undefined means the invite-capability check is still loading; it is
+     * treated as configured since the warning is only a hint, never a submit gate. */
     inviteApiConfigured?: boolean;
-    /** A blocked preflight check forbids new portions — a hard submit gate. */
+    /** A blocked preflight check is a hard gate on submitting, not just an advisory hint. */
     gated?: () => boolean;
     gateReason?: () => string | undefined;
-    /** Names of existing portions; a clash is caught here rather than tripping
-     * the DB UNIQUE constraint mid-provisioning. */
+    /** Existing portion names; a clash is caught here instead of tripping the
+     * friends.name UNIQUE constraint on the server mid-provisioning. */
     takenNames?: () => string[];
   },
 ) {
   const nameField = createNameField();
   const name = nameField.name;
-  // Focus the name field when the form mounts (native autofocus doesn't fire for
-  // an element added on a view change rather than a page load).
+  // Native autofocus doesn't fire for an element added on a view change rather
+  // than a page load, so focus is set imperatively once the form mounts.
   const [nameEl, setNameEl] = createSignal<HTMLInputElement>();
   onMount(() => nameEl()?.focus());
   const [mode, setMode] = createSignal<"dedicated" | "shared">("dedicated");
@@ -371,12 +341,8 @@ export function AddPortion(
   const { enroll, setEnroll, email, setEmail, enrollment } =
     createEnrollField();
 
-  // The AddFriendInput fields this form assembles. Validation is delegated to
-  // the same `addFriendInput` schema the server enforces (single source of
-  // truth), so an empty/badly-formatted name or a non-positive-integer quota /
-  // retention gates submit here exactly as it would be rejected at the API
-  // boundary. (The NumberInputs already reject empty/negative/fractional input
-  // at the widget level; this is the backstop and drives the disabled state.)
+  // Validation reuses the same addFriendInput schema the server enforces, so
+  // submit is gated here exactly as the API would reject the request.
   const core = () => ({
     name: name().trim(),
     quotaBytes: Math.round(quota() * GB),
@@ -390,9 +356,6 @@ export function AddPortion(
   const nameTaken = () => isNameTaken(name(), props.takenNames);
   const { canSubmit, blockReason } = submitGate(props, issues, name, nameTaken);
 
-  // Debounced (see createNameField): submit gating stays immediate, but the
-  // error's visibility waits for a typing pause so "al…" doesn't flash an error
-  // at someone mid-word.
   const nameError = () =>
     nameFieldError(nameField.settled(), nameTaken(), () => errFor("name"));
 

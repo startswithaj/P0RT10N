@@ -1,7 +1,5 @@
-// Dotted-path unions + per-path IO, derived purely from the real AppRouter type
-// (type-only import → no server code in the bundle). Walks _def.record; if the
-// installed @trpc/server disagrees on that shape, this file is the one place to
-// reconcile.
+// These types come purely from a type-only import of the real AppRouter, keeping
+// server code out of the client bundle; if the installed @trpc/server changes the internal _def.record shape this walks, fix it here.
 
 import type {
   AnyMutationProcedure,

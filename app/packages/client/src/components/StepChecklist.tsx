@@ -2,8 +2,6 @@ import { For, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { CircleCheck, LoaderCircle, XCircle } from "lucide-solid";
 
-// Per-step checklist shared by provisioning + offboard. Presentational: caller passes each step's status via `status(i)`.
-
 export type StepStatus = "done" | "active" | "failed" | "pending";
 
 const list = css({ display: "flex", flexDirection: "column" });
@@ -90,7 +88,8 @@ export function StepChecklist(
 }
 
 /**
- * Map active/failed step index to a per-index status fn. Lower than activeIndex = done; failed marks that index failed; activeIndex >= length = all done.
+ * Builds a per-index status function from the active step index and whether it failed.
+ * Indexes before the active one are done, the active index is active or failed, and later indexes are pending.
  */
 export function stepStatusFor(
   activeIndex: number,

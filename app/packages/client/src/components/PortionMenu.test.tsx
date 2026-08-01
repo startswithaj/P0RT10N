@@ -3,8 +3,8 @@ import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { makeFriend } from "../test-helpers/fixtures.ts";
 import { PortionMenu } from "./PortionMenu.tsx";
 
-// Enrollment-aware menu items: auth-key friends re-issue their tag key; invite
-// friends can't (no tagged node) but can resend a pending invite.
+// Auth-key friends can re-issue their tag key; invite friends have no tagged
+// node, so they cannot, but they can resend a pending invite instead.
 describe("PortionMenu", () => {
   const open = (friend: ReturnType<typeof makeFriend>) => {
     render(() => <PortionMenu friend={friend} onAction={vi.fn()} />);
@@ -26,7 +26,7 @@ describe("PortionMenu", () => {
 
   it("accepted invite: hides both Re-issue and Resend", async () => {
     open(makeFriend({ enrollmentMode: "invite", inviteStatus: "accepted" }));
-    // The menu still renders (Rotate S3 key is common to both modes).
+    // The menu still renders because Rotate S3 key is common to both enrollment modes.
     expect(await screen.findByText("Rotate S3 key")).toBeInTheDocument();
     expect(screen.queryByText("Re-issue Tailscale key")).toBeNull();
     expect(screen.queryByText("Resend invite")).toBeNull();

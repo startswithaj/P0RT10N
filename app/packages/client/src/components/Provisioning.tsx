@@ -6,20 +6,13 @@ import { Wordmark } from "./Wordmark.tsx";
 import { Button } from "./ui/button.tsx";
 import { StepChecklist, stepStatusFor } from "./StepChecklist.tsx";
 
-// Provisioning view. addStream emits a `step` event per real step (plus
-// done/error), so the checklist tracks actual server progress and marks the
-// exact failing step.
-
-/** The add stream's state, as far as this screen cares. `step` is the live step. */
 export type ProvisionState =
   | { kind: "pending"; step: ProvisionStepKey | null }
   | { kind: "done" }
   | { kind: "error"; message: string; step: ProvisionStepKey | null };
 
-/**
- * Step labels, swapping auth-key wording for invites. Without an API token no
- * invite is sent (admin sends by hand), so the label must not claim otherwise.
- */
+// Without an invite API token, no invite is actually sent (the admin sends it
+// by hand), so the label must not claim otherwise.
 function stepLabels(
   enroll: "key" | "invite",
   inviteApiConfigured: boolean,
@@ -32,7 +25,6 @@ function stepLabels(
   });
 }
 
-/** Index of the live step (0 before the first event); length when fully done. */
 function activeIndexFor(state: ProvisionState): number {
   if (state.kind === "done") return PROVISION_STEPS.length;
   if (state.step === null) return 0;
@@ -89,8 +81,7 @@ const actions = css({
   mt: "6",
 });
 
-// Primary CTA: brand spark pill + hover lift; _hover pins bg:spark so the
-// recipe's cyan hover fill can't show.
+// _hover pins bg:spark so the button recipe's default cyan hover fill can't show through.
 const sparkBtn = css({
   rounded: "full",
   bg: "spark",
@@ -99,14 +90,12 @@ const sparkBtn = css({
   _hover: { bg: "spark", transform: "translateY(-1px)" },
 });
 
-// Secondary action: Park's outline variant, kept as a rounded-full pill to match.
 const pillOutline = css({ rounded: "full" });
 
 export function Provisioning(
   props: {
     name: string;
     enroll: "key" | "invite";
-    /** Whether email invites are wired; drives the invite step's honest label. */
     inviteApiConfigured?: boolean;
     state: () => ProvisionState;
     onDone: () => void;

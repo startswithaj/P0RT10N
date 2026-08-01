@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { makeFriend } from "../test-helpers/fixtures.ts";
 
-// Real QueryClient so createQuery works; only the trpc call is a spy.
+// Uses a real QueryClient so createQuery works; only the trpc call is a spy.
 vi.mock("../trpc.ts", async () => {
   const { QueryClient } = await import("@tanstack/solid-query");
   return {
@@ -16,8 +16,8 @@ import { queryClient, trpc } from "../trpc.ts";
 import { InviteStatusBadge } from "./InviteStatusBadge.tsx";
 
 describe("InviteStatusBadge", () => {
-  // Helpers stay inside describe (no-test-globals lint rule).
-  // deno-lint-ignore no-explicit-any -- mocked query is a vi.fn under a real tRPC type
+  // Helpers stay inside the describe block to satisfy the no-test-globals lint rule.
+  // deno-lint-ignore no-explicit-any -- The mocked query is a vi.fn under a real tRPC type.
   const asMock = (fn: unknown) => fn as any;
 
   const renderBadge = (friend: ReturnType<typeof makeFriend>) =>
@@ -45,7 +45,7 @@ describe("InviteStatusBadge", () => {
       makeFriend({ enrollmentMode: "invite", inviteStatus: "accepted" }),
     );
     expect(await screen.findByText("Invite accepted")).toBeInTheDocument();
-    // accepted is terminal → no reconcile call.
+    // Accepted is a terminal status, so no reconcile call happens.
     expect(trpc.friends.inviteStatus.query).not.toHaveBeenCalled();
   });
 

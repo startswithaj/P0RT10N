@@ -9,10 +9,8 @@ import {
 } from "./action-dialog-shared.ts";
 
 /**
- * The modal frame shared by every action dialog: dimmed backdrop, floating
- * panel, title, and Enter-to-confirm on the body. Enter is ignored on a focused
- * button so Enter-on-Cancel still cancels; the owning dialog's `onEnter` decides
- * whether the preconditions are met.
+ * Enter is ignored when a button has focus, so Enter on Cancel still cancels.
+ * The owning dialog's `onEnter` callback decides whether preconditions are met.
  */
 export function DialogShell(props: {
   title: string;

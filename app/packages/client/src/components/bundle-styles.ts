@@ -1,6 +1,5 @@
 import { css } from "styled-system/css";
 
-// Shared across the bundle screen's sections (Bundle.tsx and CredentialsCard).
 export const section = css({ mb: "6" });
 
 export const eyebrow = css({
@@ -13,8 +12,8 @@ export const eyebrow = css({
 
 export const codeWrap = css({ position: "relative" });
 
-// Kept as an object so the Tailscale block can merge a wrapping override over
-// it (Panda's `cx` only concatenates — `css(base, override)` resolves).
+// This stays a plain object so callers can merge a wrapping override with css(base,
+// override), since Panda's `cx` only concatenates class names instead of resolving styles.
 const codeBlockStyles = {
   fontFamily: "body",
   fontSize: "xs",
@@ -33,8 +32,8 @@ const codeBlockStyles = {
 
 export const codeBlock = css(codeBlockStyles);
 
-// The auth key is one long unbroken token: wrap it rather than scroll, so it
-// stops at the reserved right padding instead of running under the copy button.
+// The auth key is one long unbroken token, so this wraps it rather than scrolling,
+// stopping at the reserved right padding instead of running under the copy button.
 export const codeBlockWrapped = css(codeBlockStyles, {
   whiteSpace: "pre-wrap",
   wordBreak: "break-all",

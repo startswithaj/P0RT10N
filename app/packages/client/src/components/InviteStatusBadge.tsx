@@ -12,9 +12,8 @@ const LABEL: Record<InviteStatus, string> = {
   manual: "Invite · manual",
 };
 
-// Status pill for invite friends. While outstanding (`pending`/`manual`) it reconciles
-// against Tailscale on render (endpoint checks OAuth users/devices, persists status), flipping
-// to `accepted` without refresh. Accepted/expired terminal; auth-key friends render nothing.
+// While an invite is pending or manual, this polls Tailscale live and flips to
+// accepted without a page refresh. Accepted and expired are terminal, and auth-key friends render nothing.
 export function InviteStatusBadge(props: { friend: FriendRow }) {
   const isInvite = () => props.friend.enrollmentMode === "invite";
 
@@ -32,8 +31,8 @@ export function InviteStatusBadge(props: { friend: FriendRow }) {
   const status = (): InviteStatus | null =>
     live.data?.status ?? props.friend.inviteStatus;
 
-  // A reconciled change refreshes the list so the menu's resend item and this badge stay in
-  // sync. Converges: once the list reflects the status, the query disables and the effect stops.
+  // When the live status changes, this invalidates the friends list so the badge and the resend
+  // menu item stay in sync; once the list reflects it, the query disables and the effect stops.
   createEffect(() => {
     const fresh = live.data?.status;
     if (fresh && fresh !== props.friend.inviteStatus) {

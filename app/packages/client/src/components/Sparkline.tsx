@@ -1,16 +1,11 @@
 import { css } from "styled-system/css";
 
-// A tiny faint activity sparkline for a Status-page row: last-24h hourly request
-// counts. Idle (all-zero) rows draw a dashed baseline so it reads as "nothing to
-// plot", not flatlined data.
-
 const wrap = css({
   color: "fg.muted",
   opacity: "0.6",
   flexShrink: "0",
-  // Block-level flex, not inline-flex: an inline box rests on the text baseline
-  // and rides a few px above the row's status dot. A block flex item is centred
-  // by the row's own `align-items: center`, level with the dot, no magic offset.
+  // This uses block-level flex instead of inline-flex because an inline box rides
+  // above the row's status dot; block flex is centered by the row's align-items.
   display: "flex",
   alignItems: "center",
 });
@@ -21,18 +16,18 @@ const MID = H / 2;
 
 export function Sparkline(props: { data: number[] }) {
   const peak = () => Math.max(0, ...props.data);
-  // A single point (or fewer) can't form a line, and an all-zero series has no
-  // shape — both are "empty" and render as a dashed line on the mid baseline.
+  // A single point or an all-zero series has no shape to plot, so both are
+  // treated as empty and rendered as a dashed line on the mid baseline.
   const isEmpty = () => props.data.length < 2 || peak() === 0;
 
   const points = () => {
-    // Idle: a dashed line on the mid baseline so it sits level with the status
-    // dot. Active: volume anchored to the bottom — taller reads as busier.
+    // When idle it draws a dashed line level with the status dot; when active
+    // it anchors volume to the bottom, so a taller line reads as busier.
     if (isEmpty()) return `0,${MID} ${W},${MID}`;
     const d = props.data;
     const n = d.length;
     const max = peak();
-    // 1px inset top/bottom so the peak and baseline strokes aren't clipped.
+    // A 1px inset on top and bottom keeps the peak and baseline strokes from clipping.
     return d
       .map((v, i) => {
         const x = (i / (n - 1)) * W;

@@ -4,10 +4,8 @@ import { createRoot } from "solid-js";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { makeBundle, makeFriend } from "./test-helpers/fixtures.ts";
 
-// Mock trpc/query so the friends list resolves from a fixture and the add-stream
-// subscription is an observable spy. `queryClient` must stay a REAL QueryClient
-// (App's createQuery + the provider need it), so only `trpc` is faked — unlike
-// the dialog tests, which can stub queryClient entirely.
+// queryClient must stay a REAL QueryClient because App's createQuery and the
+// provider need it, so only trpc is mocked here, unlike dialog tests that stub queryClient entirely.
 vi.mock("./trpc.ts", async () => {
   const { QueryClient } = await import("@tanstack/solid-query");
   return {
@@ -54,13 +52,10 @@ describe("App dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
-    // Default: auth off → the gate opens straight to the dashboard.
     asMock(trpc.auth.status.query).mockResolvedValue({
       enabled: false,
       authenticated: true,
     });
-    // Default: an all-up snapshot so the footer reads Healthy unless a test
-    // overrides it.
     asMock(trpc.status.get.query).mockResolvedValue({
       minio: [],
       tailscale: [],
@@ -117,8 +112,6 @@ describe("App dashboard", () => {
 
       renderApp();
 
-      // One card per friend: both names, both status badges, and one Progress
-      // bar (role=progressbar) per row.
       expect(await screen.findByText("alice")).toBeInTheDocument();
       expect(screen.getByText("bob")).toBeInTheDocument();
       expect(screen.getByText("active")).toBeInTheDocument();
@@ -133,7 +126,7 @@ describe("App dashboard", () => {
       renderApp();
 
       expect(await screen.findByText("No portions yet")).toBeInTheDocument();
-      // Two "Add portion" buttons: the NavBar one plus the empty-state CTA.
+      // There are two "Add portion" buttons: the NavBar one and the empty-state CTA.
       expect(
         screen.getAllByRole("button", { name: /add portion/i }),
       ).toHaveLength(2);
@@ -161,8 +154,8 @@ describe("App dashboard", () => {
 
       expect(await screen.findByText("no backups since 3 days ago"))
         .toBeInTheDocument();
-      // Exactly one nudge: the 47h friend is inside the threshold and shows
-      // a neutral last-activity timestamp instead.
+      // Only one nudge is expected: the 47h friend falls inside the threshold
+      // and shows a neutral last-activity timestamp instead.
       expect(screen.getAllByText(/no backups since/)).toHaveLength(1);
       expect(screen.getByText("last activity 1 day ago")).toBeInTheDocument();
     });
@@ -199,7 +192,7 @@ describe("App dashboard", () => {
       const callsAfterLoad = asMock(trpc.friends.list.query).mock.calls
         .length as number;
 
-      // Status tab, then back to Portions — setView invalidates the cache.
+      // Clicking Status then Portions calls setView, which invalidates the cache.
       fireEvent.click(screen.getByRole("button", { name: "Status" }));
       fireEvent.click(screen.getByRole("button", { name: "Portions" }));
 
@@ -231,15 +224,15 @@ describe("App dashboard", () => {
 
       const chip = await screen.findByRole("button", { name: "Healthy" });
       fireEvent.click(chip);
-      // The Status page's MinIO group renders — the chip links to the issue.
+      // The Status page's MinIO group renders because the chip links to the issue.
       expect(await screen.findByText("MinIO")).toBeInTheDocument();
     });
   });
 
   describe("usage Progress value", () => {
     it("reflects the bytesUsed/quota percentage on the progressbar", async () => {
-      // 50 GB used of 100 GB → 50%. fraction mirrors bytesUsed/quotaBytes so the
-      // Progress value is the storage-usage percentage.
+      // 50 GB used of 100 GB is 50%. The fraction field mirrors bytesUsed/quotaBytes,
+      // so the Progress value is the storage-usage percentage.
       const friend = makeFriend({
         usage: {
           bytesUsed: 50_000_000_000,
@@ -261,10 +254,8 @@ describe("App dashboard", () => {
     });
   });
 
-  // After the add flow finishes, the shown-once bundle secret must not
-  // linger in component state. Driving the state machine directly (createAddFlow)
-  // asserts the clearing precisely — the DOM masks the secret, so DOM absence
-  // alone wouldn't prove state was reset.
+  // The shown-once bundle secret must not linger in component state after the add
+  // flow finishes; driving createAddFlow directly proves it, since DOM absence alone wouldn't prove state was reset.
   describe("add flow clears the shown-once bundle", () => {
     const draft: NewPortion = {
       name: "alice",
@@ -295,9 +286,9 @@ describe("App dashboard", () => {
         return createAddFlow();
       });
       flow.startAdd(draft);
-      // addStart resolves → progress subscription attaches.
+      // addStart resolves before the progress subscription attaches.
       await waitFor(() => expect(handlers).toBeDefined());
-      // done event carries NO secrets — it triggers the single claim.
+      // The done event carries no secrets; it only triggers the single claim.
       handlers?.onData({ type: "done", bundleReady: true });
       await waitFor(() => expect(flow.doneBundle()).not.toBeNull());
       expect(trpc.jobs.claimBundle.mutate).toHaveBeenCalledWith({
@@ -307,7 +298,7 @@ describe("App dashboard", () => {
 
       flow.finishAdd();
 
-      // ...but finishAdd wipes both, so no secret is retained in memory.
+      // finishAdd wipes both, so no secret is retained in memory.
       expect(flow.doneBundle()).toBeNull();
       expect(flow.pending()).toBeNull();
 

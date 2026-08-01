@@ -22,11 +22,8 @@ import {
 import { trpc } from "../trpc.ts";
 import type { FriendRow } from "./types.ts";
 
-/**
- * Start teardown as a background job, then observe: drive `setOffboard` per step, close
- * (refetching) on done, or freeze on the failed step. Failures arrive as `error` data events
- * on jobs.progress; the observer stream is replayable, so a reconnect never re-runs teardown.
- */
+// Failures arrive as error data events on jobs.progress, and the observer
+// stream is replayable, so a reconnect never re-runs teardown.
 function subscribeOffboard(
   friend: { id: number; name: string },
   setOffboard: Setter<OffboardState>,
@@ -56,7 +53,6 @@ function subscribeOffboard(
             invalidate();
             // The teardown itself is complete either way, so confirm it now.
             toastSuccess(`Offboarded ${friend.name}`);
-            // Manual ACL mode: keep dialog open with cleanup advice; offboard is already complete.
             if (ev.manualAclCleanup) {
               setOffboard({ kind: "advice", cleanup: ev.manualAclCleanup });
             } else {
@@ -74,10 +70,6 @@ function subscribeOffboard(
     );
 }
 
-/**
- * Manual ACL mode: offboard done; advise which policy entries to remove by hand.
- * Dismiss just closes — no side effects.
- */
 function AclCleanupBody(props: {
   name: string;
   cleanup: string;
@@ -122,7 +114,7 @@ export function OffboardDialog(
   const [offboard, setOffboard] = createSignal<OffboardState>({ kind: "idle" });
   const [copied, setCopied] = createSignal(false);
 
-  // Match the typed name verbatim (the label instructs it) — not upper-cased.
+  // The typed name is matched verbatim, not case-normalized, matching what the label instructs.
   const canConfirm = () => confirmName() === props.friend.name;
   const running = () => offboard().kind !== "idle";
 

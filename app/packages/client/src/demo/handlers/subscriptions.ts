@@ -9,7 +9,8 @@ const STEP_MS = 450;
 const stepsFor = (kind: DemoJob["kind"]): ReadonlyArray<{ key: string }> =>
   kind === "add" ? PROVISION_STEPS : OFFBOARD_STEPS;
 
-/** Commit the job's effect exactly once (idempotent — a replay can't double-apply). */
+/** Commits the job's effect exactly once; since it is idempotent, a replayed
+ *  event can never double-apply it. */
 const commit = (job: DemoJob): void => {
   updateDemoState((s) => {
     const existing = s.jobs[job.id];
