@@ -12,7 +12,7 @@ describe("startServer (HTTP)", () => {
     const abort = new AbortController();
     const listening = Promise.withResolvers<number>();
     const server = startServer({
-      port: 0, // ephemeral
+      port: 0,
       context,
       signal: abort.signal,
       onListen: ({ port }) => listening.resolve(port),
@@ -37,7 +37,7 @@ describe("startServer (HTTP)", () => {
 
   it("admin listener does NOT serve the audit webhook", async () => {
     // The webhook lives on its own listener so the admin API never needs a
-    // non-loopback bind; the admin listener must not even route the path.
+    // non-loopback bind. The admin listener must not even route this path.
     const database = createTestDatabase();
     const context = await buildContext(database, testEnv(), noopLogger());
     const abort = new AbortController();
@@ -59,7 +59,7 @@ describe("startServer (HTTP)", () => {
           body: "{}",
         },
       );
-      // Falls through to tRPC (no such procedure), never to handleMinioEvent.
+      // This falls through to tRPC because no matching procedure exists; it never reaches handleMinioEvent.
       expect(res.status).not.toBe(204);
       expect(res.status).not.toBe(401);
       await res.body?.cancel();
@@ -75,7 +75,7 @@ describe("startServer (HTTP)", () => {
     const listening = Promise.withResolvers<number>();
     const server = startMinioEventServer({
       port: 0,
-      hostname: "127.0.0.1", // loopback in tests; 0.0.0.0 is the deploy default
+      hostname: "127.0.0.1", // Tests use loopback; the deploy default is 0.0.0.0.
       sink: { token: "sekret", onEvent: () => {} },
       signal: abort.signal,
       onListen: ({ port }) => listening.resolve(port),
@@ -136,7 +136,7 @@ describe("startServer (HTTP)", () => {
       expect(wrongToken.status).toBe(401);
       await wrongToken.body?.cancel();
 
-      // >1 MiB body rejected up front (413) — never reaches onEvent.
+      // Bodies over 1 MiB are rejected up front with a 413 and never reach onEvent.
       const huge = await fetch(
         `http://127.0.0.1:${port}/internal/minio-events`,
         {
@@ -149,11 +149,8 @@ describe("startServer (HTTP)", () => {
       await huge.body?.cancel();
       expect(received.length).toBe(0);
 
-      // Same cap with NO Content-Length (chunked stream): the declared-size
-      // check can't see it, so the LimitedBytesTransformStream must trip.
-      // The server aborts the read mid-upload, so the client races between
-      // receiving the 413 and a connection reset — BOTH prove the cap fired;
-      // the invariant is that the event is never ingested.
+      // With no Content-Length, the size check can't see the body, so LimitedBytesTransformStream
+      // must trip the cap mid-upload; the client may see a 413 or a reset, but the event is never ingested.
       const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
       const chunkedOutcome = await fetch(
         `http://127.0.0.1:${port}/internal/minio-events`,
@@ -162,7 +159,7 @@ describe("startServer (HTTP)", () => {
           headers: { authorization: "Bearer sekret" },
           body: new ReadableStream<Uint8Array>({
             start(controller) {
-              // 17 × 64 KiB = 1088 KiB > 1 MiB
+              // 17 chunks of 64 KiB total 1088 KiB, more than the 1 MiB cap.
               Array.from({ length: 17 }).forEach(() =>
                 controller.enqueue(chunk)
               );
@@ -208,7 +205,7 @@ describe("startServer (HTTP)", () => {
   it("staticDir: serves built assets and falls back to index.html", async () => {
     const database = createTestDatabase();
     const context = await buildContext(database, testEnv(), noopLogger());
-    // Temp asset dir inside the repo (never /tmp); cleaned up in finally.
+    // The temp asset dir lives inside the repo, not /tmp, and is removed in the finally block.
     const staticDir = await Deno.makeTempDir({ dir: ".", prefix: "static-" });
     await Deno.writeTextFile(`${staticDir}/index.html`, "<!doctype html>app");
     await Deno.writeTextFile(`${staticDir}/app.js`, "console.log(1)");
@@ -224,17 +221,14 @@ describe("startServer (HTTP)", () => {
     const port = await listening.promise;
 
     try {
-      // Real asset is served as-is.
       const js = await fetch(`http://127.0.0.1:${port}/app.js`);
       expect(js.status).toBe(200);
       expect(await js.text()).toBe("console.log(1)");
 
-      // Unknown path (a client-side route) falls back to index.html.
       const deep = await fetch(`http://127.0.0.1:${port}/friends/alice`);
       expect(deep.status).toBe(200);
       expect(await deep.text()).toBe("<!doctype html>app");
 
-      // API routes still win over static.
       const trpc = await fetch(`http://127.0.0.1:${port}/trpc/friends.list`);
       expect(trpc.status).toBe(200);
       await trpc.body?.cancel();

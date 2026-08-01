@@ -23,7 +23,6 @@ describe("McShellClient arg-building", () => {
     await c.du("backup");
     await c.listUsers();
     cmds.forEach((cmd) => {
-      // TEST_CRED rides the env URL; argv stays secret-free.
       expect(cmd.env).toEqual({
         MC_HOST_alice: "http://AKIATEST:secret123@127.0.0.1:9100",
       });
@@ -155,21 +154,19 @@ describe("McShellClient arg-building", () => {
       "alice",
       "audit_webhook:p0rt1on",
     ]);
-    // MinIO sends auth_token verbatim as the Authorization header — the
-    // Bearer scheme the manager expects must be baked in, quoted for mc's
-    // space-splitting KV parser.
+    // MinIO sends auth_token verbatim as the Authorization header, so the
+    // Bearer scheme must be baked in here, quoted for mc's KV parser.
     expect(cmds[0].args[6]).toBe('auth_token="Bearer tok"');
     expect(cmds[1].args).toEqual(
       ["admin", "service", "restart", "--json", "alice"],
     );
-    // The restart drops connections — "configured" must mean "serving
-    // again", so the next mc call can't land in the restart window.
+    // The restart drops connections, so "configured" must mean "serving
+    // again"; the next mc call must not land in the restart window.
     expect(cmds[2].args).toEqual(["ready", "alice"]);
   });
 
   it("setAuditWebhook retries `ready` until MinIO answers again", async () => {
     const cmds: RecordedCommand[] = [];
-    // MinIO refuses twice mid-restart, then comes back.
     const readyFailures = { left: 2 };
     await client(cmds, (args) => {
       if (args[0] === "ready" && readyFailures.left > 0) {
@@ -194,8 +191,8 @@ describe("McShellClient arg-building", () => {
   });
 
   it("createUser failure never leaks the secret key in the error", async () => {
-    // The secret sits after `--` (structurally omitted) AND is declared for
-    // masking — the failure must be loggable without leaking it.
+    // The secret sits after `--`, so argv is structurally omitted from
+    // errors, and it is also declared for masking as a backup.
     const failing = client([], () => ({
       code: 1,
       stdout: "",
@@ -209,8 +206,6 @@ describe("McShellClient arg-building", () => {
   });
 
   it("args after -- are omitted from errors even with no declared secrets", async () => {
-    // exec's structural rule is the backstop: createUser's argv tail never
-    // appears in the message.
     const failing = client([], () => ({ code: 1, stdout: "", stderr: "boom" }));
     const err = await failing
       .createUser({ accessKeyId: "AK-visible-id", secretKey: "SK" })
@@ -279,9 +274,8 @@ describe("McShellClient parsing + errors", () => {
   });
 
   it("removeBucket purges locked versions with --bypass before rb", async () => {
-    // `rb --force` alone cannot delete GOVERNANCE-locked versions (every
-    // active friend has some) — the version purge with the root bypass must
-    // come first, then the bucket removal.
+    // `rb --force` cannot delete GOVERNANCE-locked versions, which every
+    // active friend has, so the bypass purge must run before the removal.
     const cmds: RecordedCommand[] = [];
     await client(cmds).removeBucket("backup");
     expect(cmds.map((c) => c.args)).toEqual([

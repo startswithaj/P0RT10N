@@ -7,7 +7,6 @@ import { activityRouter } from "./routers/activity.ts";
 import { auditRouter } from "./routers/audit.ts";
 import { statusRouter } from "./routers/status.ts";
 
-/** The composed API. The Solid client imports `AppRouter` for end-to-end types. */
 export const appRouter = router({
   auth: authRouter,
   friends: friendsRouter,

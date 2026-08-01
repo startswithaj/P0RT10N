@@ -39,11 +39,10 @@ describe("ProvisioningService boot recovery", () => {
     expect(calls.indexOf("runtime:ensureInstance")).toBeLessThan(
       calls.indexOf("runtime:waitUntilHealthy"),
     );
-    // A fresh SERVE key (server-side tag), not a friend key.
+    // Mints a fresh SERVE key (server-side tag), not a friend key.
     expect(calls).toContain("ts:mintAuthKey:tag:p0rt1on-serve");
-    // Never re-creates the bucket — that data survives in the pantry.
+    // Never re-creates the bucket; that data survives in the pantry.
     expect(calls).not.toContain("mc:makeBucketWithLock");
-    // Records the re-enrolled serve node, re-issues the webhook + ACL.
     expect(calls).toContain("repo:recordServeNodeId:old");
     expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("ts:ensureFriendAcl");

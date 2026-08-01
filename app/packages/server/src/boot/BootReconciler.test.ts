@@ -51,7 +51,7 @@ describe("BootReconciler", () => {
       mockInstanceRuntime(calls, opts),
       ops,
       noopLogger(),
-      { attempts: 2, delayMs: 0 }, // bounded wait, no real sleeping in tests
+      { attempts: 2, delayMs: 0 }, // Uses a bounded wait so tests never actually sleep.
     );
   }
 
@@ -68,8 +68,8 @@ describe("BootReconciler", () => {
       degraded: 0,
     });
     expect(calls).toContain("ops:realign:alice");
-    // Adopt runs even when healthy — it converges config drift (restart
-    // policy); the actual no-start behaviour is DockerRuntime's, tested there.
+    // Adopt runs even when healthy because it converges restart-policy drift;
+    // the no-start behavior itself belongs to DockerRuntime and is tested there.
     expect(calls).toContain(`runtime:ensureRunning:alice`);
   });
 
@@ -89,7 +89,7 @@ describe("BootReconciler", () => {
 
     expect(summary.recovered).toBe(1);
     expect(calls).toContain("ops:recover:alice");
-    // Data survives ⇒ never marked failed, never realigned separately.
+    // When data survives, the instance is never marked failed or realigned separately.
     expect(calls.some((c) => c.startsWith("repo:failInstanceMissing")))
       .toBe(false);
   });
@@ -157,7 +157,7 @@ describe("BootReconciler", () => {
     const summary = await build(calls, {
       rows: [ROW, bobRow],
       // alice's instance exists and is healthy; bob's is absent, its data is
-      // gone, and the DB fail-flip blows up — bob must not take alice down.
+      // gone, and the DB fail-flip blows up, so bob must not take alice down.
       instances: [running],
       hasDataFor: (name) => name !== "bob",
       repo: {

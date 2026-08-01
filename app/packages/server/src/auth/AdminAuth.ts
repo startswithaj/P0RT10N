@@ -1,11 +1,8 @@
-// Optional single-admin auth. Creds come from env (P0RT1ON_ADMIN_USERNAME/
-// _PASSWORD); password is hashed once at boot (SHA-256 via Web Crypto), plaintext
-// never retained. Sessions are random opaque tokens held in memory (restart =
-// re-login). Disabled → every request allowed; boot guard forbids non-loopback bind then.
+// The password is hashed once at boot with SHA-256 and the plaintext is never retained. Sessions
+// are random opaque tokens held only in memory, so a manager restart requires re-login.
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** SHA-256 → hex string. */
 async function hash(value: string): Promise<string> {
   const bits = await crypto.subtle.digest(
     "SHA-256",
@@ -17,10 +14,9 @@ async function hash(value: string): Promise<string> {
 }
 
 export class AdminAuth {
-  private readonly sessions = new Map<string, number>(); // token -> expiresAt
+  private readonly sessions = new Map<string, number>();
 
   private constructor(
-    /** Null → auth off; middleware allows every request. */
     private readonly creds: { username: string; passHash: string } | null,
     private readonly now: () => number,
   ) {}
@@ -29,12 +25,11 @@ export class AdminAuth {
     return this.creds !== null;
   }
 
-  /** Auth off — allows everything (safe only on a loopback bind; boot guard). */
+  // Auth being off is only safe on a loopback bind, which the boot guard enforces.
   static disabled(): AdminAuth {
     return new AdminAuth(null, Date.now);
   }
 
-  /** Hash the env password once; returns an enabled instance. */
   static async create(
     creds: { username: string; password: string },
     now: () => number = () => Date.now(),
@@ -43,8 +38,8 @@ export class AdminAuth {
     return new AdminAuth({ username: creds.username, passHash }, now);
   }
 
-  /** Verify by hashing the submitted password and comparing to the stored one
-   * (one-way hash → a plain compare is safe). */
+  // The submitted password is hashed and compared with plain equality, which is safe
+  // since the underlying hash is one-way.
   async verify(username: string, password: string): Promise<boolean> {
     if (this.creds === null) return false;
     return (await hash(password)) === this.creds.passHash &&
@@ -57,7 +52,6 @@ export class AdminAuth {
     return token;
   }
 
-  /** True if the token exists and hasn't expired (expired tokens are pruned). */
   validate(token: string): boolean {
     const expiresAt = this.sessions.get(token);
     if (expiresAt === undefined) return false;

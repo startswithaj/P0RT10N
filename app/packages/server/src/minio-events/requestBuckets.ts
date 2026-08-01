@@ -1,39 +1,31 @@
-// Rolling 24h request counting via hourly buckets: a compact hour-epoch → count
-// map (~25 entries/friend). Writes bump the current hour + prune past the
-// window; reads sum in-window buckets. Windowing on read means the count decays
-// to zero as a friend idles, rather than freezing.
+// Rolling 24h request counts are windowed hourly buckets summed on read, so
+// the count decays to zero as a friend idles rather than freezing.
 
-/** hour-epoch (floor(ms / 1h), as a string key) -> request count in that hour. */
+/** Each key is an hour-epoch (floor(ms / 1h)) stored as a string, mapped to
+ * the request count for that hour. */
 export type RequestBuckets = Record<string, number>;
 
-/** Hours in the rolling window. 24 buckets ≈ "the last 24 hours" (hour-coarse). */
 const WINDOW_HOURS = 24;
 const HOUR_MS = 3_600_000;
 
-/** The whole-hour bucket an ISO timestamp falls in, or null if unparseable. */
 function hourOf(iso: string): number | null {
   const ms = new Date(iso).getTime();
   return Number.isFinite(ms) ? Math.floor(ms / HOUR_MS) : null;
 }
 
-/** The bucket key for an ISO timestamp (throws on unparseable input). */
 export function hourKey(iso: string): string {
   const hour = hourOf(iso);
   if (hour === null) throw new Error(`unparseable timestamp: ${iso}`);
   return String(hour);
 }
 
-/** The oldest hour still inside the window ending at `now` (null if `now` bad). */
 function cutoff(now: string): number | null {
   const hour = hourOf(now);
   return hour === null ? null : hour - (WINDOW_HOURS - 1);
 }
 
-/**
- * Record one request at `at`, then drop buckets older than the window ending at
- * `now`. An unparseable `now` leaves existing buckets untouched (prune is a
- * best-effort trim, never a data-loss risk); an unparseable `at` is not counted.
- */
+/** An unparseable `at` is not counted, and an unparseable `now` skips pruning,
+ * leaving existing buckets untouched rather than risking data loss. */
 export function bump(
   buckets: RequestBuckets,
   at: string,
@@ -46,11 +38,8 @@ export function bump(
   return prune(next, now);
 }
 
-/**
- * Drop buckets outside the window ending at `now` — older than the window OR
- * future-dated (a skewed event timestamp would otherwise be counted in every
- * 24h sum until the clock catches up to it).
- */
+/** Buckets older than the window or future-dated are both dropped, so a
+ * skewed event timestamp can't be counted in every 24h sum forever. */
 export function prune(buckets: RequestBuckets, now: string): RequestBuckets {
   const oldest = cutoff(now);
   if (oldest === null) return { ...buckets };
@@ -62,11 +51,8 @@ export function prune(buckets: RequestBuckets, now: string): RequestBuckets {
   );
 }
 
-/**
- * Hourly counts across the window ending at `now`, oldest→newest (fixed length
- * WINDOW_HOURS). Missing hours are 0; empty when `now` is unparseable. Feeds the
- * Status-page sparkline — same window as `sumLast24h`.
- */
+/** Must use the same window as `sumLast24h` so the sparkline and the total
+ * agree. */
 export function hourlySeries(buckets: RequestBuckets, now: string): number[] {
   const oldest = cutoff(now);
   if (oldest === null) return [];
@@ -76,7 +62,6 @@ export function hourlySeries(buckets: RequestBuckets, now: string): number[] {
   );
 }
 
-/** Sum of requests within the window ending at `now`. */
 export function sumLast24h(buckets: RequestBuckets, now: string): number {
   const oldest = cutoff(now);
   return Object.entries(buckets).reduce(

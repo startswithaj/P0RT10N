@@ -20,7 +20,6 @@ describe("UsageSampler", () => {
     { friendId: 2, bucket: "bob", alias: "p0rt1on-bob", minioPort: 9101 },
   ];
 
-  /** In-memory UsageStore recording inserted samples. */
   function fakeStore(targets: UsageSampleTarget[]) {
     const inserted: number[] = [];
     const store: UsageStore = {
@@ -61,7 +60,7 @@ describe("UsageSampler", () => {
       },
       noopLogger(),
       undefined,
-      { attempts: 1, delayMs: 1 }, // no retry — keeps failure tests instant
+      { attempts: 1, delayMs: 1 }, // No retries, so failure tests stay instant.
     );
 
   it("sampleAll measures every active friend and records a sample", async () => {
@@ -103,17 +102,17 @@ describe("UsageSampler", () => {
     const duCalls: string[] = [];
     const sampler = buildSampler(store, duCalls);
 
-    // A burst of events 10s apart — each re-arms the 30s timer.
+    // Events arrive 10s apart during the burst; each one re-arms the 30s debounce timer.
     sampler.noteActivity(2);
     await time.tickAsync(10_000);
     sampler.noteActivity(2);
     await time.tickAsync(10_000);
     sampler.noteActivity(2);
-    expect(duCalls).toEqual([]); // still inside the burst
+    expect(duCalls).toEqual([]); // No sample fires yet because the burst is still active.
 
-    await time.tickAsync(30_000); // 30s of quiet → exactly one sample
-    // tickAsync fires the timer but doesn't flush the promise chain the
-    // callback starts — drain it before asserting.
+    await time.tickAsync(30_000); // 30 seconds of quiet triggers exactly one sample.
+    // tickAsync fires the timer but does not flush the promise chain the
+    // callback starts, so drain microtasks before asserting.
     await time.runMicrotasks();
     expect(duCalls).toEqual(["p0rt1on-bob/bob"]);
     expect(inserted).toEqual([2]);
@@ -121,7 +120,7 @@ describe("UsageSampler", () => {
 
   it("noteActivity for a friend no longer active is a silent no-op", async () => {
     using time = new FakeTime();
-    const { store, inserted } = fakeStore([TARGETS[0]]); // bob (2) not active
+    const { store, inserted } = fakeStore([TARGETS[0]]); // Friend 2 (bob) is not active here.
     const sampler = buildSampler(store);
 
     sampler.noteActivity(2);

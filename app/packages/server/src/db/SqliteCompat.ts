@@ -1,8 +1,6 @@
 /**
- * Compatibility wrapper adapting @db/sqlite's API to the surface
- * drizzle-orm/better-sqlite3 expects. better-sqlite3 wants
- * stmt.all()/get()/run()/raw().all(); @db/sqlite gives all()/get()/run()/values().
- * We bridge .raw() → .values(). (Ported from chargeHA's SqliteCompat.)
+ * Adapts @db/sqlite's all()/get()/run()/values() surface to what
+ * drizzle-orm/better-sqlite3 expects; .raw() bridges to .values().
  */
 import {
   Database as NativeDatabase,
@@ -16,10 +14,8 @@ import type {
 } from "./driver.ts";
 
 /**
- * The DB opens with `int64: true` so integers > 2^31 aren't truncated to a
- * 32-bit value (a @db/sqlite v0.12 limitation — byte counts/quotas exceed that).
- * The driver then returns those as BigInt; we coerce back to JS number (safe up
- * to 2^53 ≈ 9 PB), since the rest of the app works in numbers.
+ * int64: true keeps integers over 2^31 from truncating, a @db/sqlite v0.12
+ * limitation that matters since byte counts/quotas exceed it; this coerces the result back to a JS number.
  */
 function fromBigInt(value: unknown): unknown {
   return typeof value === "bigint" ? Number(value) : value;
@@ -53,7 +49,6 @@ class CompatStatement implements DatabaseStatement {
     };
   }
 
-  /** "Raw mode" view returning tuples instead of objects. */
   raw(): DatabaseRawStatement {
     return new CompatRawStatement(this.stmt);
   }
@@ -72,16 +67,13 @@ class CompatRawStatement implements DatabaseRawStatement {
   }
 }
 
-/** Wraps @db/sqlite with the better-sqlite3 API surface drizzle requires. */
 export class CompatDatabase implements DatabaseDriver {
   private readonly native: NativeDatabase;
 
   constructor(path: string) {
     this.native = new NativeDatabase(path, { int64: true });
-    // The timer-driven sweep and tRPC request handlers share this DB: WAL
-    // lets readers overlap a writer, and busy_timeout waits out short lock
-    // contention instead of failing immediately with SQLITE_BUSY.
-    // journal_mode returns a row, so it must go through the query path.
+    // WAL lets readers overlap a writer and busy_timeout avoids immediate SQLITE_BUSY
+    // failures under lock contention, since the sweep and tRPC handlers share this DB.
     this.native.prepare("PRAGMA journal_mode = WAL").get();
     this.native.exec("PRAGMA busy_timeout = 5000");
   }

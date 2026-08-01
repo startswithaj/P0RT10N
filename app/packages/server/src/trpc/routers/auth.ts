@@ -2,9 +2,9 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "../trpc.ts";
 
-/** Session cookie name — shared with the server's per-request cookie parse. */
+/** Session cookie name; must match the name server.ts uses when parsing the request cookie. */
 export const SESSION_COOKIE = "p0rt1on_session";
-const MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 function sessionCookie(token: string, maxAge: number, secure: boolean): string {
   const flags = ["HttpOnly", "SameSite=Strict", "Path=/", `Max-Age=${maxAge}`];
@@ -12,9 +12,8 @@ function sessionCookie(token: string, maxAge: number, secure: boolean): string {
   return `${SESSION_COOKIE}=${token}; ${flags.join("; ")}`;
 }
 
-/** Public auth endpoints (the only procedures reachable without a session). */
+/** The only procedures reachable without a session; every other router requires one. */
 export const authRouter = router({
-  /** Whether auth is on, and whether THIS request is authenticated. */
   status: publicProcedure.query(({ ctx }) => ({
     enabled: ctx.auth.enabled,
     authenticated: !ctx.auth.enabled ||
@@ -26,7 +25,7 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       if (!ctx.auth.enabled) return { ok: true };
       if (!(await ctx.auth.verify(input.username, input.password))) {
-        // Generic message — never distinguish username from password.
+        // Generic message; never reveal whether the username or password was wrong.
         throw new TRPCError({
           code: "UNAUTHORIZED",
           message: "invalid credentials",

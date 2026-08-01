@@ -3,19 +3,13 @@ import type { HealthCheck, SystemHealth } from "@p0rt1on/shared/domain";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
 
-// Boot preflight over the tailnet prerequisites a portion needs before anyone
-// creates one. All API-checkable on boot: MagicDNS (needs dns:read) and HTTPS
-// certs (needs networking_settings:read) read directly. A missing SCOPE (403)
-// is a warn (reachable, just unverifiable), not a hard block.
-// reportServeUnavailable is the runtime backstop if a real provision proves
-// serve is off.
+// A missing OAuth scope (403) means the API is reachable but unverifiable, so
+// it is classified as a warn rather than a hard block.
 
-/** Tailscale admin DNS page — where MagicDNS + HTTPS certificates live. */
 const DNS_ADMIN_URL = "https://login.tailscale.com/admin/dns";
 
-/** The alternative to enabling HTTPS: serve plain HTTP over the tailnet. Verified
- * escape hatch — the instance entrypoint runs `serve --http=80` (no cert) and the
- * healthcheck passes. WireGuard still encrypts the path. */
+/** Plain HTTP is a verified fallback: `tailscale serve --http=80` still runs
+ * over WireGuard-encrypted transport, so it is not actually insecure. */
 const HTTP_MODE_HINT =
   " Or set P0RT1ON_TAILSCALE_SERVE_MODE=http to serve plain HTTP over the " +
   "(still WireGuard-encrypted) tailnet instead.";
@@ -26,8 +20,6 @@ export interface SystemHealthConfig {
   aclMode: "auto" | "manual";
 }
 
-/** A boolean API read: the value, or a failure flagged as scope-missing (403)
- * vs a genuine reachability/credential error. */
 type Read =
   | { ok: true; value: boolean }
   | { ok: false; forbidden: boolean; error: string };
@@ -47,7 +39,7 @@ export class TailnetSystemHealthService implements SystemHealthService {
     private readonly logger: Logger,
     private readonly now: () => number = () => Date.now(),
   ) {
-    // Optimistic until the boot probe runs — the probe is awaited before serve.
+    // Optimistic default until the boot probe runs, since the probe is awaited before the server starts serving.
     this.#latched = {
       checks: [],
       canProvision: true,
@@ -84,8 +76,6 @@ export class TailnetSystemHealthService implements SystemHealthService {
     this.#latch([...others, this.#httpsServeCheck({ ok: true, value: false })]);
   }
 
-  /** Run a boolean API read, classifying failures as scope-missing (403) vs a
-   * reachability/credential error. */
   async #read(fn: () => Promise<boolean>): Promise<Read> {
     try {
       return { ok: true, value: await fn() };
@@ -96,8 +86,8 @@ export class TailnetSystemHealthService implements SystemHealthService {
   }
 
   #apiCheck(magic: Read, https: Read): HealthCheck {
-    // A 403 means the API is reachable and the creds are valid, just missing a
-    // scope — reachability only fails when neither call got even that far.
+    // A 403 means the API is reachable and credentials are valid, just missing
+    // a scope, so reachability only fails when neither call gets even that far.
     const reachable = [magic, https].some((r) => r.ok || r.forbidden);
     if (reachable) {
       return {
@@ -162,7 +152,7 @@ export class TailnetSystemHealthService implements SystemHealthService {
 
   async #serveTagCheck(): Promise<HealthCheck> {
     const tag = this.config.serveNodeTag;
-    // A read error surfaces as a string (never a boolean) → warn, don't block.
+    // A read error surfaces as a string rather than a boolean, so that case is treated as a warn, not a block.
     const owned = await this.tailscale.isTagOwned(tag).catch((err) =>
       errMsg(err)
     );
@@ -183,7 +173,7 @@ export class TailnetSystemHealthService implements SystemHealthService {
         detail: `${tag} is declared in tagOwners.`,
       };
     }
-    // Manual ACL mode: the admin declares tags by hand — never write here.
+    // In manual ACL mode the admin declares tags by hand, so this code must never write to the policy.
     if (this.config.aclMode === "manual") {
       return {
         id: "serveTag",
@@ -196,7 +186,7 @@ export class TailnetSystemHealthService implements SystemHealthService {
         fixUrl: DNS_ADMIN_URL,
       };
     }
-    // Auto mode: create it now — idempotent, and pre-warms provisioning.
+    // In auto mode the tag is created immediately since the operation is idempotent and pre-warms provisioning.
     try {
       await this.tailscale.ensureTagOwner(tag);
       return {

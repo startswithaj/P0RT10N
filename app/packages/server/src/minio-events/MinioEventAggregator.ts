@@ -8,13 +8,12 @@ import type { Logger } from "../services/types.ts";
 import type { MinioEventSubscription } from "./MinioEventSubscription.ts";
 import type { FriendEvent } from "./resolveFriend.ts";
 
-// Folds resolved MinIO events into the per-friend `activity` row (1:1, friendId
-// PK). Upstream resolveFriend already did bucket→friend + anti-poll filtering.
-// Local-only single-writer, so read-modify-write upsert is fine.
+// This is the only writer to the per-friend `activity` row, so the
+// read-modify-write upsert below is safe without locking.
 
 export class MinioEventAggregator {
-  /** Resolves when the event stream ends (shutdown). The consumer starts
-   * folding on construction; await this in tests / for a clean stop. */
+  /** Resolves when the event stream ends. Folding starts on construction;
+   * await this in tests or for a clean shutdown. */
   readonly done: Promise<void>;
 
   constructor(
@@ -26,9 +25,8 @@ export class MinioEventAggregator {
     this.done = this.run();
   }
 
-  /** Fold resolved events into per-friend activity until the stream aborts. A
-   * mid-stream throw (e.g. a SQLite error) stops this consumer, logged — it
-   * never becomes an unhandled rejection that takes the process down. */
+  /** A mid-stream throw here is caught and logged rather than becoming an
+   * unhandled rejection that would crash the process. */
   private async run(): Promise<void> {
     try {
       // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
@@ -42,9 +40,9 @@ export class MinioEventAggregator {
     }
   }
 
-  /** Fold one resolved event into its friend's activity row. */
   fold(fe: FriendEvent): Promise<void> {
-    // Sync SQLite body deferred so a throw rejects rather than escaping sync.
+    // The synchronous SQLite work is deferred so a throw becomes a promise
+    // rejection instead of escaping synchronously.
     return defer(() => this.foldSync(fe));
   }
 
@@ -53,11 +51,12 @@ export class MinioEventAggregator {
       .where(eq(activity.friendId, friendId)).get();
     const byOp: RequestsByOp = { ...existing?.requestsByOp };
     byOp[event.op] = (byOp[event.op] ?? 0) + 1;
-    // Denied = failed auth: 401 (bad/expired creds) as well as 403.
+    // A denied request is a failed auth: either 401 (bad or expired
+    // credentials) or 403.
     const denied = event.statusCode === 401 || event.statusCode === 403 ? 1 : 0;
     const now = this.now();
-    // Bucket this request by its own time, then keep requests24h as a synced
-    // cache of the in-window sum (reads recompute, but this stays sensible too).
+    // requests24h is a synced cache of the in-window sum kept alongside the
+    // raw buckets, even though reads could recompute it fresh.
     const requestBuckets = bump(
       existing?.requestBuckets ?? {},
       event.time,
@@ -70,7 +69,8 @@ export class MinioEventAggregator {
         requests24h: sumLast24h(requestBuckets, now),
         requestBuckets,
         requestsByOp: byOp,
-        // Monotonic: an out-of-order event must not move "last seen" backwards.
+        // lastRequestAt is monotonic: an out-of-order event must never move
+        // it backwards.
         lastRequestAt:
           existing.lastRequestAt && existing.lastRequestAt > event.time
             ? existing.lastRequestAt

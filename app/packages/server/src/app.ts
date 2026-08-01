@@ -35,18 +35,14 @@ import { AdminAuth } from "./auth/AdminAuth.ts";
 import type { Logger } from "./services/types.ts";
 import type { TrpcContext } from "./trpc/trpc.ts";
 
-// Dependency wiring: buildApp assembles services from DB + Env + logger.
-// All env reads go through Env; nothing here touches Deno.env.
+// All env reads go through Env; nothing here touches Deno.env directly.
 
-/** Everything main.ts needs: the request context + the boot-only pieces. */
 export interface App {
   context: TrpcContext;
   bootReconciler: BootReconciler;
-  /** Shared mc factory (the usage sampler in main.ts needs per-instance clients). */
   mcFactory: McShellClientFactory;
 }
 
-/** P0RT1ON_RUNTIME=docker (default) or kubernetes — the only branch point. */
 async function buildInstanceRuntime(
   env: Env,
   runner: DenoCommandRunner,
@@ -54,9 +50,6 @@ async function buildInstanceRuntime(
 ): Promise<InstanceRuntime> {
   if (env.runtimeKind === "kubernetes") {
     const settings = env.kubeSettings();
-    // No explicit overrides → the client auto-detects the mounted in-cluster
-    // ServiceAccount (token + CA + server); dev passes P0RT1ON_K8S_API and
-    // P0RT1ON_K8S_TOKEN.
     const client = await buildRestClient({
       apiBase: settings.apiBase,
       token: settings.tokenInline,
@@ -82,8 +75,6 @@ async function buildInstanceRuntime(
   });
 }
 
-/** P0RT1ON_TAILSCALE_BACKEND=tailscale (default) or headscale — the only place
- * this branches. Headscale is the self-hosted test-tier control plane. */
 function buildTailscaleApi(env: Env): TailscaleApi {
   if (env.tailscaleBackend === "headscale") {
     return new HeadscaleHttpApi({
@@ -97,7 +88,6 @@ function buildTailscaleApi(env: Env): TailscaleApi {
   });
 }
 
-/** Request-scoped wiring only — the common case for routers and tests. */
 export async function buildContext(
   database: Database,
   env: Env,
@@ -121,10 +111,9 @@ export async function buildApp(
   const repo = new DrizzleProvisioningRepo(database.db, {
     portRange: config.portRange,
     serveNodeTag: config.serveNodeTag,
-    // Instances publish to the HOST loopback — a containerized manager's own
-    // netns says nothing about those ports, so only probe when host-run.
-    // Under k8s there are no host ports at all (the allocated port is just
-    // the in-pod MinIO listen port), so probing is meaningless there too.
+    // Instances publish to the host's loopback interface; a containerized manager can't
+    // see those ports from its own network namespace, so probing only applies when running on the host.
+    // Kubernetes has no host ports at all, so probing is skipped there too.
     probePort:
       env.runtimeKind === "docker" && config.instanceAddressing === "host"
         ? denoPortProbe()
@@ -137,7 +126,6 @@ export async function buildApp(
     runner,
     tempFiles,
     keyGen,
-    // Only the runtime knows how to address an instance's admin plane.
     (t) => instanceRuntime.adminEndpoint(t.alias, t.minioPort),
   );
   const tailscale = buildTailscaleApi(env);
@@ -155,7 +143,7 @@ export async function buildApp(
     new McSmokeTester(runner, tempFiles),
     logger,
   );
-  // Env credentials → hashed auth at boot; absent → disabled (loopback only).
+  // Env credentials become hashed auth at boot; if absent, auth is disabled.
   const adminCreds = env.adminAuth;
   const auth = adminCreds
     ? await AdminAuth.create(adminCreds)

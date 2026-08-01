@@ -7,7 +7,6 @@ import type {
 import { containerNames } from "../runtime/names.ts";
 import type { InventoryService, Logger } from "./types.ts";
 
-/** One instance row the inventory probes (subset of the instances table). */
 export interface StatusInstanceRow {
   kind: string;
   tsHostname: string;
@@ -16,38 +15,30 @@ export interface StatusInstanceRow {
   tsTag: string;
 }
 
-/** The read-side dependency: the instance list plus per-instance request series. */
 export interface StatusInstances {
   instancesForStatus(): Promise<StatusInstanceRow[]>;
   requestSeriesByInstance(): Promise<Map<string, number[]>>;
 }
 
-/** Container health + DB status (+ whether the data survives) → the Status-page
- * state. `dataGone` only matters once an instance is otherwise "down". */
+/** `dataGone` only matters once an instance is otherwise considered down. */
 function serviceState(
   health: InstanceHealth,
   dbStatus: string,
   dataGone: boolean,
 ): ServiceStatus["state"] {
   if (health === "healthy") return "up";
-  // Reaping is teardown-in-progress: the container is going away on purpose, so
-  // a failing health probe here is expected — surface it as pending, not down.
+  // Reaping means teardown is already in progress, so a failing health probe
+  // is expected there; it surfaces as pending, not down.
   if (dbStatus === "reaping") return "pending";
   if (health === "starting" || dbStatus === "provisioning") {
     return "provisioning";
   }
-  // Down AND the data is gone ⇒ the backups are unrecoverable — a distinct,
-  // louder state than a down instance whose pantry data survives (recoverable).
+  // When an instance is down and its data is also gone, the backups are
+  // unrecoverable, which is more severe than a down instance whose data survives.
   if (dataGone) return "lost";
   return "down";
 }
 
-/**
- * Builds the Status-page inventory: each instance is one container (MinIO +
- * tailscaled) probed for health via the runtime; both the MinIO row and the
- * Tailscale row reflect that single container. Plus the control-plane API. The
- * probes run concurrently per instance.
- */
 export class RuntimeInventoryService implements InventoryService {
   constructor(
     private readonly queries: StatusInstances,
@@ -66,8 +57,6 @@ export class RuntimeInventoryService implements InventoryService {
       instances.map((inst) => this.probe(inst)),
     );
     return {
-      // Every MinIO row carries a series (empty ⇒ flat baseline sparkline); the
-      // `spark` field is what distinguishes an activity row from tailscale/host.
       minio: probed.map((p) => ({
         ...p.minio,
         spark: series.get(p.minio.instance ?? "") ?? [],
@@ -85,13 +74,9 @@ export class RuntimeInventoryService implements InventoryService {
   private async probe(
     inst: StatusInstanceRow,
   ): Promise<{ minio: ServiceStatus; tailscale: ServiceStatus }> {
-    // The container name stays as the row LABEL only (the status page shows
-    // the real resource name for debugging); health goes through the
-    // runtime-agnostic interface.
     const names = containerNames(inst.tsHostname);
     const health = await this.runtime.instanceHealth(inst.tsHostname);
-    // Only a not-healthy instance can be "lost"; healthy ones skip the extra
-    // storage check. Data gone (pantry dir / data PVC) while down = backups lost.
+    // Only a not-healthy instance can be lost; healthy instances skip the extra storage check.
     const dataGone = health !== "healthy" &&
       !(await this.runtime.hasData(inst.tsHostname));
     const state = serviceState(health, inst.status, dataGone);
@@ -103,10 +88,8 @@ export class RuntimeInventoryService implements InventoryService {
         instance: inst.tsHostname,
       },
       tailscale: {
-        // Same container as the MinIO row; diagnostics live on that row only
-        // (no `instance` → not expandable). Show the serve tag (the row name
-        // already carries the hostname; the friend's full serve URL lives on
-        // the friend detail, resolved live from the node).
+        // Shares the MinIO row's container and deliberately omits `instance`,
+        // since diagnostics belong on the MinIO row only.
         name: `${inst.tsHostname} (serve)`,
         detail: inst.tsTag,
         state,

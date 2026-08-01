@@ -11,7 +11,6 @@ import { MINIO_EVENT_PATH } from "./lib/Env.ts";
 const TRPC_ENDPOINT = "/trpc";
 const MINIO_EVENT_ENDPOINT = MINIO_EVENT_PATH;
 
-/** Read one cookie value from a Cookie header (undefined if absent). */
 function readCookie(header: string | null, name: string): string | undefined {
   return header
     ?.split(/;\s*/)
@@ -19,36 +18,29 @@ function readCookie(header: string | null, name: string): string | undefined {
     ?.slice(name.length + 1);
 }
 
-/** Token-guarded MinIO audit-webhook sink (loopback/container-net only). */
+/** Token-guarded audit-webhook sink, reachable only from loopback or the container network. */
 export interface MinioEventSink {
   token: string;
-  /** Publish one raw event to the bus. Sync + non-blocking by contract. */
+  /** Must be synchronous and non-blocking. */
   onEvent: (raw: unknown) => void;
 }
 
 export interface ServerOptions {
   port: number;
   context: TrpcContext;
-  /** Admin listener bind. Defaults to this machine (127.0.0.1); a wider bind is
-   * allowed without auth (main.ts warns). */
+  /** Defaults to 127.0.0.1; a wider bind is allowed without auth and main.ts
+   * warns instead of refusing to boot. */
   bindHost?: string;
-  /**
-   * Built SPA assets dir to serve for non-API routes (production). Omit in dev —
-   * the Vite dev server serves the frontend, so the API only handles tRPC.
-   */
   staticDir?: string;
-  /** Aborts the server (used by tests for clean shutdown). */
   signal?: AbortSignal;
-  /** Called once the listener is bound (tests await this for the real port). */
   onListen?: (addr: { port: number }) => void;
 }
 
 export interface MinioEventServerOptions {
   port: number;
   /**
-   * Bind address for the audit listener. `0.0.0.0` when containerized so
-   * instance containers can POST events via the host gateway — safe because
-   * this listener serves ONLY the token-guarded webhook, never the admin API.
+   * Defaults to 0.0.0.0 when containerized so containers reach it via the host gateway.
+   * This is safe: the listener serves only the token-guarded webhook, never the admin API.
    */
   hostname?: string;
   sink: MinioEventSink;
@@ -70,7 +62,6 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
-/** JSON.parse to a value or null — malformed input is a 400, not a throw. */
 function parseJson(text: string): unknown | null {
   try {
     return JSON.parse(text);
@@ -79,7 +70,6 @@ function parseJson(text: string): unknown | null {
   }
 }
 
-/** Handle a MinIO audit webhook POST: token-guard, parse, fan out to onEvent. */
 async function handleMinioEvent(
   req: Request,
   sink: MinioEventSink,
@@ -91,8 +81,8 @@ async function handleMinioEvent(
   if (!safeEqual(auth, `Bearer ${sink.token}`)) {
     return new Response("unauthorized", { status: 401 });
   }
-  // Reject oversized payloads BEFORE reading the body into memory — declared
-  // size first, then a hard streaming cap for bodies with no Content-Length.
+  // Rejects oversized payloads before reading the body into memory, checking
+  // the declared size first and applying a hard streaming cap for bodies with no Content-Length.
   if (Number(req.headers.get("content-length") ?? "0") > MAX_AUDIT_BODY_BYTES) {
     return new Response("payload too large", { status: 413 });
   }
@@ -104,16 +94,12 @@ async function handleMinioEvent(
   const body = parseJson(text);
   if (body === null) return new Response("bad request", { status: 400 });
   const events = Array.isArray(body) ? body : [body];
-  // publish is non-blocking and never throws — fan out directly (a 204 means
-  // "enqueued", not "persisted"; consumers fold/forward off the bus).
+  // Publish is non-blocking and never throws, so events fan out directly here.
+  // A 204 response means the event was enqueued, not persisted.
   events.forEach((e) => sink.onEvent(e));
   return new Response(null, { status: 204 });
 }
 
-/**
- * Serve the built SPA from `fsRoot`, falling back to `index.html` for paths
- * with no matching file so client-side routes (deep links, reload) work.
- */
 async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
   const res = await serveDir(req, { fsRoot, quiet: true });
   if (res.status === 404) return serveFile(req, join(fsRoot, "index.html"));
@@ -121,19 +107,10 @@ async function handleStatic(req: Request, fsRoot: string): Promise<Response> {
 }
 
 /**
- * Serve the tRPC router over HTTP. The admin surface binds this machine
- * (127.0.0.1) by default; a wider bind (`P0RT1ON_ADMIN_BIND_HOST`, e.g. behind a
- * TLS proxy) is allowed without auth — main.ts warns and the UI banners it.
- * `/health` is a plain liveness check; `/trpc` routes to tRPC.
- * The audit webhook is deliberately NOT here (see startMinioEventServer): serving
- * it from this listener once forced `0.0.0.0` binds that exposed the whole
- * unauthenticated admin API to every container. When `staticDir` is set
- * (production), everything else serves the built SPA; in dev it's unset and
- * non-API requests fall through to tRPC (Vite serves the UI).
+ * The audit webhook is deliberately not served from this listener.
+ * Combining them once forced a 0.0.0.0 bind that exposed the whole unauthenticated admin API to every container.
  */
 export function startServer(opts: ServerOptions): Deno.HttpServer {
-  // A wider bind without a password no longer refuses to boot — main.ts warns
-  // instead (and the UI banners it). `bind` is the listener address below.
   const bind = opts.bindHost ?? "127.0.0.1";
 
   const handleTrpc = (req: Request) =>
@@ -141,8 +118,6 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
       endpoint: TRPC_ENDPOINT,
       req,
       router: appRouter,
-      // Per-request: parse the session cookie + note the proxy's scheme, and
-      // hand the adapter's resHeaders through for Set-Cookie.
       createContext: ({ resHeaders }) => ({
         ...opts.context,
         sessionToken: readCookie(req.headers.get("cookie"), SESSION_COOKIE),
@@ -174,10 +149,8 @@ export function startServer(opts: ServerOptions): Deno.HttpServer {
 }
 
 /**
- * The network-exposed sibling: serves ONLY the token-guarded audit webhook
- * (plus `/health` for container healthchecks) so instance containers can
- * deliver events without the admin API ever leaving loopback. Every other
- * path — including anything tRPC-shaped — is a 404 by construction.
+ * Serves only the token-guarded audit webhook and /health, so instance
+ * containers can reach it without the admin API ever leaving loopback. Every other path is a 404 by construction.
  */
 export function startMinioEventServer(
   opts: MinioEventServerOptions,

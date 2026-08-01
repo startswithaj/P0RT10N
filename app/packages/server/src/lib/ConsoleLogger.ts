@@ -7,21 +7,15 @@ const RANK: Record<LogLevel, number> = {
   error: 40,
 };
 
-/** A formatted line plus its level — the sink decides where it goes. */
 export type LogSink = (level: LogLevel, line: string) => void;
 
 export interface ConsoleLoggerOptions {
-  /** Minimum level to emit (default "info"). Records below it are dropped. */
   level?: LogLevel;
-  /** Context merged into every record's meta (set via `child`). */
   bindings?: Record<string, unknown>;
-  /** Where formatted lines go. Injectable for tests; defaults to console.*. */
   sink?: LogSink;
-  /** Timestamp source. Injectable for tests; defaults to ISO wall-clock. */
   now?: () => string;
 }
 
-// Route by severity so callers can split stderr (warn/error) from stdout.
 const CONSOLE_FN: Record<LogLevel, (line: string) => void> = {
   debug: (line) => console.debug(line),
   info: (line) => console.info(line),
@@ -31,12 +25,6 @@ const CONSOLE_FN: Record<LogLevel, (line: string) => void> = {
 
 const defaultSink: LogSink = (level, line) => CONSOLE_FN[level](line);
 
-/**
- * Leveled structured logger. Format: `<iso> <LEVEL> <message> <json-meta>`.
- * `child` clones with merged bindings so a flow's IDs ride along on every line.
- * The threshold is configured at the edge (main.ts reads the log level) to keep
- * this class env-free and unit-testable.
- */
 export class ConsoleLogger implements Logger {
   readonly #level: LogLevel;
   readonly #threshold: number;

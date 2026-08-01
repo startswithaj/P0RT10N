@@ -31,7 +31,6 @@ describe("MinioEventBus", () => {
 
     bus.publish("1");
     bus.publish("2");
-    // Draining A does not consume B's copies.
     expect((await a.next()).value).toBe("1");
     expect((await a.next()).value).toBe("2");
     expect((await b.next()).value).toBe("1");
@@ -40,7 +39,7 @@ describe("MinioEventBus", () => {
 
   it("a stalled subscriber never blocks publish or starves the others", async () => {
     const { bus } = build(2);
-    // "stalled" subscribes but never consumes → its bounded queue overflows.
+    // "stalled" subscribes but never consumes, so its bounded queue overflows.
     bus.subscribe("stalled");
     const healthy = bus.subscribe("healthy").events[Symbol.asyncIterator]();
 
@@ -50,7 +49,6 @@ describe("MinioEventBus", () => {
     bus.publish("2");
     bus.publish("3");
 
-    // The healthy subscriber still drains its own queue independently.
     expect((await healthy.next()).value).toBe("2");
     expect((await healthy.next()).value).toBe("3");
   });
@@ -60,7 +58,7 @@ describe("MinioEventBus", () => {
     const a = bus.subscribe("a").events[Symbol.asyncIterator]();
     expect(bus.size).toBe(1);
 
-    const pending = a.next(); // parked (nothing published)
+    const pending = a.next(); // Parked because nothing has been published yet.
     abort.abort();
     expect(bus.size).toBe(0);
     expect((await pending).done).toBe(true);

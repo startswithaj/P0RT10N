@@ -31,15 +31,15 @@ describe("CryptoKeyGen", () => {
   it("derives root creds deterministically — stable per host + master key", () => {
     const gen = new CryptoKeyGen("master-1");
 
-    // Same host + master → identical (survives container/manager recreation).
+    // Same host and master key produce identical creds, so they survive container or manager recreation.
     expect(gen.rootCredentialFor("alice")).toEqual(
       gen.rootCredentialFor("alice"),
     );
-    // Different host → different creds.
+    // A different host produces different creds.
     expect(gen.rootCredentialFor("alice")).not.toEqual(
       gen.rootCredentialFor("bob"),
     );
-    // Different master key → different creds for the same host.
+    // A different master key produces different creds for the same host.
     expect(new CryptoKeyGen("master-2").rootCredentialFor("alice")).not.toEqual(
       gen.rootCredentialFor("alice"),
     );
@@ -50,11 +50,12 @@ describe("CryptoKeyGen", () => {
     const token = gen.auditWebhookToken();
 
     expect(token).toMatch(/^[A-Za-z0-9_-]{40}$/);
-    // Same master key → same token (nothing stored, listener + instances agree).
+    // Same master key derives the same token every time since nothing is
+    // stored; the listener and instances independently agree.
     expect(new CryptoKeyGen("master-1").auditWebhookToken()).toBe(token);
-    // Different master key → different token.
+    // A different master key derives a different token.
     expect(new CryptoKeyGen("master-2").auditWebhookToken()).not.toBe(token);
-    // Distinct derivation domain — never collides with any root credential.
+    // Distinct derivation domain, so it never collides with any root credential.
     expect(gen.rootCredentialFor("alice").secretKey).not.toBe(token);
   });
 });

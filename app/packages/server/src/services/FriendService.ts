@@ -7,17 +7,13 @@ import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
 import type { FriendService, Logger } from "./types.ts";
 
-// Friend-lifecycle orchestrator: reads detail via FriendQueries, drives the
-// external boundaries (mc, Tailscale), persists status/quota/audit via the repo.
-// Owns side effects + compensation (unlike the thin query services).
-
 export class FriendServiceImpl implements FriendService {
   constructor(
     private readonly queries: FriendQueries,
     private readonly friendRepo: ProvisioningRepo,
     private readonly mc: McClientFactory,
     private readonly tailscale: TailscaleApi,
-    /** Endpoint scheme — must match how instances serve. */
+    /** Endpoint scheme that must match how instances actually serve. */
     private readonly serveMode: "https" | "http",
     private readonly logger: Logger,
   ) {}
@@ -55,7 +51,6 @@ export class FriendServiceImpl implements FriendService {
     log.info("suspending friend");
     await this.requireStatus(friendId, "active", "suspend");
     const ctx = await this.friendRepo.context(friendId);
-    // Disable the S3 user (reversible) + revoke the friend's tailnet nodes.
     if (ctx.s3AccessKeyId) {
       await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
         .disableUser(
@@ -65,8 +60,8 @@ export class FriendServiceImpl implements FriendService {
     try {
       await this.revokeNodes(ctx.nodeTag, log);
     } catch (err) {
-      // Revoke failed: re-enable the S3 user and stay active so status matches real
-      // access; surface the error. Retry re-runs both idempotent steps and converges.
+      // If the revoke fails, re-enable the S3 user so status still matches real
+      // access; retrying suspend re-runs both idempotent steps until they converge.
       log.error("node revoke failed; re-enabling S3 user to stay consistent", {
         error: String(err),
       });
@@ -77,8 +72,6 @@ export class FriendServiceImpl implements FriendService {
         })
           .enableUser(ctx.s3AccessKeyId)
           .catch((e) =>
-            // Access is now half-revoked while status says active — loud;
-            // retrying suspend still converges.
             log.error("compensating enableUser failed too", {
               error: String(e),
             })
@@ -97,8 +90,7 @@ export class FriendServiceImpl implements FriendService {
     log.info("resuming friend");
     await this.requireStatus(friendId, "suspended", "resume");
     const ctx = await this.friendRepo.context(friendId);
-    // Re-enable the S3 user; the friend re-enrolls a node with a fresh key.
-    // Status flips only after the enable succeeded (mirror of suspend).
+    // Status flips to active only after the enable call succeeds, mirroring suspend's ordering.
     if (ctx.s3AccessKeyId) {
       await this.mc.forInstance({ alias: ctx.alias, minioPort: ctx.minioPort })
         .enableUser(
@@ -111,7 +103,6 @@ export class FriendServiceImpl implements FriendService {
     return this.get(friendId);
   }
 
-  /** State guard: the operation only makes sense from one source status. */
   private async requireStatus(
     friendId: number,
     required: FriendDetail["status"],

@@ -1,6 +1,5 @@
-// The object each consumer receives: a live event stream plus the signal that
-// tears it down (abort = unsubscribe). `pipe` chains a transform carrying the
-// same signal, so consumers compose parse/resolve declaratively.
+// Each consumer gets a live event stream and the signal that tears it down;
+// aborting is how a consumer unsubscribes. `pipe` carries that signal forward.
 
 export interface MinioEventSubscription<T> {
   readonly events: AsyncIterable<T>;

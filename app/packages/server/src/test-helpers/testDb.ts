@@ -5,10 +5,10 @@ import type { RepoConfig } from "../db/ProvisioningRepo.ts";
 import type { FriendNaming } from "../provisioning/deps.ts";
 import type { AddFriendInput, IsolationMode } from "@p0rt1on/shared/domain";
 
-// In-memory test database. Applies the SAME generated Drizzle migrations the
-// app runs at boot (no hand-written DDL) — one source of truth, no drift.
+// Applies the same generated Drizzle migrations the app runs at boot, with no
+// hand-written DDL, so there is a single source of truth and no drift.
 
-/** Open an in-memory DB with all migrations applied. Caller closes via `driver`. */
+/** Caller closes via `driver`. */
 export function createTestDatabase(): Database {
   const database = openDatabase(":memory:");
   runMigrations(database.driver);
@@ -21,7 +21,6 @@ export const TEST_REPO_CONFIG: RepoConfig = {
   serveNodeTag: "tag:p0rt1on-serve",
 };
 
-/** Mirrors ProvisioningService.buildNaming for repo-level tests. */
 export function namingFor(
   name: string,
   isolationMode: IsolationMode,
@@ -48,7 +47,6 @@ export function makeAddInput(
   };
 }
 
-/** Seed an activity row for a friend (rolling counters for the dashboard). */
 export function seedActivity(
   db: Db,
   friendId: number,
@@ -61,7 +59,7 @@ export function seedActivity(
   db.insert(activity).values({ friendId, ...fields }).run();
 }
 
-/** Seed a point-in-time usage sample. Pass explicit checkedAt to order them. */
+/** Pass an explicit `checkedAt` so seeded samples can be ordered deterministically. */
 export function seedUsage(
   db: Db,
   friendId: number,

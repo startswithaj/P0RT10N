@@ -31,7 +31,6 @@ import type { AddFriendInput, SystemHealth } from "@p0rt1on/shared/domain";
 // Central test mocks. Each records into a shared `Calls` log so tests can
 // assert ordering across deps. Import these; never redefine mocks inline.
 
-/** Ordered log of operations performed across all mocked deps. */
 export type Calls = string[];
 
 export function noopLogger(): Logger {
@@ -45,7 +44,7 @@ export function noopLogger(): Logger {
   return logger;
 }
 
-/** Logger that records warn messages, for asserting log-backstop behaviour. */
+/** Recorded warns let tests assert log-backstop behaviour. */
 export function recordingLogger(): { logger: Logger; warns: string[] } {
   const warns: string[] = [];
   const logger: Logger = {
@@ -68,14 +67,14 @@ export const TEST_CONFIG: ProvisioningConfig = {
   auditWebhookToken: "tok",
 };
 
-/** An Env backed by a fixed map (master key set so requireMasterKey passes). */
+/** Master key is set so `Env.masterKey` does not throw. */
 export function testEnv(overrides: Record<string, string> = {}): Env {
   const base: Record<string, string> = {
     P0RT1ON_MASTER_KEY: "test-master-key",
     P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "test-oauth-secret",
-    // Required on the default (tailscale) backend — see Env.tagOwner.
+    // Required on the default (tailscale) backend, per Env.tagOwner.
     P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
-    // Required on the default (docker) runtime — the pantry host path.
+    // Required on the default (docker) runtime as the pantry host path.
     P0RT1ON_PANTRY: "/srv/p0rt1on",
     ...overrides,
   };
@@ -87,18 +86,12 @@ export const TEST_CRED: S3Credential = {
   secretKey: "secret123",
 };
 
-/** One recorded subprocess invocation. */
 export interface RecordedCommand {
   command: string;
   args: string[];
   env?: Record<string, string>;
 }
 
-/**
- * Fake CommandRunner: records each invocation and returns `respond(args)`
- * (default: success, empty output). Use it to assert the exact `mc` args built
- * and to drive parsing/error paths without a real subprocess.
- */
 export function fakeRunner(
   recorded: RecordedCommand[],
   respond: (args: string[]) => CommandResult = () => ({
@@ -115,12 +108,10 @@ export function fakeRunner(
   };
 }
 
-/** A successful CommandResult with optional stdout. */
 export function cmdOk(stdout = ""): CommandResult {
   return { code: 0, stdout, stderr: "" };
 }
 
-/** Runner respond: `inspect` fails (container absent), any other cmd succeeds. */
 export function respondAbsentInspect(args: string[]): CommandResult {
   return args[0] === "inspect"
     ? { code: 1, stdout: "", stderr: "no such object" }
@@ -136,7 +127,7 @@ export const INSTANCE_SPEC: InstanceSpec = {
   tsAuthKey: "tskey-serve-secret",
 };
 
-/** Docker-level run spec — what DockerInstanceRuntime derives from the above. */
+/** Docker-level run spec: what DockerInstanceRuntime derives from the spec above. */
 export const CONTAINER_RUN_SPEC: ContainerRunSpec = {
   name: "p0rt1on-instance-alice",
   image: "p0rt1on-instance:x",
@@ -147,13 +138,11 @@ export const CONTAINER_RUN_SPEC: ContainerRunSpec = {
   stateSource: "p0rt1on-tsstate-alice",
   rootCredSecretRef: "/run/secrets/minio-alice.env",
   network: "p0rt1on-net",
-  // Network addressing (how it actually ships): the manager reaches MinIO by
-  // container name, so no host port is published. Host mode is the explicit
-  // opt-in — see the host-publish test.
+  // The manager reaches MinIO by container name by default, so no host port
+  // is published; host mode is an explicit opt-in (see the host-publish test).
   publishHostPort: false,
 };
 
-/** One recorded HTTP request. */
 export interface RecordedRequest {
   url: string;
   method: string;
@@ -161,11 +150,6 @@ export interface RecordedRequest {
   headers: Record<string, string>;
 }
 
-/**
- * Fake fetch: records each request and returns `handler(req)` as a Response.
- * `json` is serialized into the body; default status 200. `headers` on the
- * handler result become response headers (e.g. an ETag).
- */
 export function fakeFetch(
   recorded: RecordedRequest[],
   handler: (
@@ -199,7 +183,6 @@ function responseBody(status: number, json: unknown): string | null {
   return json !== undefined ? JSON.stringify(json) : "";
 }
 
-/** Fake TempFiles: records written content, returns a fixed path. */
 export function fakeTempFiles(written: string[]): TempFiles {
   return {
     write: (content) => {
@@ -210,12 +193,11 @@ export function fakeTempFiles(written: string[]): TempFiles {
   };
 }
 
-/** An McShellClient (alias "alice") wired to fake runner + temp files. */
 export function buildMcShellClient(
   recorded: RecordedCommand[],
   respond?: (args: string[]) => CommandResult,
   written: string[] = [],
-  readyDelayMs = 1, // fast `mc ready` retries — no real 500ms sleeps in tests
+  readyDelayMs = 1, // fast `mc ready` retries, avoiding real sleeps in tests
 ): McShellClient {
   return new McShellClient(
     { alias: "alice", minioPort: 9100 },
@@ -253,7 +235,7 @@ export function mockMcClient(calls: Calls): McClient {
       return Promise.resolve([]);
     },
     setAuditWebhook: note("setAuditWebhook"),
-    trace: async function* () {/* no events */},
+    trace: async function* () {},
   };
 }
 
@@ -308,8 +290,6 @@ export function mockTailscaleApi(
   };
 }
 
-/** SystemHealthService mock: a healthy latched report by default; override any
- * field (e.g. `canProvision: false`) via `over`. */
 export function mockSystemHealthService(
   over: Partial<SystemHealth> = {},
 ): SystemHealthService {
@@ -326,8 +306,6 @@ export function mockSystemHealthService(
   };
 }
 
-/** UserInviteApi mock: records each op into `calls`; `configured` defaults true.
- * Override any method (e.g. findUserByEmail returning a member) via `overrides`. */
 export function mockUserInviteApi(
   calls: Calls,
   overrides: Partial<UserInviteApi> = {},
@@ -367,7 +345,6 @@ export function mockUserInviteApi(
   };
 }
 
-/** An InstanceRuntime.diagnoseInstance that reports the container as absent. */
 export const absentInstance = (name: string) =>
   Promise.resolve({
     name,
@@ -382,10 +359,8 @@ export const absentInstance = (name: string) =>
 export function mockInstanceRuntime(
   calls: Calls,
   opts: {
-    /** listInstances result (instance names + states). */
     instances?: { name: string; state: ContainerState }[];
     healthFor?: (name: string) => InstanceHealth;
-    /** hasData result per instance; default true (data present). */
     hasDataFor?: (name: string) => boolean;
     listError?: Error;
   } = {},
@@ -506,9 +481,8 @@ export function mockProvisioningRepo(
   };
 }
 
-// ---- ProvisioningService test kit (fixtures + a fully-mocked builder) ----
-// Lives here (not in the *.test.ts) because the repo's no-test-globals rule
-// bans module-level declarations in test files.
+// ProvisioningService test kit: lives here, not in the *.test.ts, because
+// the no-test-globals rule bans module-level declarations in test files.
 
 export const DEDICATED_RES: InstanceReservation = {
   friendId: 1,
@@ -534,7 +508,6 @@ export const INVITE_INPUT: AddFriendInput = {
   enrollment: { mode: "invite", email: "bob@example.com" },
 };
 
-/** An invite-enrolled friend context (offboard/status tests). */
 export const INVITE_CTX: FriendProvisionContext = {
   friendId: 1,
   name: "alice",
@@ -577,22 +550,18 @@ export const CTX: FriendProvisionContext = {
   minioPort: 9100,
 };
 
-/** Overridable parts for a ProvisioningService under test. */
 export interface ProvisioningParts {
   repo?: Partial<ProvisioningRepo>;
   runtime?: Partial<InstanceRuntime>;
-  /** Override individual mc operations (e.g. inject teardown failures). */
   mc?: Partial<McClient>;
   smoke?: () => Promise<void>;
   nodes?: TailnetNode[];
-  /** Override individual tailscale operations (e.g. inject revoke failures). */
   tailscale?: Partial<TailscaleApi>;
   /** Invite API; default is unconfigured (authKey-only flow). */
   userInvite?: UserInviteApi;
   config?: Partial<ProvisioningConfig>;
 }
 
-/** A ProvisioningService wired to all mocks, recording into `calls`. */
 export function buildProvisioningService(
   calls: Calls,
   reservation: InstanceReservation,

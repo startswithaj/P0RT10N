@@ -3,7 +3,6 @@ import type { FriendQueries } from "../db/FriendQueries.ts";
 import { NotImplementedError } from "../lib/ServiceError.ts";
 import type { ActivityService } from "./types.ts";
 
-/** Read-side wrapper over FriendQueries. */
 // TODO: wire `stream` to the audit-event bus / aggregator; currently unimplemented.
 export class ActivityServiceImpl implements ActivityService {
   constructor(private readonly queries: FriendQueries) {}

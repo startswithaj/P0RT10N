@@ -9,8 +9,8 @@ import { noopLogger } from "../../test-helpers/mocks.ts";
 describe("auth router", () => {
   const creds = { username: "admin", password: "hunter2-hunter2" };
 
-  // auth.* is the only public surface; it touches ctx.auth/logger/session/
-  // headers only, so a cast context (no real services) is enough to exercise it.
+  // auth is the only public surface here, touching only ctx.auth, logger, session, and
+  // headers, so a cast context with no real services is enough to exercise it.
   const ctxFor = (
     auth: AdminAuth,
     over: { sessionToken?: string; secureCookie?: boolean } = {},
@@ -19,7 +19,7 @@ describe("auth router", () => {
       auth,
       logger: noopLogger(),
       responseHeaders: new Headers(),
-      // login/logout audit themselves — a no-op recorder is enough here.
+      // Login and logout audit themselves, so a no-op recorder is enough here.
       auditService: { record: () => Promise.resolve() },
       ...over,
     }) as unknown as TrpcContext;
@@ -29,7 +29,7 @@ describe("auth router", () => {
   it("disabled auth: status reports enabled=false, authenticated=true", async () => {
     const status = await call(ctxFor(AdminAuth.disabled())).auth.status();
     expect(status).toEqual({ enabled: false, authenticated: true });
-    // login is a no-op that still succeeds.
+    // With auth disabled, login is a no-op that still reports success.
     expect(await call(ctxFor(AdminAuth.disabled())).auth.login(creds)).toEqual({
       ok: true,
     });
@@ -48,7 +48,7 @@ describe("auth router", () => {
     expect(cookie).toContain("p0rt1on_session=");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Strict");
-    // No proxy https signal → no Secure flag (keeps dev-over-http working).
+    // Without a proxy https signal, the cookie has no Secure flag, keeping dev-over-http working.
     expect(cookie).not.toContain("Secure");
   });
 
@@ -58,7 +58,6 @@ describe("auth router", () => {
 
     expect(await call(ctxFor(auth, { sessionToken: token })).auth.status())
       .toEqual({ enabled: true, authenticated: true });
-    // No token → not authenticated.
     expect(await call(ctxFor(auth)).auth.status())
       .toEqual({ enabled: true, authenticated: false });
 
@@ -94,19 +93,15 @@ describe("auth router", () => {
     expect(ctx.responseHeaders?.get("Set-Cookie")).toContain("Secure");
   });
 
-  // protectedProcedure semantics, isolated via a one-off protected route.
   const guarded = router({ ping: protectedProcedure.query(() => "pong") });
   const callGuarded = createCallerFactory(guarded);
 
   it("protectedProcedure: auth off allows; auth on needs a valid session", async () => {
     const auth = await AdminAuth.create(creds);
-    // Auth off → passes straight through.
     expect(await callGuarded(ctxFor(AdminAuth.disabled())).ping()).toBe("pong");
-    // Auth on, no session → rejected.
     await expect(callGuarded(ctxFor(auth)).ping()).rejects.toThrow(
       "authentication required",
     );
-    // Auth on, valid session → allowed.
     const token = auth.createSession();
     expect(await callGuarded(ctxFor(auth, { sessionToken: token })).ping())
       .toBe("pong");

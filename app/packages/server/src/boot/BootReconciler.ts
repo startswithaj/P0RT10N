@@ -2,12 +2,8 @@ import type { ContainerState, InstanceRuntime } from "../runtime/runtime.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
 import type { Logger } from "../services/types.ts";
 
-// Boot-time reconcile: DB says which instances SHOULD exist, runtime is
-// reality; compared once per boot. Never DELETES containers/volumes/data.
-// Recreates a missing instance over surviving data; if data is ALSO gone,
-// marks it failed rather than fabricating an empty instance.
+// Boot reconcile never deletes containers, volumes, or data.
 
-/** What happened to one instance during the reconcile. */
 type Outcome =
   | "healthy"
   | "started"
@@ -17,31 +13,19 @@ type Outcome =
   | "error";
 
 export interface ReconcileSummary {
-  /** Stopped containers brought back up (and verified healthy). */
   started: number;
-  /** Already running and healthy. */
   healthy: number;
-  /** Container gone but data survived → recreated over it. */
   recovered: number;
-  /** Container AND data both gone → instance + friends marked failed. */
   failed: number;
-  /** Labelled containers with no DB row — logged, left alone. */
   orphaned: number;
-  /** Alive but not healthy after the bounded wait, or reconcile errored. */
   degraded: number;
 }
 
-/**
- * The provisioning-layer ops the reconcile delegates to (ProvisioningService
- * satisfies this). `realignInstance` re-issues the webhook + ACLs for a present
- * instance; `recoverInstance` recreates a missing one over its surviving data.
- */
 export interface InstanceReconcileOps {
   realignInstance(instance: InstanceRow): Promise<void>;
   recoverInstance(instance: InstanceRow): Promise<void>;
 }
 
-/** Bounded health wait — injectable so tests don't sleep. */
 export interface HealthWait {
   attempts: number;
   delayMs: number;
@@ -60,9 +44,8 @@ export class BootReconciler {
     private readonly runtime: InstanceRuntime,
     private readonly ops: InstanceReconcileOps,
     private readonly logger: Logger,
-    // Containers may still be starting right after a host boot (tailscaled +
-    // MinIO both need to come up) — cap the wait so boot never stalls;
-    // instances still starting are picked up by the normal status paths.
+    // Right after a host boot, tailscaled and MinIO may still be starting, so the wait is
+    // bounded and boot never stalls; still-starting instances are picked up by the normal status paths.
     private readonly wait: HealthWait = { attempts: 30, delayMs: 2000 },
   ) {}
 
@@ -72,7 +55,7 @@ export class BootReconciler {
     const instances = await this.runtime.listInstances().then(
       (list) => list,
       (err) => {
-        // The admin UI must still come up to SHOW the problem — never fatal.
+        // The admin UI must still come up to show the problem, so a runtime failure here is never fatal.
         log.error("runtime unreachable — skipping instance reconcile", {
           error: String(err),
         });
@@ -132,10 +115,9 @@ export class BootReconciler {
     log: Logger,
   ): Promise<Outcome> {
     if (!instance) {
-      // Container gone. If the DATA survived (pantry dir / data PVC), recreate
-      // the instance over it — same identity, no friend action. If the data is
-      // ALSO gone, do NOT fabricate an empty instance over destroyed backups:
-      // mark failed so it's surfaced.
+      // If the container is gone but its data survived, the instance is recreated over that data
+      // with the same identity and no friend action. If the data is also gone, boot does not
+      // fabricate an empty instance over destroyed backups; it marks the instance failed instead.
       if (await this.runtime.hasData(row.tsHostname)) {
         log.warn("instance container gone but data survives — recreating", {
           instance: row.tsHostname,
@@ -144,9 +126,8 @@ export class BootReconciler {
         return "recovered";
       }
       const friendsFailed = await this.repo.failInstanceMissing(row.instanceId);
-      // Audit the loss (system row) so it survives in the log even after the
-      // failed friend rows are swept — the status page shows "Data lost" live,
-      // the audit trail records that it happened and when.
+      // The loss is audited as a system row so it survives even after the failed friend
+      // rows are later swept, giving a permanent record of when the data was lost.
       await this.repo.audit(
         null,
         "instance_data_lost",
@@ -158,26 +139,24 @@ export class BootReconciler {
       });
       return "failed";
     }
-    // Adopt regardless of state: starts it if stopped, and converges config
-    // drift (e.g. the restart policy) even when it's already running.
+    // The instance is adopted regardless of its current state, meaning it is started if stopped
+    // and any config drift, such as the restart policy, is converged even when already running.
     await this.runtime.ensureRunning(row.tsHostname);
     const healthy = await this.waitHealthy(row.tsHostname, this.wait.attempts);
     if (!healthy) {
-      // Alive but not healthy: log only. Marking it failed would feed the
-      // sweep, which DELETES instances and their data — boot never destroys.
-      // The status page surfaces it as down.
+      // If alive but unhealthy, this only logs rather than marking the instance failed, because a
+      // failed status feeds the sweep that deletes instances and their data, and boot must never destroy anything.
       log.error("instance not healthy after bounded wait — left as-is", {
         instance: row.tsHostname,
       });
       return "unhealthy";
     }
-    // Re-issue the webhook (derived token) + re-apply ACLs — converges the
-    // config that lives outside the instance's data. Idempotent.
+    // Re-issuing the webhook and reapplying ACLs converges config that lives outside the
+    // instance's data, and this call is idempotent.
     await this.ops.realignInstance(row);
     return instance.state === "stopped" ? "started" : "healthy";
   }
 
-  /** Recursive bounded poll of the instance's health probe. */
   private async waitHealthy(
     name: string,
     attemptsLeft: number,

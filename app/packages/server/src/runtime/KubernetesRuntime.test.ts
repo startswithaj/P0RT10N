@@ -4,10 +4,8 @@ import { buildRestClient, KubernetesRuntime } from "./KubernetesRuntime.ts";
 import { INSTANCE_SPEC } from "../test-helpers/mocks.ts";
 import type { RestClient } from "@cloudydeno/kubernetes-client";
 
-// The typed @cloudydeno api layer sits between the runtime and the wire, so we
-// mock its entry point — `RestClient.performRequest` — and assert on the STRUCTURED
-// request (path, method, patch content-type, body) the api layer produces,
-// rather than hand-built URL strings.
+// Tests mock `RestClient.performRequest`, the cloudydeno api layer's entry
+// point, asserting on its structured requests instead of raw URL strings.
 interface Recorded {
   method: string;
   path: string;
@@ -16,7 +14,6 @@ interface Recorded {
   body?: unknown;
 }
 
-/** A response the fake returns, or an error to throw (with an HTTP status). */
 type Reply = { json?: unknown; status?: number };
 
 describe("KubernetesRuntime", () => {
@@ -36,8 +33,8 @@ describe("KubernetesRuntime", () => {
       recorded.push(rec);
       const reply = handler(rec);
       if (reply.status && reply.status >= 400) {
-        // Mirror cloudydeno: the error carries `httpCode` and echoes the
-        // RESPONSE message (never the request) — lets us prove redaction.
+        // Mirrors cloudydeno by attaching `httpCode` and echoing the response
+        // message, never the request, so the test can prove redaction works.
         const err = new Error(
           `Kubernetes returned HTTP ${reply.status}: ${
             (reply.json as { message?: string })?.message ?? ""
@@ -77,10 +74,8 @@ describe("KubernetesRuntime", () => {
       fakeClient(recorded, handler),
     );
 
-  // The cloudydeno converters are strict — a ContainerStatus needs
-  // name/image/imageID/ready/restartCount, and a StatefulSet needs a
-  // selector + template even when we only read name/replicas. These builders
-  // produce valid-but-minimal fixtures.
+  // cloudydeno's converters are strict about required fields (e.g.
+  // ContainerStatus needs imageID) even when tests never read them.
   const cstatus = (over: Record<string, unknown>) => ({
     name: "instance",
     image: "img",
@@ -150,7 +145,6 @@ describe("KubernetesRuntime", () => {
       ?.body as { spec: { storageClassName?: string } };
     const state = reqs.find((r) => last(r.path) === "alice-state")
       ?.body as { spec: { storageClassName?: string } };
-    // Data comes from the pantry; tailscale state stays off it (default class).
     expect(data.spec.storageClassName).toBe("p0rt1on-pantry");
     expect(state.spec.storageClassName).toBeUndefined();
   });
@@ -186,7 +180,6 @@ describe("KubernetesRuntime", () => {
     const reqs: Recorded[] = [];
     await build(reqs).ensureInstance(INSTANCE_SPEC);
     const pod = bodyOf(reqs, "statefulsets").spec.template.spec;
-    // Least privilege: no API token, no capabilities, userspace tailscaled.
     expect(pod.automountServiceAccountToken).toBe(false);
     expect(pod.securityContext).toEqual({
       runAsNonRoot: true,
@@ -219,7 +212,6 @@ describe("KubernetesRuntime", () => {
   });
 
   it("tailscale extras land in the pod env only when configured", async () => {
-    // Default build (no tailscale config): neither var appears.
     const plainReqs: Recorded[] = [];
     await build(plainReqs).ensureInstance(INSTANCE_SPEC);
     const plainEnv = bodyOf(plainReqs, "statefulsets")
@@ -228,7 +220,7 @@ describe("KubernetesRuntime", () => {
     expect(plainEnv).not.toContain("TAILSCALE_LOGIN_SERVER");
     expect(plainEnv).not.toContain("TAILSCALE_SERVE_MODE");
 
-    // Headscale test tier: login server + the no-cert http serve fallback.
+    // Headscale test tier lacks TLS certs, hence the http serve-mode fallback.
     const reqs: Recorded[] = [];
     await build(reqs, undefined, {
       loginServer: "http://hs:8080",
@@ -243,13 +235,11 @@ describe("KubernetesRuntime", () => {
   });
 
   it("container resources: omitted by default, set from config", async () => {
-    // Default: no resources block at all (no caps).
     const plain: Recorded[] = [];
     await build(plain).ensureInstance(INSTANCE_SPEC);
     expect(bodyOf(plain, "statefulsets").spec.template.spec.containers[0])
       .not.toHaveProperty("resources");
 
-    // Configured: only the set fields, split into requests/limits.
     const reqs: Recorded[] = [];
     await new KubernetesRuntime(
       {
@@ -358,7 +348,7 @@ describe("KubernetesRuntime", () => {
     await gone.stopInstance("alice");
     await expect(gone.ensureRunning("alice")).rejects.toThrow("cannot adopt");
 
-    // A non-404 scale failure is a real error — stop must NOT swallow it.
+    // A non-404 scale failure is a real error, so stop must not swallow it.
     const broken = build([], () => ({ status: 500 }));
     await expect(broken.stopInstance("alice")).rejects.toThrow();
   });

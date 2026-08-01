@@ -1,9 +1,6 @@
-// Secret redaction for error messages built from shell commands. Two layers:
-// callers DECLARE known secret values (masked wherever they occur), and argv
-// after `--` is structurally omitted so even an undeclared secret can't leak.
-// Shared by McShellClient and docker/TS_AUTHKEY handling.
+// Redaction has two layers: declared secret values get masked wherever they occur,
+// and argv after `--` is structurally omitted so even an undeclared secret can't leak.
 
-/** Replace every occurrence of each declared secret in `text`. */
 export function maskSecrets(text: string, secrets: string[]): string {
   return secrets.reduce(
     (masked, secret) =>
@@ -12,10 +9,7 @@ export function maskSecrets(text: string, secrets: string[]): string {
   );
 }
 
-/**
- * Render argv for an error message: everything after a `--` separator is
- * replaced with a count placeholder, never interpolated.
- */
+/** Everything after a `--` separator becomes a count placeholder in the rendered argv; it is never interpolated. */
 export function safeArgs(args: string[]): string {
   const sep = args.indexOf("--");
   if (sep === -1) return args.join(" ");

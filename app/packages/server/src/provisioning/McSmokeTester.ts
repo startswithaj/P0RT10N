@@ -4,10 +4,8 @@ import { ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets } from "../lib/redact.ts";
 import { mcHostEnv } from "../minio/McShellClient.ts";
 
-// SmokeTester via `mc`: exercises the friend's new key end-to-end
-// (Put→Get→Delete) against their bucket, reusing bundled `mc` +
-// CommandRunner/TempFiles (no S3 SDK). MUST run before default retention is
-// armed, else the test object's delete is blocked by Object Lock.
+// This smoke test must run before default retention is armed, since Object Lock would
+// otherwise block the test object's delete.
 
 export class McSmokeTester implements SmokeTester {
   constructor(
@@ -22,19 +20,19 @@ export class McSmokeTester implements SmokeTester {
     const objectPath = `${alias}/${bucket}/.p0rt1on-smoke-${suffix}`;
     const token = crypto.randomUUID();
     const file = await this.tempFiles.write(token);
-    // A throwaway MC_HOST env var scopes the friend's creds to each call —
-    // nothing on argv (host-visible via `ps`), no alias config to clean up.
+    // A throwaway MC_HOST env var scopes the friend's credentials to each call, so nothing secret
+    // ever appears on argv where `ps` could see it, and there is no alias config to clean up.
     const env = mcHostEnv(alias, endpoint, cred);
     try {
-      await this.exec(["cp", file, objectPath], env, cred.secretKey); // PutObject
-      const got = await this.exec(["cat", objectPath], env, cred.secretKey); // GetObject
+      await this.exec(["cp", file, objectPath], env, cred.secretKey);
+      const got = await this.exec(["cat", objectPath], env, cred.secretKey);
       if (got.trim() !== token) {
         throw new ServiceError(
           "INTERNAL_SERVER_ERROR",
           "smoke-test GET returned unexpected content",
         );
       }
-      await this.exec(["rm", objectPath], env, cred.secretKey); // DeleteObject
+      await this.exec(["rm", objectPath], env, cred.secretKey);
     } finally {
       await this.tempFiles.remove(file);
     }
@@ -47,7 +45,7 @@ export class McSmokeTester implements SmokeTester {
   ): Promise<string> {
     const res = await this.runner.run(this.mcBin, args, env);
     if (res.code !== 0) {
-      // mc can echo the MC_HOST URL in its own stderr — mask the secret in
+      // mc can echo the MC_HOST URL in its own stderr, so the secret is masked in
       // both its raw and URL-encoded forms.
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",

@@ -5,12 +5,12 @@ import {
   subscription,
 } from "./MinioEventSubscription.ts";
 
-// In-memory fan-out bus: one publisher (webhook sink), N subscribers
-// (aggregator, sampler, forwarder). Publish is sync + non-blocking — a stalled
-// subscriber never back-pressures ingest. Carries the RAW payload untouched;
-// consumers parse on read.
+// Publish is synchronous and non-blocking, so a stalled subscriber never
+// back-pressures ingest. Events carry the raw payload untouched; each
+// consumer parses it on read.
 
-/** Per-subscriber queue depth; overflow drops the oldest event. */
+/** Each subscriber queue holds this many events; once full, the oldest event
+ * is dropped to make room. */
 const DEFAULT_CAPACITY = 1000;
 
 export class MinioEventBus {
@@ -18,16 +18,15 @@ export class MinioEventBus {
 
   constructor(
     private readonly logger: Logger,
-    // Shared shutdown signal: aborting it tears down every subscription.
+    // Aborting this shared signal tears down every subscription.
     private readonly abort: AbortController,
     private readonly capacity: number = DEFAULT_CAPACITY,
   ) {}
 
-  /** Fan one raw event to every subscriber. Never throws, never blocks. */
+  /** Never throws and never blocks, even if a subscriber's enqueue fails. */
   publish(raw: unknown): void {
-    // Isolate subscribers: a throw in one (e.g. a logger blowing up on an
-    // overflow warning) must not abort fan-out to the others or bubble into
-    // the publisher (the webhook sink).
+    // Each subscriber's enqueue is isolated: a throw here (e.g. a logging
+    // failure) must not stop fan-out to the others or bubble into the publisher.
     this.subscribers.forEach((sub) => {
       try {
         sub.enqueue(raw);
@@ -40,11 +39,8 @@ export class MinioEventBus {
     });
   }
 
-  /**
-   * Subscribe under `name`; the subscription yields raw events until the bus's
-   * abort fires, when the queue is torn down (no leak across subscribe/abort
-   * cycles). The signal is wired in here, so callers never pass one.
-   */
+  /** Yields raw events until the bus's shared abort fires, then tears the
+   * queue down so nothing leaks across subscribe/abort cycles. */
   subscribe(name: string): MinioEventSubscription<unknown> {
     const sub = new MinioEventSubscriber(name, this.capacity, this.logger);
     this.subscribers.add(sub);
@@ -61,7 +57,6 @@ export class MinioEventBus {
     return subscription(sub.stream(), signal);
   }
 
-  /** Live subscriber count (tests/diagnostics). */
   get size(): number {
     return this.subscribers.size;
   }

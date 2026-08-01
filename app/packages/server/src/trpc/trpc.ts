@@ -24,31 +24,26 @@ export interface TrpcContext {
   inventoryService: InventoryService;
   systemHealthService: SystemHealthService;
   jobService: JobService;
-  /** Static manager capabilities the client reads to shape the UI. */
   capabilities: ManagerCapabilities;
   logger: Logger;
-  /** Admin auth (disabled → protectedProcedure lets everything through). */
+  /** Admin auth; when disabled, protectedProcedure allows every request through. */
   auth: AdminAuth;
-  /** Session token from the request cookie (per-request; set by the adapter). */
   sessionToken?: string;
-  /** External request was HTTPS (proxy `X-Forwarded-Proto`) → cookie `Secure`. */
+  /** True when the external request was HTTPS per the X-Forwarded-Proto proxy header; controls the cookie's Secure flag. */
   secureCookie?: boolean;
-  // Populated by the HTTP adapter — Set-Cookie for the admin session.
   responseHeaders?: Headers;
 }
 
 const t = initTRPC.context<TrpcContext>().create({
   sse: {
-    // Keep the activity stream alive + detect dead connections.
     ping: { enabled: true, intervalMs: 10_000 },
     client: { reconnectAfterInactivityMs: 30_000 },
   },
 });
 
 /**
- * Maps domain errors to TRPCErrors so routers need no try/catch and services
- * stay transport-agnostic. In tRPC v11 next() returns a result rather than
- * throwing; when result.ok is false the original error is in result.error.cause.
+ * Maps domain errors to TRPCErrors so routers never need try/catch.
+ * In tRPC v11, next() returns a result instead of throwing, so a failure appears as result.ok === false with the cause in result.error.cause.
  */
 const errorMiddleware = t.middleware(async ({ next }) => {
   const result = await next();
@@ -62,9 +57,8 @@ const errorMiddleware = t.middleware(async ({ next }) => {
 });
 
 /**
- * Per-call logging. Emits a debug line on entry and an info/warn line on exit
- * with the path, type and elapsed ms — so every RPC is traceable. Wraps the
- * error middleware so it observes the final (possibly mapped) outcome.
+ * Wraps the error middleware, so by the time it logs, any domain error has
+ * already been mapped to its final TRPCError.
  */
 const loggingMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
   const start = Date.now();
@@ -81,9 +75,8 @@ const loggingMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
       code: result.error.code,
       error: result.error.message,
     });
-    // The failed half of the audit trail: every errored admin mutation (auth
-    // included). Queries aren't actions, so they're skipped. Best-effort — a
-    // failed audit write must never turn one failure into two.
+    // This is the failed half of the audit trail: every errored admin mutation, including auth, is recorded; queries are skipped since they aren't actions.
+    // This write is best-effort; it must never turn one failure into two.
     if (type === "mutation") {
       await ctx.auditService.record(
         "action_failed",
@@ -97,10 +90,8 @@ const loggingMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
 });
 
 /**
- * Wrap a subscription generator so mid-stream throws are logged before they
- * reach the SSE transport. Middleware can't do this: for subscriptions next()
- * resolves when the generator is created, so errors thrown while streaming
- * bypass both middlewares and would otherwise vanish from the server log.
+ * Wraps a subscription generator so mid-stream throws get logged before reaching the SSE transport.
+ * Middleware can't do this because for subscriptions, next() resolves as soon as the generator is created, so later errors would otherwise vanish from the log.
  */
 export async function* loggedStream<T>(
   gen: AsyncGenerator<T>,
@@ -115,8 +106,7 @@ export async function* loggedStream<T>(
   }
 }
 
-/** Rejects unauthenticated calls when auth is enabled; a no-op when it's off
- * (the boot guard forbids a non-loopback bind with auth off). */
+/** Rejects unauthenticated calls when auth is enabled; a no-op when auth is off. */
 const authMiddleware = t.middleware(({ ctx, next }) => {
   if (!ctx.auth.enabled) return next();
   if (!ctx.sessionToken || !ctx.auth.validate(ctx.sessionToken)) {
@@ -132,6 +122,6 @@ export const router = t.router;
 export const publicProcedure = t.procedure
   .use(loggingMiddleware)
   .use(errorMiddleware);
-/** Every admin procedure — requires a valid session (auth.* stays public). */
+/** Every admin procedure requires a valid session; auth.* endpoints stay public by using publicProcedure instead. */
 export const protectedProcedure = publicProcedure.use(authMiddleware);
 export const createCallerFactory = t.createCallerFactory;

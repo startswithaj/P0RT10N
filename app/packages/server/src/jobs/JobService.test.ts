@@ -16,7 +16,6 @@ describe("JobService", () => {
     kopiaQuickstart: "kopia ...",
   };
 
-  /** Generator that yields the given events, then optionally throws. */
   async function* fakeGen<R>(
     events: ProgressEvent<string, R>[],
     fail?: Error,
@@ -40,7 +39,7 @@ describe("JobService", () => {
       { type: "step", step: "nodes" },
       { type: "done", bundleReady: false },
     ]);
-    // A second observer (reconnect) replays identically — no re-run.
+    // A second observer (reconnect) replays the same events instead of re-running the job.
     expect(await Array.fromAsync(svc.progress(id))).toHaveLength(3);
   });
 
@@ -123,7 +122,7 @@ describe("JobService", () => {
         "offboard",
         fakeGen<void>([{ type: "done", result: undefined }]),
       );
-      await Array.fromAsync(svc.progress(id)); // job finished at t=0
+      await Array.fromAsync(svc.progress(id)); // The job finishes at t=0.
       time.tick(16 * 60 * 1000);
       // Next start() triggers the prune (no timers by design).
       svc.start(

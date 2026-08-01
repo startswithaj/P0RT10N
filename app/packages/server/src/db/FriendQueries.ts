@@ -12,28 +12,17 @@ import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
 import { hourlySeries, sumLast24h } from "../minio-events/requestBuckets.ts";
 import { defer } from "../lib/defer.ts";
 
-/**
- * The DB-derived part of a FriendDetail. The service fills the two fields this
- * layer can't: `nodeOnline` (Tailscale) and `s3Endpoint` (needs the configured
- * tailnet domain, built from `tsHostname`).
- */
 export type FriendDetailRow =
   & Omit<FriendDetail, "nodeOnline" | "s3Endpoint">
   & { tsHostname: string };
 
-// Read-side queries for the dashboard + usage screens. Pure DB. Friend-detail
-// also needs Tailscale node-online state, assembled a layer up (FriendService).
-
-/** One friend the usage sampler should measure. */
 export interface UsageSampleTarget {
   friendId: number;
   bucket: string;
   alias: string;
-  /** Host-published admin-plane port (composes the per-call MC_HOST endpoint). */
   minioPort: number;
 }
 
-/** Latest usage sample for a friend (or zeros if none recorded yet). */
 interface UsageSample {
   bytesUsed: number;
   objectCount: number;
@@ -47,8 +36,8 @@ export class FriendQueries {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
-  /** Resolve a bucket to its friend's id + bucket-scoped access key (or none).
-   * Synchronous — the MinIO-event stream stages resolve per event. */
+  // This stays synchronous (unlike the other queries here) because the
+  // MinIO-event stream stages resolve it per event.
   friendByBucket(
     bucket: string,
   ): { id: number; s3AccessKeyId: string | null } | undefined {
@@ -57,11 +46,9 @@ export class FriendQueries {
       .from(friends).where(eq(friends.bucket, bucket)).get();
   }
 
-  // Synchronous SQLite reads exposed as Promises (service contract); each
-  // body runs via defer() so a throw rejects rather than escaping
-  // synchronously — same semantics `async` gave, without the unused-await.
+  // Each query is a synchronous SQLite read exposed as a Promise via defer(),
+  // so a throw rejects instead of escaping synchronously.
 
-  /** Dashboard rows: friend + rolling activity + latest usage. */
   list(): Promise<FriendListItem[]> {
     return defer(() => this.listSync());
   }
@@ -102,13 +89,12 @@ export class FriendQueries {
     }));
   }
 
-  /** Point-in-time usage samples for one friend, newest first. */
   usageHistory(friendId: number, limit: number): Promise<UsageView[]> {
     return defer(() => this.usageHistorySync(friendId, limit));
   }
 
-  /** Audit log newest-first, page back via `before` (id cursor). `friend` is the
-   * write-time snapshot name (survives offboard); null → a system event. */
+  // friend is the write-time snapshot name, which survives the friend being
+  // offboarded; null means a system event.
   recentAuditEntries(
     limit: number,
     before?: number,
@@ -145,11 +131,6 @@ export class FriendQueries {
     return rows.map((r) => usageView(r, quota.quotaBytes));
   }
 
-  /**
-   * Friend-detail join (friend + instance + latest usage + activity). Returns
-   * `null` for an unknown friend; the caller (FriendService.get) decides how to
-   * surface that and fills `nodeOnline` + `s3Endpoint`.
-   */
   async detail(friendId: number): Promise<FriendDetailRow | null> {
     const row = this.db.select({
       id: friends.id,
@@ -197,7 +178,6 @@ export class FriendQueries {
     };
   }
 
-  /** Current aggregated activity for one friend (zeros if none recorded yet). */
   activityFor(friendId: number): Promise<ActivityView> {
     return defer(() => this.activityForSync(friendId));
   }
@@ -231,7 +211,6 @@ export class FriendQueries {
     };
   }
 
-  /** All instances, for the Status page inventory (kind/host/port + status). */
   instancesForStatus(): Promise<
     Array<{
       kind: string;
@@ -252,8 +231,7 @@ export class FriendQueries {
     );
   }
 
-  /** tsHostname → last-24h hourly request series (summed across the instance's
-   * friends). Instances with no activity are absent from the map. */
+  // Instances with no activity are absent from the returned map.
   requestSeriesByInstance(): Promise<Map<string, number[]>> {
     return defer(() => {
       const now = this.now();
@@ -263,8 +241,6 @@ export class FriendQueries {
       }).from(instances)
         .innerJoin(friends, eq(friends.instanceId, instances.id))
         .innerJoin(activity, eq(activity.friendId, friends.id)).all();
-      // Fold each instance's friends' hourly buckets into one summed map, then
-      // materialize the fixed-length window series.
       const summed = rows.reduce((acc, r) => {
         const merged = Object.entries(r.requestBuckets).reduce(
           (m, [hour, count]) => ({ ...m, [hour]: (m[hour] ?? 0) + count }),
@@ -278,8 +254,8 @@ export class FriendQueries {
     });
   }
 
-  /** Map of friendId → newest usage sample, computed in SQL (O(friends), not
-   * O(history) — the usage table is append-only and grows unboundedly). */
+  // This computes the newest sample per friend in SQL, which is O(friends) rather
+  // than O(history), since the usage table is append-only and grows unboundedly.
   private latestUsageByFriend(): Map<number, UsageSample> {
     const latest = this.db.select({
       friendId: usage.friendId,
@@ -306,14 +282,11 @@ export class FriendQueries {
     );
   }
 
-  /** Active friends with what the usage sampler needs to `mc du` them. */
   usageSampleTargets(): Promise<UsageSampleTarget[]> {
     return defer(() =>
       this.db.select({
         friendId: friends.id,
         bucket: friends.bucket,
-        // The per-instance mc alias is its tailnet hostname (same convention
-        // as BootReconciler.realign).
         alias: instances.tsHostname,
         minioPort: instances.minioPort,
       }).from(friends)
@@ -323,7 +296,6 @@ export class FriendQueries {
     );
   }
 
-  /** Append one point-in-time usage sample (the write side of usageHistory). */
   insertUsage(
     friendId: number,
     sample: { bytesUsed: number; objectCount: number },
@@ -338,8 +310,7 @@ export class FriendQueries {
     });
   }
 
-  /** Delete usage samples older than the retention cutoff (bounded work: one
-   * DELETE). Piggybacks on the periodic sweep. Returns rows deleted. */
+  // This runs as one bounded DELETE, piggybacked on the periodic cleanup sweep.
   pruneUsage(): Promise<number> {
     return defer(() => {
       const cutoff = new Date(
@@ -351,10 +322,8 @@ export class FriendQueries {
   }
 }
 
-/** Days of usage-sample history kept for the history screen. */
 export const USAGE_RETENTION_DAYS = 90;
 
-/** Build a UsageView from a sample (or zeros) against the friend's quota. */
 function usageView(
   sample: UsageSample | undefined,
   quotaBytes: number,

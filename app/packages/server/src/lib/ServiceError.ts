@@ -1,9 +1,8 @@
 import type { TRPC_ERROR_CODE_KEY } from "@trpc/server/rpc";
 
 /**
- * Transport-agnostic domain error. Services throw these; the tRPC
- * errorMiddleware maps `.code` straight onto a TRPCError so routers carry no
- * try/catch and services never import anything tRPC-specific.
+ * Services throw ServiceError, not TRPCError; the tRPC error middleware maps
+ * `.code` onto a TRPCError so services never import anything tRPC-specific.
  */
 export class ServiceError extends Error {
   readonly code: TRPC_ERROR_CODE_KEY;
@@ -15,7 +14,6 @@ export class ServiceError extends Error {
   }
 }
 
-/** Friend / instance not found. */
 export class NotFoundError extends ServiceError {
   constructor(message: string) {
     super("NOT_FOUND", message);
@@ -23,7 +21,6 @@ export class NotFoundError extends ServiceError {
   }
 }
 
-/** Bad caller input that zod can't catch (e.g. name taken, offboard confirm mismatch). */
 export class ValidationError extends ServiceError {
   constructor(message: string) {
     super("BAD_REQUEST", message);
@@ -31,7 +28,6 @@ export class ValidationError extends ServiceError {
   }
 }
 
-/** Action illegal for the friend's current state (e.g. resize while provisioning). */
 export class ConflictError extends ServiceError {
   constructor(message: string) {
     super("CONFLICT", message);
@@ -39,7 +35,6 @@ export class ConflictError extends ServiceError {
   }
 }
 
-/** A dependency that isn't wired yet (external impls land via integration). */
 export class NotImplementedError extends ServiceError {
   constructor(message: string) {
     super("NOT_IMPLEMENTED", message);
@@ -48,10 +43,8 @@ export class NotImplementedError extends ServiceError {
 }
 
 /**
- * The Tailscale token can't edit the policy file (no `policy_file` write scope),
- * so the friend's ACL grant must be added by hand. Carries the exact lines to
- * paste. Thrown in `auto` ACL mode on a 403; in `manual` mode we skip the API
- * call and surface these instructions in the bundle instead.
+ * The Tailscale token can't write the policy file, so a 403 throws this in auto mode;
+ * manual mode skips the API call and surfaces these instructions instead.
  */
 export class ManualAclRequiredError extends ServiceError {
   readonly instructions: string;

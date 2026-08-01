@@ -4,7 +4,6 @@ import type { Logger } from "../services/types.ts";
 import type { MinioEventSubscription } from "./MinioEventSubscription.ts";
 import type { FriendEvent } from "./resolveFriend.ts";
 
-/** The two queries the sampler needs (FriendQueries satisfies structurally). */
 export interface UsageStore {
   usageSampleTargets(): Promise<UsageSampleTarget[]>;
   insertUsage(
@@ -13,22 +12,14 @@ export interface UsageStore {
   ): Promise<void>;
 }
 
-// Writes the usage samples the dashboard reads (`mc du` per active friend →
-// one `usage` row). Three triggers, wired in main.ts:
-//   1. boot          — the dashboard is never empty after a restart
-//   2. hourly        — baseline cadence for idle friends
-//   3. audit-driven  — 30s of quiet after a friend's last audit event, so a
-//      finished backup shows up in ~30s without running `mc du` mid-upload
-// Sampling is best-effort: a failure logs and skips; the next trigger retries.
+// Sampling is best-effort: a failed `mc du` logs and skips rather than
+// throwing, since the next scheduled or audit-triggered sample will retry.
 
 /** Trailing debounce: sample this long after a friend's LAST audit event. */
 const ACTIVITY_DEBOUNCE_MS = 30_000;
 
-/**
- * Bounded per-sample retry. The boot sample lands right after the boot
- * reconcile's `mc admin service restart` (audit-webhook re-arm), so the
- * first `mc du` reliably hits a MinIO that is mid-restart.
- */
+/** The boot sample lands right after the boot reconcile's `mc admin service
+ * restart`, so the first `mc du` may reliably hit a MinIO mid-restart. */
 export interface SampleRetry {
   attempts: number;
   delayMs: number;
@@ -37,10 +28,9 @@ export interface SampleRetry {
 const DEFAULT_RETRY: SampleRetry = { attempts: 3, delayMs: 3_000 };
 
 export class UsageSampler {
-  /** Pending per-friend debounce timers (friendId → timer id). */
   private readonly pending = new Map<number, ReturnType<typeof setTimeout>>();
-  /** Resolves when the event stream ends (shutdown). The stream trigger starts
-   * on construction; await this in tests / for a clean stop. */
+  /** Resolves when the event stream ends. The stream starts on construction;
+   * await this in tests or for a clean shutdown. */
   readonly done: Promise<void>;
 
   constructor(
@@ -54,11 +44,8 @@ export class UsageSampler {
     this.done = this.run();
   }
 
-  /**
-   * Debounce a `mc du` sample per friend off the resolved event stream. The
-   * resolveFriend stage (piped in at the call site) already dropped this
-   * sampler's own root-key polls, so measuring never re-triggers itself.
-   */
+  /** The resolveFriend stage piped in at the call site already dropped this
+   * sampler's own root-key polls, so measuring here never re-triggers itself. */
   private async run(): Promise<void> {
     try {
       // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
@@ -70,7 +57,6 @@ export class UsageSampler {
     }
   }
 
-  /** Measure every active friend (boot + hourly). Returns sampled count. */
   async sampleAll(): Promise<number> {
     const targets = await this.queries.usageSampleTargets();
     const results = await Promise.all(
@@ -79,10 +65,8 @@ export class UsageSampler {
     return results.filter(Boolean).length;
   }
 
-  /**
-   * Audit-event trigger. Each call re-arms the friend's timer, so the sample
-   * runs once, `debounceMs` after the LAST event of a burst.
-   */
+  /** Each call re-arms the friend's debounce timer, so the sample runs once,
+   * `debounceMs` after the LAST event of a burst. */
   noteActivity(friendId: number): void {
     clearTimeout(this.pending.get(friendId));
     this.pending.set(
@@ -94,7 +78,6 @@ export class UsageSampler {
     );
   }
 
-  /** Cancel pending debounce timers (tests / shutdown). */
   dispose(): void {
     this.pending.forEach((timer) => clearTimeout(timer));
     this.pending.clear();
@@ -110,7 +93,7 @@ export class UsageSampler {
         return [] as UsageSampleTarget[];
       });
     const target = targets.find((t) => t.friendId === friendId);
-    // Offboarded/suspended since the event arrived — nothing to measure.
+    // The friend may have been offboarded or suspended since the event arrived.
     if (target) await this.sampleOne(target);
   }
 

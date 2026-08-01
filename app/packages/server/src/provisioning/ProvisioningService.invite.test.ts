@@ -18,8 +18,8 @@ describe("ProvisioningService.addFriend (invite enrollment)", () => {
 
     expect(calls).toContain("invite:create:bob@example.com");
     expect(calls).toContain("repo:recordInvite:pending");
-    // No friend auth key is minted or persisted in invite mode (the serve
-    // node's own key still is — that's a different tag).
+    // No friend auth key is minted or persisted in invite mode. The serve
+    // node's own key still is minted, but that's a different tag.
     expect(calls.some((c) => c.startsWith("ts:mintAuthKey:tag:p0rt1on-friend")))
       .toBe(false);
     expect(calls.some((c) => c.startsWith("repo:recordTsKeyId"))).toBe(false);
@@ -29,8 +29,8 @@ describe("ProvisioningService.addFriend (invite enrollment)", () => {
     expect(bundle.inviteUrl).toContain("uinv/inv1");
     expect(bundle.tsAuthKey).toBeUndefined();
     expect(bundle.tailscaleUpCommand).toBeUndefined();
-    // The quickstart join has the friend generate their OWN key — a placeholder,
-    // never a real minted secret.
+    // The quickstart join has the friend generate their own key. It's a
+    // placeholder, never a real minted secret.
     expect(bundle.kopiaQuickstart).toContain(
       "tailscale up --authkey=<your-tailscale-auth-key>",
     );
@@ -133,7 +133,7 @@ describe("ProvisioningService.offboard (invite enrollment)", () => {
     const calls: Calls = [];
     const result = await buildProvisioningService(calls, DEDICATED_RES, {
       repo: { context: () => Promise.resolve(INVITE_CTX) },
-      userInvite: mockUserInviteApi(calls), // findUserByEmail → null by default
+      userInvite: mockUserInviteApi(calls), // findUserByEmail returns null by default
     }).offboard(1);
 
     expect(calls).toContain("invite:deleteInvite:inv1");
@@ -246,7 +246,7 @@ describe("ProvisioningService.inviteStatus", () => {
     const view = await buildProvisioningService(calls, DEDICATED_RES, {
       repo: { context: () => Promise.resolve(INVITE_CTX) },
       // Acceptance is read off the OAuth API (users list or devices), not the
-      // personal token — works even with no token configured.
+      // personal token. It works even with no token configured.
       tailscale: { hasJoined: () => Promise.resolve(true) },
       userInvite: mockUserInviteApi(calls, { configured: false }),
     }).inviteStatus(1);
@@ -269,7 +269,7 @@ describe("ProvisioningService.inviteStatus", () => {
   it("manual (no token, no invite id) while not yet joined", async () => {
     const calls: Calls = [];
     const view = await buildProvisioningService(calls, DEDICATED_RES, {
-      // No invite id → admin invited by hand; not joined → still manual.
+      // No invite id means the admin invited by hand; not yet joined still counts as manual.
       repo: {
         context: () => Promise.resolve({ ...INVITE_CTX, inviteId: null }),
       },

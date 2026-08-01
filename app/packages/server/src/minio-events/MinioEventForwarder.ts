@@ -1,14 +1,11 @@
 import type { Logger } from "../services/types.ts";
 import type { MinioEventSubscription } from "./MinioEventSubscription.ts";
 
-// Forwards every raw MinIO event to the operator's webhook, byte-compatible
-// with MinIO: one event per POST, `application/json`, auth header verbatim.
-// Best-effort — bounded retry then log, never blocks the bus. Mirrors MinIO's
-// webhook client defaults (max_retry=5, retry_interval=1s, http_timeout=5s).
+// Byte-compatible with MinIO's own webhook client (one event per POST, JSON,
+// auth header verbatim); best-effort, so a failure never blocks the bus.
 
 const DEFAULTS = { maxRetry: 5, retryIntervalMs: 1000, timeoutMs: 5000 };
 
-/** Rate-limit forward-failure warnings: log the 1st failure, then every Nth. */
 const FAIL_LOG_EVERY = 100;
 
 export interface ForwardOptions {
@@ -26,8 +23,8 @@ export class MinioEventForwarder {
   private readonly retryIntervalMs: number;
   private readonly timeoutMs: number;
   private failures = 0;
-  /** Resolves when the event stream ends (shutdown). Forwarding starts on
-   * construction; await this in tests / for a clean stop. */
+  /** Resolves when the event stream ends. Forwarding starts on construction;
+   * await this in tests or for a clean shutdown. */
   readonly done: Promise<void>;
 
   constructor(
@@ -44,9 +41,8 @@ export class MinioEventForwarder {
     this.done = this.run();
   }
 
-  /** Forward each raw event until the subscription's signal aborts. Delivery
-   * errors are caught in deliver(); this guard only covers an unexpected stream
-   * failure so it never becomes an unhandled rejection. */
+  /** deliver() already catches delivery errors; this guard only covers an
+   * unexpected stream failure, so it never becomes an unhandled rejection. */
   private async run(): Promise<void> {
     try {
       // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
@@ -60,7 +56,6 @@ export class MinioEventForwarder {
     }
   }
 
-  /** POST one event, retrying up to maxRetry; log (rate-limited) on give-up. */
   private async deliver(raw: unknown, signal: AbortSignal): Promise<void> {
     const body = JSON.stringify(raw);
     // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops

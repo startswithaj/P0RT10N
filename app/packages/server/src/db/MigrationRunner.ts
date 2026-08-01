@@ -4,17 +4,14 @@ import { fileURLToPath } from "node:url";
 import type { DatabaseDriver } from "./driver.ts";
 import type { Logger } from "../services/types.ts";
 
-/** Path to the generated drizzle migrations folder at the repo root, resolved
- * from this module (NOT cwd) so boot works no matter where the server is
- * launched from. The Docker image copies `drizzle/` at the same relative spot. */
+// Resolved from this module, not cwd, so boot works no matter where the server
+// is launched from; the Docker image copies drizzle/ at this same relative spot.
 const MIGRATIONS_FOLDER = fileURLToPath(
   new URL("../../../../../drizzle", import.meta.url),
 );
 
-/** Apply generated Drizzle migrations directly via @db/sqlite. Tracks applied
- * migrations by hash (not timestamp — @db/sqlite v0.12 truncates integers
- * > 2^31, re-populating the journal every boot). One source of truth for boot
- * and tests. */
+// Applied migrations are tracked by hash, not timestamp, because @db/sqlite v0.12
+// truncates integers over 2^31 and would otherwise re-populate the journal every boot.
 export function runMigrations(sqlite: DatabaseDriver, logger?: Logger): void {
   applyMigrations(
     sqlite,
@@ -23,7 +20,6 @@ export function runMigrations(sqlite: DatabaseDriver, logger?: Logger): void {
   );
 }
 
-/** The subset of drizzle's migration metadata the runner applies. */
 export interface MigrationEntry {
   hash: string;
   sql: string[];
@@ -31,12 +27,8 @@ export interface MigrationEntry {
 }
 
 /**
- * Each migration's statements AND its journal insert commit in one
- * transaction (BEGIN IMMEDIATE — take the write lock up front at boot), so a
- * crash or failing statement can never leave the schema half-applied with no
- * journal row. A failure aborts the run; later migrations are not attempted.
- * Exported separately from runMigrations so tests can apply synthetic
- * fixtures instead of the app's real migration files.
+ * Each migration's statements and its journal-insert commit run in one BEGIN
+ * IMMEDIATE transaction, so a crash can never leave the schema half-applied.
  */
 export function applyMigrations(
   sqlite: DatabaseDriver,

@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-// Parse+validate a raw MinIO audit-webhook payload into the typed view
-// consumers use (aggregator counting, sampler friend resolution). The single
-// parse in the system; the forwarder ships raw, untouched.
+// The only place raw MinIO audit-webhook payloads get parsed; the forwarder
+// ships the raw payload untouched.
 
-/** The fields we fold from a MinIO audit entry. */
 export interface MinioEvent {
   bucket: string;
   op: string;
@@ -30,7 +28,6 @@ const minioEventSchema = z.object({
   }).optional(),
 });
 
-/** Parse+validate a raw MinIO audit payload once; null if not a usable event. */
 export function parseMinioEvent(
   raw: unknown,
   now: () => string = () => new Date().toISOString(),
@@ -50,7 +47,6 @@ export function parseMinioEvent(
   };
 }
 
-/** Stream stage: raw payloads → typed events, dropping unparseable ones. */
 export async function* parseMinioEvents(
   src: AsyncIterable<unknown>,
 ): AsyncIterable<MinioEvent> {

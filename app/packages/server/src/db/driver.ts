@@ -1,6 +1,3 @@
-// Driver contract between drizzle and the underlying SQLite. Implemented by
-// SqliteCompat.ts over @db/sqlite (native FFI).
-
 export type BindValue =
   | number
   | string

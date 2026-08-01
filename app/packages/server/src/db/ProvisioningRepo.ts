@@ -22,25 +22,21 @@ import type {
   ProvisioningRepo,
 } from "../provisioning/deps.ts";
 
-/** The transaction handle drizzle passes to a `db.transaction(...)` callback. */
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
-/** Repo-level config the data layer needs (subset of ProvisioningConfig). */
 export interface RepoConfig {
   portRange: { min: number; max: number };
-  /** Server-side serve-node tag stored on the `instances` row. */
   serveNodeTag: string;
   /**
-   * Bind-probe on the publish interface — skips ports a foreign process
-   * holds that the DB doesn't know about. Absent = DB-only allocation.
+   * Bind-probes the publish interface for ports a foreign process holds that
+   * the DB doesn't know about. If absent, port allocation is DB-only.
    */
   probePort?: PortProbe;
 }
 
 /**
- * Drizzle/SQLite implementation of ProvisioningRepo. The atomic "reserve" runs
- * in a transaction so a crash can't half-create a friend/instance. Stores no
- * secret — only the access key **ID**.
+ * Reserve runs in one transaction so a crash cannot half-create a
+ * friend/instance. Only the access key ID is stored; the secret never persists.
  */
 export class DrizzleProvisioningRepo implements ProvisioningRepo {
   constructor(
@@ -48,10 +44,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     private readonly config: RepoConfig,
   ) {}
 
-  // The repo's methods are synchronous SQLite calls exposed as Promises
-  // (interface contract). Each body runs via defer() so any throw —
-  // exhausted port range, FK violation, NOT_FOUND — rejects instead of
-  // throwing synchronously; callers rely on `.catch()` semantics.
+  // Each method is a synchronous SQLite call wrapped in defer() so it returns
+  // a rejected Promise instead of throwing synchronously; callers rely on `.catch()`.
 
   reserveFriend(
     input: AddFriendInput,
@@ -112,8 +106,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   }
 
   activate(friendId: number, instanceId: number): Promise<void> {
-    // Two-row status flip must be atomic — a crash between the friend and
-    // instance updates leaves a state the boot sweep cannot interpret.
+    // The friend and instance status updates must flip atomically; a crash
+    // between them would leave a state the boot sweep cannot interpret.
     return defer(() => {
       this.db.transaction((tx) => {
         tx.update(friends).set({ status: "active" })
@@ -125,16 +119,14 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   }
 
   markFailed(friendId: number): Promise<void> {
-    // Atomic for the same reason as activate (friend + possibly instance row).
     return defer(() => {
       this.db.transaction((tx) => this.failFriendRow(tx, friendId));
     });
   }
 
   failStaleProvisioning(): Promise<string[]> {
-    // At boot any `provisioning` row is stale — provisioning only ever happens
-    // inside the running process, so no cross-restart concurrency exists. One
-    // transaction so a crash mid-flip can't leave a half-recovered set.
+    // At boot, any row still in provisioning state is stale, since provisioning
+    // only happens inside the running process; all rows flip in one transaction.
     return defer(() =>
       this.db.transaction((tx) => {
         const stale = tx.select({ id: friends.id, name: friends.name })
@@ -211,9 +203,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     instanceId: number,
     opts: { requireEmpty: boolean },
   ): Promise<boolean> {
-    // Count + mark in ONE transaction: between a separate count and the
-    // container teardown a concurrent add could reserve onto this instance
-    // (reap-vs-add TOCTOU). Once marked, reserveTx refuses to adopt it.
+    // The count and status flip run in one transaction, closing a window where
+    // a concurrent add could reserve onto this instance between count and teardown.
     return defer(() =>
       this.db.transaction((tx) => {
         if (opts.requireEmpty && this.liveFriendsOn(instanceId, tx) > 0) {
@@ -252,10 +243,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   }
 
   failInstanceMissing(instanceId: number): Promise<number> {
-    // The instance's container is gone (host wipe, manual docker rm): fail the
-    // instance and every non-failed friend on it in one transaction so the
-    // sweep reaps the rows and frees the names. Data is already gone — this
-    // only makes the DB stop lying about it.
+    // The container may be gone already (host wipe, manual docker rm); this fails
+    // the instance and its non-failed friends in one transaction so the sweep reaps them.
     return defer(() =>
       this.db.transaction((tx) => {
         const live = tx.select({ id: friends.id }).from(friends)
@@ -287,17 +276,14 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   }
 
   deleteFriend(friendId: number): Promise<void> {
-    // friends.id is referenced (with no ON DELETE CASCADE) by usage, activity,
-    // and audit — deleting the friend while any of those rows exist trips a
-    // FOREIGN KEY constraint. Drop the friend-scoped metric rows, but preserve
-    // the audit trail by nulling its (nullable) friendId. One transaction so a
-    // crash can't leave the friend deleted with orphaned children (or vice-versa).
+    // friends.id has no ON DELETE CASCADE, so usage/activity rows are deleted and
+    // audit rows keep their friendId nulled to preserve history; all in one transaction.
     return defer(() => {
       this.db.transaction((tx) => {
         tx.update(auditTable).set({ friendId: null })
           .where(eq(auditTable.friendId, friendId)).run();
         // no-param-mutation flags `.delete()` on the `tx` param as a Map/Set
-        // mutation — a false positive for drizzle's query builder.
+        // mutation; this is a false positive for drizzle's query builder.
         // deno-lint-ignore custom-no-param-mutation/no-param-mutation
         tx.delete(usage).where(eq(usage.friendId, friendId)).run();
         // deno-lint-ignore custom-no-param-mutation/no-param-mutation
@@ -320,8 +306,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     detail?: string,
   ): Promise<void> {
     return defer(() => {
-      // Snapshot the name now — offboard deletes the friend row (and nulls
-      // friendId on surviving audit rows), so a live join would later lose it.
+      // The name is snapshotted now because offboard deletes the friend row (and
+      // nulls friendId on surviving audit rows), so a later live join would lose it.
       const friendName = friendId === null ? null : (this.db
         .select({ name: friends.name }).from(friends)
         .where(eq(friends.id, friendId)).get()?.name ?? null);
@@ -335,8 +321,6 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     });
   }
 
-  // ---- transaction body + helpers ----
-
   private reserveTx(
     tx: Tx,
     input: AddFriendInput,
@@ -346,10 +330,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       ? this.resolveSharedInstance(tx, naming)
       : this.createInstance(tx, "dedicated", naming);
     const friendId = this.insertFriend(tx, input, naming, instance.instanceId);
-    // Use the instance row's PERSISTED hostname, not the config-derived one:
-    // when adopting an existing shared instance they can differ (config
-    // changed since the pool was created) and the bundle must point at the
-    // endpoint that actually exists.
+    // The persisted instance hostname is used instead of the config-derived one,
+    // since adopting an existing shared pool can leave them different if config changed.
     return {
       friendId,
       instanceId: instance.instanceId,
@@ -369,10 +351,8 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     tsHostname: string;
     instanceExisted: boolean;
   } {
-    // Never adopt an instance in a terminal or reaping state: a concurrent
-    // offboard's reap may be tearing it down right now — adopting it would
-    // strand the new friend on a removed container (`instanceExisted: true`
-    // skips container start).
+    // An instance in a terminal or reaping state is never adopted, because a
+    // concurrent offboard's reap may be tearing it down right now.
     const existing = tx.select({
       instanceId: instances.id,
       hostPort: instances.minioPort,
@@ -414,17 +394,15 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   }
 
   private allocatePort(tx: Tx): number {
-    // Count ALL instance ports as used, not just non-failed ones: a failed row
-    // still occupies its port (minio_port is UNIQUE) until the cleanup sweep
-    // deletes it, so excluding it would collide on insert.
+    // All instance ports count as used, not just non-failed ones: minio_port is
+    // unique across all rows, and a failed row keeps its port until the cleanup sweep.
     const used = new Set(
       tx.select({ port: instances.minioPort }).from(instances).all()
         .map((r) => r.port),
     );
     const { min, max } = this.config.portRange;
-    // Bind-probe each DB-free candidate: without it a foreign process on an
-    // in-range port makes every allocation re-pick the same busy port —
-    // a permanent failure loop.
+    // Each DB-free candidate is bind-probed; without it a foreign process holding
+    // an in-range port would make every allocation re-pick the same busy port.
     const probe = this.config.probePort ?? (() => true);
     const free = Array.from({ length: max - min + 1 }, (_, i) => min + i)
       .find((port) => !used.has(port) && probe(port));
@@ -451,7 +429,6 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     return inserted[0].id;
   }
 
-  /** markFailed semantics over either the db or a transaction handle. */
   private failFriendRow(h: Db | Tx, friendId: number): void {
     const row = h.select({ instanceId: friends.instanceId })
       .from(friends).where(eq(friends.id, friendId)).get();

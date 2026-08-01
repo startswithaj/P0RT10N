@@ -3,11 +3,10 @@ import { expect } from "@std/expect";
 import { Env } from "./Env.ts";
 
 describe("Env", () => {
-  // Required vars supplied by default; construction validates them.
   const REQUIRED = {
     P0RT1ON_MASTER_KEY: "k",
     P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
-    // Required on the default (docker) runtime — the pantry host path.
+    // Required on the default (docker) runtime; this is the pantry host path.
     P0RT1ON_PANTRY: "/srv/p0rt1on",
   };
 
@@ -67,8 +66,8 @@ describe("Env", () => {
   });
 
   it("rejects an admin port that collides with the audit listener", () => {
-    // The whole point of the split is two distinct listeners — a collision
-    // must fail at boot, not surface as a bind error.
+    // The whole point of the split is two distinct listeners, so a collision must
+    // fail at boot, not surface later as a bind error.
     expect(() => env({ P0RT1ON_PORT: "8081" }).port).toThrow(
       "must differ from the audit listener's port",
     );
@@ -80,7 +79,7 @@ describe("Env", () => {
   });
 
   it("derives where instances post audit events, per runtime", () => {
-    // Never 127.0.0.1 — that would be the instance itself, not the manager.
+    // This is never 127.0.0.1, since that would point at the instance itself, not the manager.
     expect(env({}).provisioningConfig().auditWebhookUrl).toBe(
       "http://host.docker.internal:8081/internal/minio-events",
     );
@@ -100,7 +99,7 @@ describe("Env", () => {
         get: (k) => ({ P0RT1ON_MASTER_KEY: "k" } as Record<string, string>)[k],
       })
     ).toThrow("P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET");
-    // Empty string counts as unset.
+    // An empty string counts as unset.
     expect(() =>
       new Env({
         get: (k) => ({ ...REQUIRED, P0RT1ON_MASTER_KEY: "" })[k],
@@ -128,7 +127,7 @@ describe("Env", () => {
       env({ P0RT1ON_PANTRY: "/srv/p", P0RT1ON_DB_PATH: "/srv/p/p0rt1on.db" })
         .pantry
     ).toThrow("must not live inside");
-    // A DB outside the pantry is fine.
+    // A database path outside the pantry is fine.
     expect(
       env({ P0RT1ON_PANTRY: "/srv/p", P0RT1ON_DB_PATH: "/var/p0rt1on.db" })
         .pantry,
@@ -149,7 +148,7 @@ describe("Env", () => {
       });
 
     expect(k8s("p0rt1on-pantry").pantry).toBe("p0rt1on-pantry");
-    // A path (leading slash) is the docker shape — rejected on k8s.
+    // A leading-slash path is the docker shape, which is rejected on kubernetes.
     expect(() => k8s("/srv/p0rt1on").pantry).toThrow("StorageClass name");
   });
 
@@ -213,7 +212,7 @@ describe("Env", () => {
       loginServer: undefined,
       serveMode: "https",
     });
-    // Headscale derives loginServer from its own URL (same as the API base).
+    // Headscale derives loginServer from its own URL, the same as the API base.
     expect(
       env({
         P0RT1ON_TAILSCALE_BACKEND: "headscale",
@@ -223,7 +222,7 @@ describe("Env", () => {
         P0RT1ON_TAILSCALE_SERVE_MODE: "http",
       }).instanceTailscale(),
     ).toEqual({ loginServer: "http://hs:8080", serveMode: "http" });
-    // Anything but the explicit opt-out stays https.
+    // Anything but the explicit opt-out value stays https.
     expect(
       env({ P0RT1ON_TAILSCALE_SERVE_MODE: "bogus" }).instanceTailscale()
         .serveMode,

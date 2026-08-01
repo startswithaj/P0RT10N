@@ -158,8 +158,6 @@ export class Env {
     const password = this.#opt(EnvVar.AdminPassword);
     return username && password ? { username, password } : null;
   }
-  /** A non-loopback bind is refused by the boot guard unless auth is enabled —
-   * a bare admin API must never face the network. */
   get adminBindHost(): string {
     return this.#str(EnvVar.AdminBindHost, "127.0.0.1");
   }

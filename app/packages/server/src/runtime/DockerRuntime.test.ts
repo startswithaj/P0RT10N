@@ -123,7 +123,8 @@ describe("DockerRuntime.ensureInstance", () => {
       .ensureInstance(RUN_SPEC);
     expect(handle.id).toBe("abc");
     expect(cmds.some((c) => c.args[0] === "run")).toBe(false);
-    // Adopted containers may predate the restart policy — it's applied in place.
+    // Adopted containers may predate the restart policy, so it is applied in
+    // place.
     expect(
       cmds.some((c) =>
         c.args.join(" ") === "update --restart unless-stopped " + RUN_SPEC.name
@@ -325,10 +326,8 @@ describe("DockerInstanceRuntime", () => {
     };
   }
 
-  // Fake pantry: records its calls and hands back a deterministic host path,
-  // so tests can assert both the bind-mount source and the create/delete wiring
-  // without touching the filesystem (HostPantry's real fs is unit-tested in
-  // pantry.test.ts).
+  // Records calls and returns a deterministic host path so tests can assert
+  // wiring without touching the filesystem; real fs is covered in pantry.test.ts.
   function recordingPantry(
     calls: string[],
     root = "/pantry",
@@ -389,19 +388,18 @@ describe("DockerInstanceRuntime", () => {
     }).ensureInstance(INSTANCE);
 
     // Container/volume names, the network, and the env-file path are the
-    // runtime's business — none of them appear in the domain spec.
+    // runtime's business, so none of them appear in the domain spec.
     expect(specs[0]).toEqual({
       name: "p0rt1on-instance-alice",
       image: "p0rt1on-instance:x",
       tsHostname: "alice",
       tag: "tag:p0rt1on-serve",
       minioPort: 9100,
-      // Data mounts the pantry directory; tailscale state stays a named volume.
       dataSource: "/pantry/alice",
       stateSource: "p0rt1on-tsstate-alice",
       rootCredSecretRef: "/fake/policy.json",
       network: "p0rt1on-net",
-      // host addressing (the build default) → publish to the host loopback.
+      // Host addressing, the build default, publishes to the host loopback.
       publishHostPort: true,
     });
   });
@@ -449,13 +447,12 @@ describe("DockerInstanceRuntime", () => {
   });
 
   it("tailscale extras ride the env-file only when configured", async () => {
-    // Default (SaaS) config: neither var appears — byte-identical env.
     const plain: string[] = [];
     await build([], plain).ensureInstance(INSTANCE);
     expect(plain[0]).not.toContain("TAILSCALE_LOGIN_SERVER");
     expect(plain[0]).not.toContain("TAILSCALE_SERVE_MODE");
 
-    // Headscale test tier: login server + the no-cert http serve fallback.
+    // Headscale test tier lacks TLS certs, hence the http serve-mode fallback.
     const written: string[] = [];
     const headscale = new DockerInstanceRuntime(
       recordingRuntime([]),
@@ -486,9 +483,8 @@ describe("DockerInstanceRuntime", () => {
     expect(calls).toEqual([
       "stop:p0rt1on-instance-alice",
       "remove:p0rt1on-instance-alice:true",
-      // State (named volume) + the current & legacy named DATA volumes so a
-      // pre-pantry instance reaps fully — removeVolumes ignores whichever are
-      // absent. The pantry directory is deleted separately, below.
+      // Includes legacy DATA volume names so a pre-pantry instance reaps fully.
+      // removeVolumes ignores absent ones; the pantry dir is deleted separately.
       "removeVolumes:p0rt1on-tsstate-alice,p0rt1on-data-alice," +
       "p0rt1on-data-alice-1,p0rt1on-data-alice-2,p0rt1on-data-alice-3," +
       "p0rt1on-data-alice-4",
@@ -499,7 +495,6 @@ describe("DockerInstanceRuntime", () => {
   it("removeInstance without removeData keeps the container's data", async () => {
     const calls: string[] = [];
     await build(calls).removeInstance("alice", { removeData: false });
-    // Container gone, but no volume reap and no pantry delete — the data stays.
     expect(calls).toEqual(["remove:p0rt1on-instance-alice:false"]);
   });
 

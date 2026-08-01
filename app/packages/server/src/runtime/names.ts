@@ -1,15 +1,13 @@
-// Deterministic container + volume names for an instance, derived from its
-// tailnet hostname. Shared by ProvisioningService (builds the spec) and the
-// runtime (stop/remove by instance name) so the two never disagree.
+// Container and volume names are deterministically derived from the instance's tailnet hostname,
+// and both ProvisioningService and the runtime rely on that so they never disagree on a name.
 
 export interface ContainerNames {
   container: string;
-  /** Single data volume — MinIO SNSD supports Object Lock; no erasure set. */
+  // There is a single data volume because MinIO's Object Lock support requires single-node
+  // single-drive mode, which has no erasure set.
   dataVolume: string;
-  /**
-   * The pre-SNSD 4-volume names. Kept ONLY so teardown reaps instances
-   * created before the single-drive switch; never mounted for new ones.
-   */
+  // These are the pre-single-drive-switch four-volume names, kept only so teardown can reap
+  // instances created before the switch; they are never mounted for new instances.
   legacyDataVolumes: string[];
   stateVolume: string;
 }

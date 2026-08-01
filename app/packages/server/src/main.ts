@@ -17,13 +17,10 @@ import {
   resolveFriend,
 } from "./minio-events/resolveFriend.ts";
 
-// Server entrypoint: read env → open DB → wire services → run boot
-// (migrate → stale-provisioning flip → reconcile → sweep → serve; ordering
-// lives in boot.ts). Thin glue — not unit-tested; app.ts and HTTP path are.
+// Entry point: reads env, opens the database, wires services, then runs the boot sequence.
+// The exact ordering (migrate, flip stale provisioning, reconcile, sweep, serve) lives in boot.ts.
 
-const env = new Env(); // validates required vars — refuses to boot without them
-// The production image builds the SPA next to the server; in dev it is absent
-// and the Vite dev server serves the frontend instead.
+const env = new Env(); // Validates required vars; refuses to boot when any are missing.
 const distDir = `${import.meta.dirname}/../dist`;
 const staticDir = await Deno.stat(distDir)
   .then((s) => s.isDirectory ? distDir : undefined)
@@ -40,27 +37,16 @@ const context = app.context;
 const queries = new FriendQueries(database.db);
 const lookup: FriendLookup = (bucket) => queries.friendByBucket(bucket);
 
-// MinIO events fan out from one bus to independent consumers: the aggregator
-// folds per-friend activity, the sampler debounces `mc du`, the forwarder ships
-// raw payloads to the operator's webhook. Metrics consumers read the parsed,
-// friend-resolved stream; none depend on another. Usage samples also run at
-// boot + hourly (below); the sampler's stream subscription covers active
-// friends (30s after a friend's last event).
-// The bus owns the shared shutdown signal — SIGTERM aborts it, tearing down
-// every subscription.
+// The bus owns the shared shutdown signal: SIGTERM aborts it, tearing down every subscription.
+// Each consumer catches its own errors and never rejects.
 const consumersAbort = new AbortController();
 const bus = new MinioEventBus(logger, consumersAbort);
 
-// Metrics consumers read the raw stream parsed, then resolved to the owning
-// friend (parse → look up the friend + attach it); the forwarder reads raw.
 const friendEvents = (name: string) =>
   bus.subscribe(name)
     .pipe(parseMinioEvents)
     .pipe(resolveFriend(lookup));
 
-// Each consumer starts on construction and runs for the process's life; it
-// catches its own errors (never rejects), and SIGTERM aborts the shared bus
-// signal to end every loop. `sampler` is kept for its boot/hourly triggers.
 const sampler = new UsageSampler(
   friendEvents("sampler"),
   queries,
@@ -69,7 +55,6 @@ const sampler = new UsageSampler(
 );
 new MinioEventAggregator(friendEvents("aggregator"), database.db, logger);
 
-// The forwarder is optional — only when the operator configured a target.
 if (env.minioForwardUrl) {
   new MinioEventForwarder(
     bus.subscribe("forwarder"),
@@ -90,16 +75,15 @@ await runBoot({
   migrate: () => runMigrations(database.driver, logger),
   recoverStaleProvisioning: () =>
     context.provisioningService.recoverStaleProvisioning(),
-  // Degraded instances are marked/logged inside the reconciler; anything it
-  // can't handle (e.g. the DB read blowing up) is loud but never fatal — the
-  // admin UI must come up to show the problem.
+  // Degraded instances are marked and logged inside the reconciler.
+  // Any failure there is logged but never fatal, because the admin UI must come up to show the problem.
   reconcile: () =>
     app.bootReconciler.run().catch((err) =>
       logger.error("boot reconcile failed", { error: String(err) })
     ),
   sweep,
-  // Probe tailnet prerequisites so the UI can gate portion creation. Loud but
-  // never fatal — the admin UI must come up to surface the problem.
+  // Probes tailnet prerequisites so the UI can gate portion creation.
+  // Failures are logged but never fatal, because the admin UI must come up to surface the problem.
   preflight: () =>
     context.systemHealthService.probe()
       .then((h) => {
@@ -129,13 +113,10 @@ await runBoot({
 
     sampleAll();
     setInterval(sampleAll, 60 * 60 * 1000);
-    // Two listeners so the exposed surface is minimal: the admin API is
-    // loopback-only by construction, and only the token-guarded audit
-    // webhook faces the container network.
-    // Warn (don't block) when the admin API is bound wider than this machine
-    // with no password. We only know the bind address here — not the actual
-    // exposure (a container's host publish is invisible to it) — so the risk is
-    // stated conditionally; the UI banner, keyed on the request URL, is precise.
+    // Two listeners keep the exposed surface minimal: the admin API defaults to
+    // loopback, and only the token-guarded audit webhook faces the container network.
+    // This only checks the bind address, not actual exposure, since a container's host publish is invisible to it.
+    // So the warning here is conditional; the UI banner, keyed on the request URL, gives the precise signal.
     const localOnly = ["127.0.0.1", "localhost", "::1"];
     if (!localOnly.includes(env.adminBindHost) && !env.adminAuth) {
       logger.warn(
@@ -158,8 +139,8 @@ await runBoot({
       port: EVENT_PORT,
       hostname: EVENT_BIND_HOST,
       sink: {
-        // Derived from the master key — same value buildApp wires into
-        // setAuditWebhook, so instances and listener always agree.
+        // Derived from the master key. This is the same value buildApp wires into
+        // setAuditWebhook, so instances and the listener always agree on it.
         token: new CryptoKeyGen(env.masterKey).auditWebhookToken(),
         onEvent: (raw) => bus.publish(raw),
       },
@@ -168,7 +149,6 @@ await runBoot({
           `p0rt1on minio-event webhook listening on ${EVENT_BIND_HOST}:${port}`,
         ),
     });
-    // Stop the consumers (ends their loops, cancels in-flight forwards), exit.
     Deno.addSignalListener("SIGTERM", () => {
       consumersAbort.abort();
       Deno.exit(0);

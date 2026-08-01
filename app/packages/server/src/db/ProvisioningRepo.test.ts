@@ -52,7 +52,7 @@ describe("DrizzleProvisioningRepo", () => {
   });
 
   it("skips a port a foreign process holds (probe says busy)", async () => {
-    // The DB thinks 9000 is free, but something else is bound to it — the
+    // The DB thinks 9000 is free, but something else is bound to it, so the
     // probe must advance to 9001 instead of failing on 9000 forever.
     const probed = new DrizzleProvisioningRepo(database.db, {
       ...TEST_REPO_CONFIG,
@@ -126,7 +126,7 @@ describe("DrizzleProvisioningRepo", () => {
       makeAddInput("carol", "shared"),
       namingFor("carol", "shared"),
     );
-    // Both pooled onto one instance — recovery re-applies both grants.
+    // Both are pooled onto one instance; recovery re-applies both grants.
     const tags = await repo.liveFriendTagsOnInstance(bob.instanceId);
     expect(tags.toSorted()).toEqual([
       "tag:p0rt1on-friend-bob",
@@ -135,9 +135,8 @@ describe("DrizzleProvisioningRepo", () => {
   });
 
   it("shared: never adopts a reaping instance — a new pool is created instead", async () => {
-    // The reap-vs-add race: once the sweep marks the pool `reaping`, a
-    // concurrent add must NOT reserve onto it (it's about to be removed —
-    // `instanceExisted: true` would skip container start and dangle).
+    // Reap-vs-add race: once marked `reaping`, a concurrent add must not
+    // reserve onto it, since `instanceExisted: true` would skip container start.
     const bob = await repo.reserveFriend(
       makeAddInput("bob", "shared"),
       namingFor("bob", "shared"),
@@ -163,20 +162,18 @@ describe("DrizzleProvisioningRepo", () => {
     expect(
       await repo.markInstanceReaping(bob.instanceId, { requireEmpty: true }),
     ).toBe(false);
-    // Dedicated teardown doesn't require empty — the offboarding friend's own
-    // row may still exist when the mark happens.
+    // Dedicated teardown does not require empty, since the offboarding
+    // friend's own row may still exist when the mark happens.
     expect(
       await repo.markInstanceReaping(bob.instanceId, { requireEmpty: false }),
     ).toBe(true);
   });
 
   it("shared: adopting an existing pool returns its STORED hostname, not config's", async () => {
-    // Pool created under the hostname "pool"...
     await repo.reserveFriend(
       makeAddInput("bob", "shared"),
       namingFor("bob", "shared", "pool"),
     );
-    // ...then the shared instance name changes in config before carol is added.
     const carol = await repo.reserveFriend(
       makeAddInput("carol", "shared"),
       namingFor("carol", "shared", "renamed-pool"),
@@ -199,7 +196,7 @@ describe("DrizzleProvisioningRepo", () => {
     expect(ctx.s3AccessKeyId).toBe("AKIANEW");
     expect(ctx.bucket).toBe("alice");
     expect(ctx.nodeTag).toBe("tag:p0rt1on-friend-alice");
-    expect(ctx.serveNodeId).toBeNull(); // not yet recorded
+    expect(ctx.serveNodeId).toBeNull();
   });
 
   it("records the serve node ID; context reflects it", async () => {
@@ -255,11 +252,9 @@ describe("DrizzleProvisioningRepo", () => {
       status: "pending",
     });
 
-    // From alice's perspective, one OTHER portion (bob) shares the email.
     expect(await repo.otherFriendsWithInviteEmail(alice.friendId, email)).toBe(
       1,
     );
-    // A different email nobody uses → 0.
     expect(await repo.otherFriendsWithInviteEmail(alice.friendId, "x@y.z"))
       .toBe(0);
   });
@@ -297,17 +292,14 @@ describe("DrizzleProvisioningRepo", () => {
       makeAddInput("alice", "dedicated"),
       namingFor("alice", "dedicated"),
     );
-    // Child rows referencing friends.id. None have ON DELETE CASCADE, so
-    // deleting the friend while these exist used to trip a FOREIGN KEY
-    // constraint (the offboard bug).
+    // None of these child rows have ON DELETE CASCADE, so deleting the friend
+    // while they exist used to trip a foreign key constraint (the offboard bug).
     seedUsage(database.db, res.friendId, 100, 5, "2026-07-01T00:00:00Z");
     seedActivity(database.db, res.friendId, { requests24h: 7 });
     await repo.audit(res.friendId, "add_friend", "mode=dedicated");
 
-    // Must not throw despite the referencing rows.
     await repo.deleteFriend(res.friendId);
 
-    // Friend + its friend-scoped metric rows are gone...
     await expect(repo.context(res.friendId)).rejects.toThrow("not found");
     const usageCount = database.driver.prepare("SELECT COUNT(*) c FROM usage")
       .get();
@@ -316,7 +308,7 @@ describe("DrizzleProvisioningRepo", () => {
       "SELECT COUNT(*) c FROM activity",
     ).get();
     expect(activityCount?.c).toBe(0);
-    // ...but the audit trail survives, detached from the deleted friend.
+    // The audit trail survives, detached from the deleted friend.
     const auditCount = database.driver.prepare("SELECT COUNT(*) c FROM audit")
       .get();
     expect(auditCount?.c).toBe(1);
@@ -436,15 +428,15 @@ describe("DrizzleProvisioningRepo", () => {
     await repo.activate(carol.friendId, carol.instanceId);
 
     const live = await repo.liveInstances();
-    expect(live.length).toBe(1); // the one shared pool
+    expect(live.length).toBe(1);
     expect(live[0].instanceId).toBe(bob.instanceId);
     expect(live[0].minioPort).toBe(9000);
 
-    // Container vanished: both friends and the instance flip in one call...
+    // The container vanished, so both friends and the instance flip in one call.
     expect(await repo.failInstanceMissing(bob.instanceId)).toBe(2);
     expect(await repo.liveInstances()).toEqual([]);
     expect((await repo.failedFriendIds()).length).toBe(2);
-    // ...and repeating it is a no-op (already failed).
+    // Repeating the call is a no-op, since everything is already failed.
     expect(await repo.failInstanceMissing(bob.instanceId)).toBe(0);
   });
 
@@ -463,7 +455,6 @@ describe("DrizzleProvisioningRepo", () => {
     await expect(repo.activate(res.friendId, res.instanceId)).rejects
       .toThrow("injected");
 
-    // Neither update persisted — the friend is still provisioning.
     const row = database.driver.prepare("SELECT status s FROM friends").get();
     expect(row?.s).toBe("provisioning");
   });
@@ -493,7 +484,6 @@ describe("DrizzleProvisioningRepo", () => {
     await repo.deleteFriend(res.friendId);
     await repo.deleteInstance(res.instanceId);
 
-    // With the instance gone, the next dedicated friend reclaims port 9000.
     const next = await repo.reserveFriend(
       makeAddInput("bob", "dedicated"),
       namingFor("bob", "dedicated"),

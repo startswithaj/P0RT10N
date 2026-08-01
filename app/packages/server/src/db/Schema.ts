@@ -18,26 +18,17 @@ import {
 } from "@p0rt1on/shared/domain";
 import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
 
-// p0rt1on metadata DB (SQLite via Drizzle) — NO SECRETS. Stores only which
-// instances/buckets exist, their config, and aggregated activity/usage. Never
-// an S3 secret, Tailscale auth key, or encryption key. Migrations run at boot.
+// This metadata DB stores no secrets, only which instances/buckets exist, their
+// config, and aggregated activity/usage; never an S3 secret, Tailscale auth key, or encryption key.
 
-// ---- Instances ----
-// One row per running MinIO + tailscaled pair (the unit the runtime layer
-// starts/stops). A `dedicated` instance backs exactly one friend; the single
-// `shared` instance backs many. Holds the port + endpoint so shared-mode
-// friends reference one row instead of duplicating it.
 export const instances = sqliteTable("instances", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   kind: text("kind", { enum: INSTANCE_KIND_VALUES }).notNull(),
-  // Host port the MinIO container is published on; allocated for dedicated,
-  // reused for the shared pool. Unique across non-failed instances.
   minioPort: integer("minio_port").notNull(),
   tsHostname: text("ts_hostname").notNull(),
-  // The serve node's tag on our tailnet (instance side).
   tsTag: text("ts_tag").notNull(),
-  // Stable tailnet node ID; offboard deletes by this (not hostname, which the
-  // control plane renames on collision). Null for pre-column instances.
+  // Offboard deletes by this stable tailnet node ID, not hostname, since the
+  // control plane renames the hostname on collision. Null for pre-column instances.
   serveNodeId: text("serve_node_id"),
   status: text("status", { enum: INSTANCE_STATUS_VALUES })
     .notNull()
@@ -48,10 +39,6 @@ export const instances = sqliteTable("instances", {
   index("idx_instances_kind_status").on(table.kind, table.status),
 ]);
 
-// ---- Friends ----
-// One row per friend. Endpoint/port live on `instances`; for `dedicated` it's a
-// 1:1 reference, for `shared` many friends point at the same instance row.
-// s3AccessKeyId is the access key **ID only** — the secret is never stored.
 export const friends = sqliteTable("friends", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -66,23 +53,19 @@ export const friends = sqliteTable("friends", {
     .notNull()
     .default("GOVERNANCE"),
   lockRetentionDays: integer("lock_retention_days").notNull(),
-  // Access key ID only — never the secret. Null between row-reserve (step 1)
-  // and user creation (step 4) of the provisioning flow.
+  // Only the access key ID is stored here, never the secret. It's null between
+  // row-reserve (step 1) and user creation (step 4) of the provisioning flow.
   s3AccessKeyId: text("s3_access_key_id"),
-  // The friend's client node tag (`tag:p0rt1on-friend-<name>`), gated by ACL.
   tsNodeTag: text("ts_node_tag").notNull(),
-  // Tailscale auth-key ID only — never the key secret (zero-knowledge). Kept
-  // so the key can be revoked on failure-reap, re-issue, and offboard. Null
-  // for friends provisioned before this column (their keys expire naturally).
+  // Only the auth-key ID is stored, never the secret, so the key can still be
+  // revoked on failure-reap, re-issue, or offboard while keeping zero-knowledge.
   tsKeyId: text("ts_key_id"),
-  // How the friend joined the tailnet. Default authKey so pre-column rows read
-  // as the existing tagged-node flow (see ENROLLMENT_MODE_VALUES).
+  // Defaults to authKey so pre-column rows read as the existing tagged-node flow.
   enrollmentMode: text("enrollment_mode", { enum: ENROLLMENT_MODE_VALUES })
     .notNull()
     .default("authKey"),
-  // Invite flow only (null for authKey friends): the invited email (== login
-  // identity for the ACL grant), the Tailscale invite id (status/resend/revoke),
-  // and the tracked invite status (pending / accepted / expired / manual).
+  // These three fields are invite-flow only (null for authKey friends): inviteEmail
+  // doubles as the ACL grant's login identity, and inviteStatus tracks pending/accepted/expired/manual.
   inviteEmail: text("invite_email"),
   inviteId: text("invite_id"),
   inviteStatus: text("invite_status"),
@@ -98,39 +81,34 @@ export const friends = sqliteTable("friends", {
   index("idx_friends_status").on(table.status),
 ]);
 
-// ---- Activity ----
-// One row per friend, upserted by the audit-webhook aggregator. Metadata only
-// (counts, bytes, timestamps) — never object contents (zero-knowledge holds).
+// Only metadata (counts, bytes, timestamps) is stored here, never object
+// contents, preserving zero-knowledge.
 export const activity = sqliteTable("activity", {
-  // 1:1 with friends; friendId is the PK.
   friendId: integer("friend_id")
     .primaryKey()
     .references(() => friends.id),
   requestsTotal: integer("requests_total").notNull().default(0),
-  // JSON map of raw MinIO op name -> count. `mode: "json"` auto parses/serializes;
-  // column stays `text` so SQLite JSON operators still apply. Default literal '{}'.
+  // This column is JSON-mapped (op name to count) but stays `text` so SQLite JSON
+  // operators still apply; mode: "json" handles parsing and serializing automatically.
   requestsByOp: text("requests_by_op", { mode: "json" }).$type<RequestsByOp>()
     .notNull().default(sql`'{}'`),
-  // Rolling request count over the last 24h. Denormalized cache of the buckets
-  // below (kept in sync on each event); reads recompute from `requestBuckets`
-  // so the count decays as a friend goes idle rather than freezing.
+  // This is a denormalized cache of the requestBuckets below, kept in sync on each
+  // event; reads recompute from requestBuckets so the count decays as a friend goes idle.
   requests24h: integer("requests_24h").notNull().default(0),
-  // Hourly request tallies (hour-epoch -> count) for the rolling-24h window.
-  // JSON map, pruned to the window on every ingest. See
-  // minio-events/requestBuckets.ts.
+  // Hourly request tallies for the rolling 24h window, pruned to that window on every ingest.
   requestBuckets: text("request_buckets", { mode: "json" })
     .$type<RequestBuckets>().notNull().default(sql`'{}'`),
   lastRequestAt: text("last_request_at"),
   lastOp: text("last_op"),
   bytesInTotal: integer("bytes_in_total").notNull().default(0),
   bytesOutTotal: integer("bytes_out_total").notNull().default(0),
-  // Denied / failed-auth count — drives the security nudge.
+  // Denied/failed-auth count that drives the security nudge.
   deniedCount: integer("denied_count").notNull().default(0),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
 
-// ---- Usage ----
-// Point-in-time `mc du` samples (append-only); the latest row is "current usage".
+// These are point-in-time `mc du` samples, append-only; the latest row per
+// friend is treated as current usage.
 export const usage = sqliteTable("usage", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   friendId: integer("friend_id")
@@ -143,11 +121,8 @@ export const usage = sqliteTable("usage", {
   index("idx_usage_friend_checked").on(table.friendId, table.checkedAt),
 ]);
 
-// ---- Audit ----
-// Lifecycle events (add/resize/rotate/suspend/offboard + boot recover/data-loss).
-// friendId is nullable for non-friend-scoped (system) actions. `friendName` is
-// SNAPSHOT at write time so history survives the friend being offboarded/renamed
-// — never resolve the name by a live join. `detail` is optional context.
+// friendId is nullable for non-friend-scoped system actions. friendName is a
+// snapshot taken at write time so history survives the friend being offboarded or renamed.
 export const audit = sqliteTable("audit", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   friendId: integer("friend_id").references(() => friends.id),
@@ -159,8 +134,6 @@ export const audit = sqliteTable("audit", {
   index("idx_audit_friend_created").on(table.friendId, table.createdAt),
   index("idx_audit_created").on(table.createdAt),
 ]);
-
-// ---- Inferred row / insert types ----
 
 export type Instance = typeof instances.$inferSelect;
 export type NewInstance = typeof instances.$inferInsert;

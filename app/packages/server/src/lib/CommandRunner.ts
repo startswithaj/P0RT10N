@@ -1,6 +1,3 @@
-// Process + temp-file abstractions injected into shell-out wrappers (mc, docker)
-// so arg-building and output-parsing are unit-testable with fakes. Deno impls run in prod/IT.
-
 export interface CommandResult {
   code: number;
   stdout: string;
@@ -8,7 +5,6 @@ export interface CommandResult {
 }
 
 export interface CommandRunner {
-  /** `env` vars are merged over the child's inherited environment. */
   run(
     command: string,
     args: string[],
@@ -16,7 +12,6 @@ export interface CommandRunner {
   ): Promise<CommandResult>;
 }
 
-/** Runs a real subprocess via Deno.Command. Requires --allow-run. */
 export class DenoCommandRunner implements CommandRunner {
   async run(
     command: string,
@@ -38,17 +33,12 @@ export class DenoCommandRunner implements CommandRunner {
   }
 }
 
-/** Writes short-lived files (e.g. an IAM policy `mc` reads from disk). */
 export interface TempFiles {
-  /** Write `content` to a fresh file and return its path. */
   write(content: string): Promise<string>;
   remove(path: string): Promise<void>;
 }
 
-/**
- * Temp files under a pwd-relative dir (never the system /tmp). Requires
- * --allow-read/--allow-write.
- */
+/** Temp files always live under a pwd-relative directory, never the system /tmp. */
 export class DenoTempFiles implements TempFiles {
   constructor(private readonly dir = "./.p0rt1on-tmp") {}
 

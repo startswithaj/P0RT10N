@@ -41,9 +41,8 @@ describe("MinioEventAggregator", () => {
     return res;
   };
 
-  // An empty stream for the fold-only tests (fold() doesn't read the stream —
-  // parse/resolve happen in the pipe, see resolveFriend.test.ts). accessKey is
-  // irrelevant here (kept only to satisfy the MinioEvent shape).
+  // fold() never reads the stream itself, so these tests can pass an empty one.
+  // accessKey is irrelevant here, kept only to satisfy the MinioEvent shape.
   const emptyStream = (): MinioEventSubscription<FriendEvent> =>
     subscription(
       (async function* (): AsyncGenerator<FriendEvent> {})(),
@@ -174,7 +173,7 @@ describe("MinioEventAggregator", () => {
       database.db,
       logger,
       () => "T",
-    ).done; // resolves despite the throw
+    ).done; // `done` resolves even though the stream rejected.
     expect(errors.some((m) => m.includes("aggregator stopped"))).toBe(true);
   });
 });

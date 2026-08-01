@@ -1,23 +1,12 @@
-// Progress-step definitions for the add/offboard flows. Kept in their own
-// module (no zod / no other deps) so the client can import these runtime values
-// for the progress checklists without pulling the rest of `domain` — and its
-// zod schemas — into the browser bundle. Re-exported from `domain` for the
-// server's convenience.
-//
-// The add/offboard flows stream progress over SSE (friends.addStream /
-// friends.offboardStream). Each event names its step by `key`; the server passes
-// these keys to the generator's `yield`, and the client renders the ordered list
-// below, marking the reported step active and earlier ones done. Order here =
-// display order; the keys are the wire contract between server and client.
+// The array order below is the display order, and each step's `key` is the
+// wire contract that the server and client must agree on.
 
-/** One checklist step: a stable `key` (the wire contract) + display `label`. */
 export type ProgressStep<K extends string> = { key: K; label: string };
 
-/** Add-friend provisioning steps, in execution order (authkey label varies by enroll). */
 export const PROVISION_STEPS = [
   { key: "instance", label: "Starting MinIO instance" },
   { key: "tailnet", label: "Configuring tailnet access" },
-  { key: "authkey", label: "Minting Tailscale auth key" }, // "invite": swapped client-side
+  { key: "authkey", label: "Minting Tailscale auth key" }, // the client swaps this label when enrollment mode is invite
   { key: "bucket", label: "Creating bucket & S3 user" },
   { key: "smoke", label: "Running smoke test" },
   { key: "retention", label: "Arming retention & quota" },
@@ -26,20 +15,16 @@ export const PROVISION_STEPS = [
 export type ProvisionStepKey = (typeof PROVISION_STEPS)[number]["key"];
 
 /**
- * Job progress events — the `jobs.progress` wire contract. Failures travel as
- * DATA (`error` events), never as stream errors: the stream is a pure observer
- * of a background job, so a dropped connection can safely reconnect and replay
- * without re-running or losing work. `done` never carries the bundle; secrets
- * are handed over exactly once via the `jobs.claimBundle` mutation.
- * `manualAclCleanup` is advisory plain text (manual ACL mode offboards only),
- * not a secret — it may ride the event.
+ * Failures travel as `error` events, not stream errors, so a dropped
+ * connection can safely reconnect and replay without re-running work. `done`
+ * never carries the bundle; secrets are handed over exactly once via the
+ * separate `jobs.claimBundle` mutation.
  */
 export type JobProgressEvent =
   | { type: "step"; step: string }
   | { type: "error"; message: string; step: string | null }
-  | { type: "done"; bundleReady: boolean; manualAclCleanup?: string };
+  | { type: "done"; bundleReady: boolean; manualAclCleanup?: string }; // manualAclCleanup is advisory plain text, not a secret
 
-/** Offboard teardown steps, in execution order. */
 export const OFFBOARD_STEPS = [
   { key: "storage", label: "Removing S3 user & bucket" },
   { key: "nodes", label: "Revoking Tailscale nodes" },

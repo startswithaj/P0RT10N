@@ -24,7 +24,6 @@ describe("app wiring (tRPC caller over a real DB)", () => {
 
   beforeEach(async () => {
     database = createTestDatabase();
-    // Seed an active friend with activity + usage directly via the repo.
     const repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
     const res = await repo.reserveFriend(
       makeAddInput("alice", "dedicated"),
@@ -32,8 +31,8 @@ describe("app wiring (tRPC caller over a real DB)", () => {
     );
     friendId = res.friendId;
     await repo.activate(friendId, res.instanceId);
-    // Bucket keyed to the current hour so it sits inside the rolling-24h window
-    // the production clock (default) computes against.
+    // The bucket is keyed to the current hour so it falls inside the rolling
+    // 24-hour window that the production clock computes against.
     seedActivity(database.db, friendId, {
       lastRequestAt: "2026-06-29T09:00:00Z",
       requestBuckets: { [hourKey(new Date().toISOString())]: 7 },
@@ -70,9 +69,8 @@ describe("app wiring (tRPC caller over a real DB)", () => {
   });
 
   it("management mutations are wired (reject at the external boundary)", async () => {
-    // With a real mc factory + stub Tailscale (no binary/tailnet in unit tests),
-    // these reach their service and fail at the external call — proving routing.
-    // The service logic itself is covered in FriendService.test.ts with mocks.
+    // With a real mc factory and a stub Tailscale (no binary in unit tests), these calls
+    // reach their service and fail at the external boundary; the service logic itself is covered by mocks in FriendService.test.ts.
     await expect(caller.friends.get({ friendId })).rejects.toThrow();
     await expect(
       caller.friends.add(makeAddInput("dave", "dedicated")),
@@ -82,10 +80,8 @@ describe("app wiring (tRPC caller over a real DB)", () => {
     await expect(caller.friends.suspend({ friendId })).rejects.toThrow();
   });
 
-  // Job-model wiring: mutations START detached work; jobs.progress observes it.
-  // In the unit env the work fails at the external boundary (no mc/docker) —
-  // that failure MUST arrive as a terminal error DATA event, never a hang or a
-  // stream throw (the bug class the job model exists to kill).
+  // Mutations start detached work that fails at the external boundary in the unit env (no mc/docker).
+  // That failure must arrive as a terminal error event, never a hang or a stream throw, since preventing that bug class is why the job model exists.
 
   it("addStart detaches the job; failure arrives as an error event via jobs.progress", async () => {
     const { jobId } = await caller.friends.addStart(
@@ -93,7 +89,7 @@ describe("app wiring (tRPC caller over a real DB)", () => {
     );
     const events = await Array.fromAsync(await caller.jobs.progress({ jobId }));
     expect(events.at(-1)?.type).toBe("error");
-    // Failed add ⇒ no bundle; the claim maps NotFoundError → TRPC NOT_FOUND.
+    // A failed add produces no bundle; the claim maps a NotFoundError to a TRPC NOT_FOUND error.
     await expect(caller.jobs.claimBundle({ jobId })).rejects.toThrow(
       "none produced",
     );

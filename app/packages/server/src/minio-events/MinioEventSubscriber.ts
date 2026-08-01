@@ -1,10 +1,8 @@
 import type { Logger } from "../services/types.ts";
 
-// One bus subscription: a bounded ring buffer feeding a parked-until-pushed
-// async generator. Overflow drops the OLDEST event so a slow consumer never
-// back-pressures the publisher — it only loses its tail.
+// A bounded ring buffer: overflow drops the oldest event, so a slow consumer
+// never back-pressures the publisher, only loses its own tail.
 
-/** Rate-limit overflow warnings: log the 1st drop, then every Nth. */
 const DROP_LOG_EVERY = 1000;
 
 export class MinioEventSubscriber {
@@ -22,7 +20,7 @@ export class MinioEventSubscriber {
   enqueue(raw: unknown): void {
     if (this.closed) return;
     if (this.items.length >= this.capacity) {
-      this.items.shift(); // drop oldest — a slow consumer never blocks ingest
+      this.items.shift();
       this.drops++;
       if (this.drops === 1 || this.drops % DROP_LOG_EVERY === 0) {
         this.logger.warn(
@@ -49,9 +47,6 @@ export class MinioEventSubscriber {
     w?.();
   }
 
-  // Producer generator: yield each buffered event; hasNext() parks when empty,
-  // returns false once closed-and-drained. A live unbounded stream — no
-  // collection to map over.
   async *stream(): AsyncGenerator<unknown> {
     // deno-lint-ignore custom-no-imperative-loops/no-imperative-loops
     while (await this.hasNext()) {
@@ -59,7 +54,6 @@ export class MinioEventSubscriber {
     }
   }
 
-  /** Resolve true when an event is ready, false when closed and drained. */
   private hasNext(): Promise<boolean> {
     if (this.items.length > 0) return Promise.resolve(true);
     if (this.closed) return Promise.resolve(false);

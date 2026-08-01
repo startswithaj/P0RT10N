@@ -32,8 +32,8 @@ describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
   afterEach(() => database.driver.close());
 
   it("kill -9 mid-provision: next boot recovers, sweeps, and frees the name", async () => {
-    // Crash between reserveFriend and markFailed: the row is stuck in
-    // `provisioning` and the unique name is blocked with no recovery path.
+    // A crash between reserveFriend and markFailed leaves the row stuck in provisioning,
+    // blocking the unique name with no recovery path.
     await repo.reserveFriend(
       makeAddInput("alice", "dedicated"),
       namingFor("alice", "dedicated"),
@@ -43,10 +43,8 @@ describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
       namingFor("alice", "dedicated"),
     )).rejects.toThrow();
 
-    // Boot sequence against the REAL repo (external teardown mocked): the
-    // reservation fixture is unused — every repo call delegates to SQLite.
-    // Explicit delegation (not a spread): class methods live on the prototype,
-    // so spreading the repo instance into the mock would silently drop them.
+    // This runs against the real repo, with external teardown mocked, using explicit
+    // delegation rather than a spread, since class methods live on the prototype and spreading would silently drop them.
     const calls: Calls = [];
     const svc = buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
@@ -63,7 +61,7 @@ describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
     expect(await svc.recoverStaleProvisioning()).toEqual(["alice"]);
     expect(await svc.sweepFailed()).toBeGreaterThan(0);
 
-    // Same boot, same name: reservable again — nothing orphaned.
+    // The same name is reservable again after the sweep, confirming nothing was left orphaned.
     const again = await repo.reserveFriend(
       makeAddInput("alice", "dedicated"),
       namingFor("alice", "dedicated"),
@@ -116,7 +114,7 @@ describe("FriendServiceImpl", () => {
     const d = await service.get(res.friendId);
     expect(d.name).toBe("alice");
     expect(d.bucket).toBe("alice");
-    // https resolves the node's real MagicDNS FQDN live (mock: <host>.tailnet.ts.net).
+    // In https mode the endpoint resolves the node's live MagicDNS FQDN; the mock returns <host>.tailnet.ts.net.
     expect(d.s3Endpoint).toBe("https://alice.tailnet.ts.net");
     expect(d.nodeOnline).toBe(true);
   });
@@ -136,7 +134,7 @@ describe("FriendServiceImpl", () => {
       queries,
       repo,
       mockMcFactory(mockMcClient(calls)),
-      // Node not registered → nodeFqdn null → no composed guess, surface it.
+      // The node isn't registered, so nodeFqdn is null; with no composed guess, the error surfaces instead.
       { ...mockTailscaleApi(calls, []), nodeFqdn: () => Promise.resolve(null) },
       "https",
       noopLogger(),
@@ -192,7 +190,7 @@ describe("FriendServiceImpl", () => {
 
   it("suspend with zero enrolled nodes succeeds (friend never connected)", async () => {
     const res = await seed("alice");
-    const { service } = build([]); // nodesByTag → []
+    const { service } = build([]);
     const d = await service.suspend(res.friendId);
     expect(d.status).toBe("suspended");
   });
@@ -240,8 +238,8 @@ describe("FriendServiceImpl", () => {
     await expect(service.suspend(res.friendId)).rejects.toThrow(
       "tailscale down",
     );
-    // Order: disabled, then re-enabled on the failure — access stays open,
-    // matching the status that stays active.
+    // The user is disabled, then re-enabled after the failure, so access stays
+    // open, matching a status that remains active.
     expect(calls).toContain("mc:disableUser");
     expect(calls.indexOf("mc:disableUser")).toBeLessThan(
       calls.indexOf("mc:enableUser"),
@@ -249,7 +247,6 @@ describe("FriendServiceImpl", () => {
     const d = await service.get(res.friendId);
     expect(d.status).toBe("active");
 
-    // Retry with the API recovered converges to suspended.
     const { service: healthy } = build(nodes);
     const after = await healthy.suspend(res.friendId);
     expect(after.status).toBe("suspended");

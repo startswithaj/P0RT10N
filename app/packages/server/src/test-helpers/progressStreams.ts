@@ -4,10 +4,8 @@ import type { ProgressEvent } from "../lib/progress.ts";
 // *.test.ts) so the no-test-globals rule permits module-level functions.
 
 /**
- * Drain a progress generator into its events + any terminal error. Recursion
- * (not a `for await` loop — the no-imperative-loops rule) and spreads (no param
- * mutation). Unlike Array.fromAsync, this keeps the events collected BEFORE a
- * throw, so tests can assert exactly where a failing stream stopped.
+ * Recursion, not a for-await loop, satisfies the no-imperative-loops rule.
+ * Unlike Array.fromAsync, this keeps events collected before a throw.
  */
 export async function collect<K, R>(
   gen: AsyncGenerator<ProgressEvent<K, R>>,
@@ -22,7 +20,6 @@ export async function collect<K, R>(
   return collect(gen, [...acc, next.v.value]);
 }
 
-/** The step keys, in order, from a collected event list. */
 export function stepKeys<K>(events: ProgressEvent<K, unknown>[]): K[] {
   return events.flatMap((e) => e.type === "step" ? [e.step] : []);
 }

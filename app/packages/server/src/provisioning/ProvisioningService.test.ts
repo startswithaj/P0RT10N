@@ -32,7 +32,7 @@ describe("ProvisioningService.addFriend", () => {
     expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("repo:activate");
     // The friend key's ID is persisted at mint time so failure-reap and
-    // offboard can revoke it (ID only — the secret stays request-scoped).
+    // offboard can revoke it; the secret itself stays request-scoped.
     expect(calls).toContain("repo:recordTsKeyId:kid");
 
     expect(bundle.s3SecretKey).toBe(TEST_CRED.secretKey);
@@ -42,8 +42,8 @@ describe("ProvisioningService.addFriend", () => {
   });
 
   it("hands the serve key + derived root cred to the runtime in memory", async () => {
-    // Secret transport (docker env-file / k8s Secret) is the runtime's
-    // business — the service only puts the material on the in-memory spec.
+    // Secret transport, docker env-file or k8s Secret, is the runtime's
+    // business; the service only puts material on the in-memory spec.
     const calls: Calls = [];
     const specs: InstanceSpec[] = [];
     await buildProvisioningService(calls, DEDICATED_RES, {
@@ -67,7 +67,7 @@ describe("ProvisioningService.addFriend", () => {
 
   it("records the serve node's ID at provision (for id-based offboard)", async () => {
     const calls: Calls = [];
-    // The freshly-enrolled serve node, found by its (still-unambiguous) hostname.
+    // The serve node is freshly enrolled, so its hostname is still unambiguous.
     const nodes: TailnetNode[] = [
       { nodeId: "srv1", hostname: "p0rt1on-alice", tags: [], online: true },
     ];
@@ -110,7 +110,6 @@ describe("ProvisioningService.addFriend", () => {
     // Friend endpoint is http, and http mode addresses the node by its tailnet
     // IP (no MagicDNS-bound cert), not the MagicDNS FQDN.
     expect(bundle.s3Endpoint).toBe("http://100.64.0.1");
-    // ...and the grant targets port 80, not 443.
     expect(bundle.manualAclInstructions).toContain("tcp:80");
     expect(bundle.manualAclInstructions).not.toContain("tcp:443");
   });
@@ -119,7 +118,6 @@ describe("ProvisioningService.addFriend", () => {
     const calls: Calls = [];
     await expect(
       buildProvisioningService(calls, DEDICATED_RES, {
-        // Node not on the tailnet yet → nodeFqdn null → surface it, no guess.
         tailscale: { nodeFqdn: () => Promise.resolve(null) },
       }).addFriend(ADD_INPUT),
     ).rejects.toThrow("has no MagicDNS name yet");
@@ -132,8 +130,8 @@ describe("ProvisioningService.addFriend", () => {
       instanceExisted: true,
     }).addFriend({ ...ADD_INPUT, isolationMode: "shared" });
 
-    // No new container — but the adopted one is started (if stopped) and
-    // health-verified before any bucket work touches it.
+    // No new container is created, but the adopted one is started if stopped
+    // and health-verified before any bucket work touches it.
     expect(calls).not.toContain("runtime:ensureInstance");
     expect(calls).toContain("runtime:ensureRunning:p0rt1on-alice");
     expect(calls.indexOf("runtime:waitUntilHealthy")).toBeLessThan(
@@ -193,7 +191,7 @@ describe("ProvisioningService.rotateKey", () => {
 describe("ProvisioningService.rotateKey (gap-free)", () => {
   it("creates and records the new credential BEFORE removing the old", async () => {
     // Regression: remove-then-create left the friend credential-less when
-    // createUser failed. Order must be create → attach → persist → remove.
+    // createUser failed. The order must be create, attach, persist, then remove.
     const calls: Calls = [];
     const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
       repo: { context: () => Promise.resolve(CTX) },
@@ -233,8 +231,8 @@ describe("ProvisioningService.rotateKey (gap-free)", () => {
   });
 
   it("sweeps stale policy-attached users first and reports it", async () => {
-    // A stale user from a previously failed rotation (MinIO knows it, the DB
-    // doesn't) is removed; the recorded and unrelated users are kept.
+    // A stale user from a previously failed rotation, which MinIO knows but the
+    // DB doesn't, is removed; the recorded and unrelated users are kept.
     const calls: Calls = [];
     const removed: string[] = [];
     const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
@@ -308,14 +306,14 @@ describe("ProvisioningService.offboard", () => {
     // The bucket-scoped IAM policy must not outlive the friend.
     expect(calls).toContain("mc:removePolicy");
     expect(calls).toContain("ts:deleteNode:n1");
-    // Neither may the enrollment key — unused it stays live for ~90 days.
+    // Neither may the enrollment key survive: unused, it stays live ~90 days.
     expect(calls).toContain("ts:revokeAuthKey:kid-old");
     expect(calls).toContain("runtime:removeInstance");
     expect(calls).toContain("repo:deleteInstance");
   });
 
   it("removes stale policy-attached users during teardown", async () => {
-    // No credential may outlive the friend — including ones a failed rotation
+    // No credential may outlive the friend, including ones a failed rotation
     // left behind that only MinIO knows about.
     const calls: Calls = [];
     const removed: string[] = [];
@@ -359,10 +357,8 @@ describe("ProvisioningService.offboard", () => {
   });
 
   it("skips MinIO teardown when the instance is already gone", async () => {
-    // The instance container was removed out-of-band; its bucket, users and
-    // policies went with it. Reaching in with mc would wedge on
-    // connection-refused — the offboard must treat the storage as already torn
-    // down and still complete (tailnet + rows cleaned up).
+    // If the container was removed out-of-band, reaching in with mc would hang
+    // on a refused connection, so storage must be treated as already torn down.
     const calls: Calls = [];
     await buildProvisioningService(calls, DEDICATED_RES, {
       repo: { context: () => Promise.resolve(CTX) },
@@ -378,9 +374,8 @@ describe("ProvisioningService.offboard", () => {
   });
 
   it("refuses a COMPLIANCE friend with data BEFORE any destructive step", async () => {
-    // COMPLIANCE-locked objects are undeletable by anyone until retention
-    // lapses — failing up-front beats failing opaquely mid-teardown with the
-    // user and policy already gone.
+    // COMPLIANCE-locked objects are undeletable until retention lapses, so
+    // failing up front beats failing opaquely after the user and policy are gone.
     const calls: Calls = [];
     const svc = buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
@@ -409,8 +404,8 @@ describe("ProvisioningService.offboard", () => {
   });
 
   it("manual ACL mode: never calls the policy API, returns cleanup advice", async () => {
-    // The token can't edit the policy in manual mode — a 403 mid-teardown
-    // would strand the friend row after the user/bucket are already gone.
+    // The token cannot edit the policy in manual mode, so a 403 mid-teardown
+    // would strand the friend row after the user and bucket are already gone.
     const calls: Calls = [];
     const result = await buildProvisioningService(calls, DEDICATED_RES, {
       config: { aclMode: "manual" },
@@ -435,7 +430,7 @@ describe("ProvisioningService.offboard", () => {
 
   it("records the offboard audit BEFORE deleting the friend row", async () => {
     // Regression: the audit FK references friends.id, so auditing after the
-    // delete tripped a FOREIGN KEY constraint. Order must be audit → delete.
+    // delete tripped a foreign key constraint; order must be audit, then delete.
     const calls: Calls = [];
     await buildProvisioningService(calls, DEDICATED_RES, {
       repo: { context: () => Promise.resolve(CTX) },
@@ -452,7 +447,7 @@ describe("ProvisioningService.offboard", () => {
     await buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
         context: () => Promise.resolve({ ...CTX, isolationMode: "shared" }),
-        // The atomic count+mark says friends remain → nothing was marked.
+        // The atomic count-and-mark says friends remain, so nothing was marked.
         markInstanceReaping: () => Promise.resolve(false),
       },
     }).offboard(1);
@@ -486,9 +481,8 @@ describe("ProvisioningService.sweepFailed", () => {
   });
 
   it("reaps a failed friend whose instance is already gone", async () => {
-    // An absent instance means the storage steps are vacuously done — the
-    // sweep clears the tombstone instead of retrying a connection-refused
-    // forever (what used to strand the row).
+    // An absent instance means storage steps are vacuously done, so the sweep
+    // clears the tombstone instead of retrying a refused connection forever.
     const calls: Calls = [];
     const n = await buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
@@ -505,8 +499,8 @@ describe("ProvisioningService.sweepFailed", () => {
   });
 
   it("keeps the tombstone when key revocation fails", async () => {
-    // The stored key ID is the only record a live enrollment key exists —
-    // same gating as every other resource step.
+    // The stored key ID is the only record a live enrollment key exists, so
+    // it is gated the same as every other resource step.
     const calls: Calls = [];
     await buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
@@ -542,7 +536,7 @@ describe("ProvisioningService.sweepFailed", () => {
 
   it("orphan reap deletes the serve node by STORED ID despite a rename", async () => {
     // A stale node made the control plane rename this one to <host>-1, so a
-    // hostname match would MISS it — the stored ID still finds it.
+    // hostname match would miss it, but the stored ID still finds it.
     const calls: Calls = [];
     const nodes: TailnetNode[] = [
       { nodeId: "srv1", hostname: "p0rt1on-alice-1", tags: [], online: false },
@@ -564,8 +558,8 @@ describe("ProvisioningService.sweepFailed", () => {
   });
 
   it("orphan reap without a stored ID falls back to hostname (misses a rename)", async () => {
-    // The pre-column behaviour: null ID → hostname match, which a rename
-    // defeats. Documents exactly why the ID column exists.
+    // Pre-column behavior: a null ID falls back to a hostname match, which a
+    // rename defeats; this documents exactly why the ID column exists.
     const calls: Calls = [];
     const nodes: TailnetNode[] = [
       { nodeId: "srv1", hostname: "p0rt1on-alice-1", tags: [], online: false },
@@ -591,21 +585,21 @@ describe("ProvisioningService.sweepFailed", () => {
     const svc = buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
         failedFriendIds: () => Promise.resolve([1]),
-        // No s3AccessKeyId (failed before the user was created) → skip removeUser.
+        // No s3AccessKeyId, since it failed before the user was created, so
+        // removeUser is skipped.
         context: () => Promise.resolve({ ...CTX, s3AccessKeyId: null }),
-        // deleteInstance rejects mid-reap → attempt() must swallow it.
+        // deleteInstance rejects mid-reap, so attempt() must swallow it.
         deleteInstance: () => Promise.reject(new Error("db down")),
       },
     });
-    // deleteInstance rejects inside reapInstance → attempt() swallows it.
     const n = await svc.sweepFailed();
     expect(n).toBe(1);
     expect(calls).toContain("repo:deleteFriend");
   });
 
   it("keeps the tombstone when a resource step fails (no deleteFriend)", async () => {
-    // Regression: reap during a MinIO outage must NOT delete the friend row —
-    // the row is the only record the bucket/user exist.
+    // Regression: reap during a MinIO outage must not delete the friend row,
+    // since the row is the only record that the bucket and user exist.
     const calls: Calls = [];
     const n = await buildProvisioningService(calls, DEDICATED_RES, {
       repo: {
@@ -622,7 +616,6 @@ describe("ProvisioningService.sweepFailed", () => {
   });
 
   it("converges on the next sweep once teardown succeeds again", async () => {
-    // First sweep fails on removeBucket; second (healthy) completes the reap.
     const calls: Calls = [];
     let minioDown = true;
     const svc = buildProvisioningService(calls, DEDICATED_RES, {
@@ -693,7 +686,6 @@ describe("ProvisioningService.addFriendStream", () => {
     );
 
     expect(error).toBeNull();
-    // Real per-step progress — one step event per PROVISION_STEPS entry, in order.
     expect(stepKeys(events)).toEqual(PROVISION_STEPS.map((s) => s.key));
     const done = events.at(-1);
     expect(done?.type).toBe("done");
@@ -710,7 +702,6 @@ describe("ProvisioningService.addFriendStream", () => {
       }).addFriendStream(ADD_INPUT),
     );
 
-    // The stream halts exactly at "smoke": earlier steps emitted, later ones not.
     expect(stepKeys(events)).toEqual([
       "instance",
       "tailnet",

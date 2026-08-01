@@ -54,14 +54,14 @@ describe("FriendQueries", () => {
       requestBuckets: { [hourKey("2026-06-29T09:00:00Z")]: 12 },
     });
     seedUsage(database.db, res.friendId, 100, 5, "2026-06-29T08:00:00Z");
-    seedUsage(database.db, res.friendId, 512, 9, "2026-06-29T09:00:00Z"); // newest
+    seedUsage(database.db, res.friendId, 512, 9, "2026-06-29T09:00:00Z");
 
     const list = await queries.list();
     expect(list.length).toBe(1);
     const row = list[0];
     expect(row.name).toBe("alice");
     expect(row.requests24h).toBe(12);
-    expect(row.usage.bytesUsed).toBe(512); // newest sample wins
+    expect(row.usage.bytesUsed).toBe(512);
     expect(row.usage.objectCount).toBe(9);
     expect(row.usage.quotaBytes).toBe(1024);
     expect(row.usage.fraction).toBeCloseTo(0.5);
@@ -82,16 +82,16 @@ describe("FriendQueries", () => {
     const res = await addFriend("alice");
     seedActivity(database.db, res.friendId, {
       requestBuckets: {
-        [hourKey("2026-06-29T09:00:00Z")]: 4, // newest hour in the window
+        [hourKey("2026-06-29T09:00:00Z")]: 4,
         [hourKey("2026-06-29T08:00:00Z")]: 1,
       },
     });
-    await addFriend("bob"); // no activity → absent from the map
+    await addFriend("bob"); // Bob has no activity, so he is absent from the series map.
 
     const series = await queries.requestSeriesByInstance();
     const alice = series.get("alice");
     expect(alice?.length).toBe(24);
-    expect(alice?.at(-1)).toBe(4); // NOW's hour, newest slot
+    expect(alice?.at(-1)).toBe(4); // This is NOW's hour, the newest slot in the series.
     expect(alice?.at(-2)).toBe(1);
     expect(alice?.reduce((a, b) => a + b, 0)).toBe(5);
     expect(series.has("bob")).toBe(false);
@@ -105,7 +105,7 @@ describe("FriendQueries", () => {
 
     const history = await queries.usageHistory(res.friendId, 2);
     expect(history.length).toBe(2);
-    expect(history[0].bytesUsed).toBe(30); // newest
+    expect(history[0].bytesUsed).toBe(30);
     expect(history[1].bytesUsed).toBe(20);
   });
 
@@ -124,9 +124,9 @@ describe("FriendQueries", () => {
       "instance_data_lost",
       "rotate_key",
     ]);
-    expect(page1[0].friend).toBeNull(); // system/instance row (no friendId)
+    expect(page1[0].friend).toBeNull(); // This is a system/instance row, so it has no friendId.
     expect(page1[0].detail).toBe("p0rt1on-bob");
-    expect(page1[1].friend).toBe("alice"); // name from the LEFT JOIN
+    expect(page1[1].friend).toBe("alice"); // The friend name here comes from the LEFT JOIN.
 
     // "Load older": page back from the id cursor of the last shown row.
     const page2 = await queries.recentAuditEntries(2, page1[1].id);
@@ -141,7 +141,7 @@ describe("FriendQueries", () => {
       requestBuckets: { [hourKey("2026-06-29T09:00:00Z")]: 7 },
     });
     seedUsage(database.db, res.friendId, 100, 2, "2026-06-29T07:00:00Z");
-    seedUsage(database.db, res.friendId, 256, 3, "2026-06-29T09:00:00Z"); // newest
+    seedUsage(database.db, res.friendId, 256, 3, "2026-06-29T09:00:00Z");
 
     const d = await queries.detail(res.friendId);
     expect(d?.name).toBe("alice");
@@ -150,7 +150,7 @@ describe("FriendQueries", () => {
     expect(d?.tsNodeTag).toBe("tag:p0rt1on-friend-alice");
     expect(d?.instanceKind).toBe("dedicated");
     expect(d?.tsHostname).toBe("alice");
-    expect(d?.usage.bytesUsed).toBe(256); // newest sample wins
+    expect(d?.usage.bytesUsed).toBe(256);
     expect(d?.usage.quotaBytes).toBe(1024);
     expect(d?.activity.requests24h).toBe(7);
   });
@@ -162,7 +162,7 @@ describe("FriendQueries", () => {
   it("usageSampleTargets lists only ACTIVE friends with their instance alias", async () => {
     const active = await addFriend("alice");
     await repo.activate(active.friendId, active.instanceId);
-    await addFriend("bob"); // still `provisioning` — not a sample target
+    await addFriend("bob"); // Bob is still `provisioning`, so he is not a sample target.
 
     const targets = await queries.usageSampleTargets();
     expect(targets).toEqual([
@@ -182,15 +182,15 @@ describe("FriendQueries", () => {
     const list = await queries.list();
     expect(list[0].usage.bytesUsed).toBe(777);
     expect(list[0].usage.objectCount).toBe(4);
-    expect(list[0].usage.checkedAt).toBe(NOW); // stamped with the injected clock
+    expect(list[0].usage.checkedAt).toBe(NOW); // checkedAt is stamped using the injected clock.
   });
 
   it("pruneUsage deletes only samples older than the retention cutoff", async () => {
     const res = await addFriend("alice");
     // NOW is 2026-06-29; the 90-day cutoff falls on 2026-03-31.
-    seedUsage(database.db, res.friendId, 100, 1, "2026-03-01T00:00:00Z"); // stale
-    seedUsage(database.db, res.friendId, 200, 2, "2026-06-01T00:00:00Z"); // kept
-    seedUsage(database.db, res.friendId, 300, 3, "2026-06-29T09:00:00Z"); // kept
+    seedUsage(database.db, res.friendId, 100, 1, "2026-03-01T00:00:00Z");
+    seedUsage(database.db, res.friendId, 200, 2, "2026-06-01T00:00:00Z");
+    seedUsage(database.db, res.friendId, 300, 3, "2026-06-29T09:00:00Z");
 
     expect(await queries.pruneUsage()).toBe(1);
 

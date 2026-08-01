@@ -1,6 +1,5 @@
-// In-process FIFO mutex. Provisioning-mutating ops (add/offboard/rotate/sweep)
-// serialize through one instance — single-admin app; closes interleavings like
-// reap-vs-add without distributed locking. Read-only queries bypass it.
+// This FIFO mutex serializes provisioning ops (add/offboard/rotate/sweep) through
+// one instance so interleavings like reap-vs-add can't happen; read-only queries bypass it.
 
 export class Mutex {
   private tail: Promise<void> = Promise.resolve();
@@ -13,7 +12,6 @@ export class Mutex {
     return acquired;
   }
 
-  /** Run `fn` exclusively. */
   async run<T>(fn: () => Promise<T>): Promise<T> {
     const release = await this.acquire();
     try {
@@ -24,9 +22,8 @@ export class Mutex {
   }
 
   /**
-   * Run a streaming op exclusively — the lock spans the WHOLE stream (a
-   * half-consumed add must not interleave with an offboard), released even
-   * when the consumer abandons the stream (finally fires on return/throw).
+   * The lock spans the whole stream, so a half-consumed add can't interleave
+   * with an offboard, and release still fires via `finally` if the consumer abandons the stream.
    */
   async *runStream<T, R>(
     gen: () => AsyncGenerator<T, R>,
