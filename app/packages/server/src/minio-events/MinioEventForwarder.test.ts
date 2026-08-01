@@ -9,7 +9,7 @@ describe("MinioEventForwarder", () => {
   const RAW = { api: { name: "PutObject", bucket: "alice" }, accessKey: "K" };
 
   /** A fetch stub: records each call, responds per attempt number (1-based). */
-  const fakeFetch = (responder: (attempt: number) => Response) => {
+  const attemptFetch = (responder: (attempt: number) => Response) => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fn = ((url: string | URL, init?: RequestInit) => {
       calls.push({ url: String(url), init: init ?? {} });
@@ -30,7 +30,9 @@ describe("MinioEventForwarder", () => {
 
   it("forwards the raw payload byte-identical, one JSON POST per event", async () => {
     // Non-empty body so the response-drain path (res.body.cancel) runs.
-    const { fn, calls } = fakeFetch(() => new Response("ok", { status: 200 }));
+    const { fn, calls } = attemptFetch(() =>
+      new Response("ok", { status: 200 })
+    );
     const fwd = new MinioEventForwarder(
       rawSub(new AbortController().signal),
       { url: URL },
@@ -49,7 +51,9 @@ describe("MinioEventForwarder", () => {
   });
 
   it("sends the configured Authorization header verbatim", async () => {
-    const { fn, calls } = fakeFetch(() => new Response(null, { status: 200 }));
+    const { fn, calls } = attemptFetch(() =>
+      new Response(null, { status: 200 })
+    );
     const fwd = new MinioEventForwarder(
       rawSub(new AbortController().signal),
       { url: URL, authorization: "Bearer tok" },
@@ -62,7 +66,9 @@ describe("MinioEventForwarder", () => {
   });
 
   it("retries up to maxRetry, then logs once (rate-limited)", async () => {
-    const { fn, calls } = fakeFetch(() => new Response(null, { status: 500 }));
+    const { fn, calls } = attemptFetch(() =>
+      new Response(null, { status: 500 })
+    );
     const { logger, warns } = recordingLogger();
     const fwd = new MinioEventForwarder(
       rawSub(new AbortController().signal),
@@ -96,7 +102,7 @@ describe("MinioEventForwarder", () => {
   });
 
   it("succeeds after a transient failure without logging", async () => {
-    const { fn, calls } = fakeFetch((n) =>
+    const { fn, calls } = attemptFetch((n) =>
       new Response(null, { status: n < 2 ? 500 : 200 })
     );
     const { logger, warns } = recordingLogger();
@@ -114,7 +120,7 @@ describe("MinioEventForwarder", () => {
 
   it("stops retrying once the subscription aborts (shutdown)", async () => {
     const ac = new AbortController();
-    const { fn, calls } = fakeFetch(() => {
+    const { fn, calls } = attemptFetch(() => {
       ac.abort(); // shutdown arrives during the first attempt
       return new Response(null, { status: 500 });
     });
@@ -135,7 +141,7 @@ describe("MinioEventForwarder", () => {
       ...noopLogger(),
       error: (m: string) => void errors.push(m),
     };
-    const { fn } = fakeFetch(() => new Response(null, { status: 200 }));
+    const { fn } = attemptFetch(() => new Response(null, { status: 200 }));
 
     const boom: AsyncIterable<unknown> = {
       [Symbol.asyncIterator]: () => ({

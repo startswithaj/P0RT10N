@@ -25,8 +25,8 @@ import type {
   ProvisioningRepo,
 } from "../provisioning/deps.ts";
 import { ProvisioningService } from "../provisioning/ProvisioningService.ts";
-import type { Logger, SystemHealthService } from "../services/types.ts";
-import type { AddFriendInput, SystemHealth } from "@p0rt1on/shared/domain";
+import type { Logger } from "../services/types.ts";
+import type { AddFriendInput } from "@p0rt1on/shared/domain";
 
 // Central test mocks. Each records into a shared `Calls` log so tests can
 // assert ordering across deps. Import these; never redefine mocks inline.
@@ -287,22 +287,6 @@ export function mockTailscaleApi(
     magicDnsEnabled: () => Promise.resolve(true),
     httpsCertsEnabled: () => Promise.resolve(true),
     isTagOwned: () => Promise.resolve(true),
-  };
-}
-
-export function mockSystemHealthService(
-  over: Partial<SystemHealth> = {},
-): SystemHealthService {
-  const health: SystemHealth = {
-    checks: [],
-    canProvision: true,
-    probedAt: "2026-06-30T12:00:00Z",
-    ...over,
-  };
-  return {
-    probe: () => Promise.resolve(health),
-    current: () => health,
-    reportServeUnavailable: () => {},
   };
 }
 
