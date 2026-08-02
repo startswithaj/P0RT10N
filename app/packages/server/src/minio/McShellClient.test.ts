@@ -360,9 +360,4 @@ describe("McShellClient parsing + errors", () => {
       .listUsers();
     expect(users).toEqual([]);
   });
-
-  it("trace throws NOT_IMPLEMENTED on iteration", () => {
-    const iterable = client([]).trace(new AbortController().signal);
-    expect(() => iterable[Symbol.asyncIterator]()).toThrow("not implemented");
-  });
 });

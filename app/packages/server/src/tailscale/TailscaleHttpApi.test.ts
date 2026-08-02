@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { TailscaleHttpApi } from "./TailscaleHttpApi.ts";
+import { isNotFoundError, TailscaleHttpApi } from "./TailscaleHttpApi.ts";
+import { ServiceError } from "../lib/ServiceError.ts";
 import { fakeFetch, type RecordedRequest } from "../test-helpers/mocks.ts";
 
 describe("TailscaleHttpApi", () => {
@@ -188,6 +189,22 @@ describe("TailscaleHttpApi", () => {
       api([], () => ({ status: 500, json: { message: "boom" } }))
         .revokeAuthKey("k1"),
     ).rejects.toThrow("failed (500)");
+  });
+
+  it("isNotFoundError classifies by status, not message wording", () => {
+    // Status set, message says nothing about 404: still classified as not-found.
+    expect(
+      isNotFoundError(new ServiceError("NOT_FOUND", "gone", 404)),
+    ).toBe(true);
+    // No status but the legacy message shape: falls back to the regex.
+    expect(
+      isNotFoundError(new ServiceError("NOT_FOUND", "failed (404): gone")),
+    ).toBe(true);
+    // Neither status nor message indicates 404.
+    expect(
+      isNotFoundError(new ServiceError("NOT_FOUND", "failed (500): boom")),
+    ).toBe(false);
+    expect(isNotFoundError(new Error("not a ServiceError"))).toBe(false);
   });
 
   it("throws on a non-2xx response", async () => {

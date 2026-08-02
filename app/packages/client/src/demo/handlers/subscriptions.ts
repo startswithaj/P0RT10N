@@ -93,28 +93,6 @@ const progress: SubscriptionHandler = (input, emit) => {
   };
 };
 
-const activityStream: SubscriptionHandler = (input, emit) => {
-  const friendId = (input as { friendId: number }).friendId;
-
-  const current = () =>
-    getDemoState().friends.find((f) => f.id === friendId)?.activity ?? null;
-
-  const first = current();
-  if (first) emit.data(first);
-  const timer = setInterval(() => {
-    const a = current();
-    if (a) {
-      emit.data({
-        ...a,
-        requests24h: a.requests24h + 1,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  }, 3000);
-  return () => clearInterval(timer);
-};
-
 export const subscriptionHandlers: SubscriptionHandlers = {
   "jobs.progress": progress,
-  "activity.stream": activityStream,
 };

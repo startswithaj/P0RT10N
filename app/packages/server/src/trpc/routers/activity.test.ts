@@ -29,9 +29,6 @@ describe("activity router", () => {
       responseHeaders: new Headers(),
       activityService: {
         current: () => Promise.resolve(view),
-        stream: async function* () {
-          yield view;
-        },
       },
     }) as unknown as TrpcContext;
 
@@ -40,11 +37,5 @@ describe("activity router", () => {
   it("current returns the service's current aggregate", async () => {
     const got = await call(ctxFor()).activity.current({ friendId: 1 });
     expect(got).toEqual(view);
-  });
-
-  it("stream yields the service's activity iterable", async () => {
-    const iter = await call(ctxFor()).activity.stream({ friendId: 1 });
-    const out = await Array.fromAsync(iter);
-    expect(out).toEqual([view]);
   });
 });

@@ -9,6 +9,11 @@ import type {
   ProvisionStepKey,
   TsKeyBundle,
 } from "@p0rt1on/shared/domain";
+import {
+  buildKopiaQuickstart,
+  kopiaInviteJoinLines,
+  kopiaJoinLines,
+} from "@p0rt1on/shared/kopiaQuickstart";
 import type { ProvisioningService as ProvisioningServiceContract } from "../services/types.ts";
 import type { Logger } from "../services/types.ts";
 import type { McClient, McClientFactory, S3Credential } from "../minio/mc.ts";
@@ -56,32 +61,6 @@ type EnrollmentResult =
     manualInstructions?: string;
     warning?: string;
   };
-
-function kopiaJoinLines(tailscaleUpCommand: string): string[] {
-  return [
-    "# Join the tailnet (redeems your single-use key):",
-    tailscaleUpCommand,
-    "",
-  ];
-}
-
-function kopiaInviteJoinLines(): string[] {
-  return [
-    "# After accepting the invite, generate an auth key in your Tailscale admin",
-    "# console (https://login.tailscale.com/admin/settings/keys), then join:",
-    "tailscale up --authkey=<your-tailscale-auth-key>",
-    "",
-  ];
-}
-
-function kopiaCreateTail(retentionDays: number): string[] {
-  return [
-    `  --retention-mode=GOVERNANCE --retention-period=${retentionDays}d`,
-    "",
-    "# Then back up a directory (immutable for the retention window):",
-    "kopia snapshot create /path/to/your/data",
-  ];
-}
 
 export class ProvisioningService implements ProvisioningServiceContract {
   // Serializes mutating ops (add/offboard/rotate/sweep) to rule out
@@ -1273,7 +1252,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       s3SecretKey: cred.secretKey,
       enrollmentMode: enroll.mode,
       manualAclInstructions,
-      kopiaQuickstart: this.kopiaQuickstart({
+      kopiaQuickstart: buildKopiaQuickstart({
         endpoint,
         bucket: naming.bucket,
         cred,
@@ -1317,7 +1296,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       // tsAuthKey / tailscaleUpCommand are omitted — the node is already
       // enrolled, and the existing repo makes the quickstart a `connect` with
       // the rotated key.
-      kopiaQuickstart: this.kopiaQuickstart({
+      kopiaQuickstart: buildKopiaQuickstart({
         endpoint,
         bucket: ctx.bucket,
         cred,
@@ -1325,39 +1304,5 @@ export class ProvisioningService implements ProvisioningServiceContract {
         create: false,
       }),
     };
-  }
-
-  /** Mirrors backup-client/entrypoint — keep the two in sync. */
-  private kopiaQuickstart(opts: {
-    endpoint: string;
-    bucket: string;
-    cred: S3Credential;
-    retentionDays: number;
-    create: boolean;
-    joinLines?: string[];
-  }): string {
-    const host = opts.endpoint.replace(/^https?:\/\//, "");
-    const create = opts.create;
-    const join = opts.joinLines ?? [];
-    const password = create
-      ? "# Choose YOUR OWN password — client-side only, NEVER sent to us, and"
-      : "# Use the SAME KOPIA_PASSWORD you set when the repo was created —";
-    const lastCredFlag = create
-      ? `  --secret-access-key=${opts.cred.secretKey} \\`
-      : `  --secret-access-key=${opts.cred.secretKey}`;
-    const tail = create ? kopiaCreateTail(opts.retentionDays) : [];
-    return [
-      ...join,
-      password,
-      "# UNRECOVERABLE if lost:",
-      "export KOPIA_PASSWORD='change-me-to-a-strong-passphrase'",
-      "",
-      `kopia repository ${create ? "create" : "connect"} s3 \\`,
-      `  --bucket=${opts.bucket} \\`,
-      `  --endpoint=${host} \\`,
-      `  --access-key=${opts.cred.accessKeyId} \\`,
-      lastCredFlag,
-      ...tail,
-    ].join("\n");
   }
 }

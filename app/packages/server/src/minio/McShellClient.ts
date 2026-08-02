@@ -4,12 +4,11 @@ import type {
   McClientFactory,
   McTarget,
   S3Credential,
-  TraceEvent,
   UserEntry,
 } from "./mc.ts";
 import type { CommandRunner, TempFiles } from "../lib/CommandRunner.ts";
 import type { LockMode } from "@p0rt1on/shared/domain";
-import { NotImplementedError, ServiceError } from "../lib/ServiceError.ts";
+import { ServiceError } from "../lib/ServiceError.ts";
 import { maskSecrets, safeArgs } from "../lib/redact.ts";
 
 function bucketScopedPolicy(bucket: string): string {
@@ -333,15 +332,6 @@ export class McShellClient implements McClient {
     }
     await new Promise((resolve) => setTimeout(resolve, this.readyDelayMs));
     return this.awaitReady(attemptsLeft - 1);
-  }
-
-  // TODO: implement the live tail (streaming trace).
-  trace(_signal: AbortSignal): AsyncIterable<TraceEvent> {
-    return {
-      [Symbol.asyncIterator]() {
-        throw new NotImplementedError("McShellClient.trace not implemented");
-      },
-    };
   }
 }
 

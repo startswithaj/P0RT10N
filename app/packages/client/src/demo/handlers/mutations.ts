@@ -12,6 +12,11 @@ import type {
   FriendBundle,
   FriendDetail,
 } from "@p0rt1on/shared/domain";
+import {
+  buildKopiaQuickstart,
+  kopiaInviteJoinLines,
+  kopiaJoinLines,
+} from "@p0rt1on/shared/kopiaQuickstart";
 
 type AddInput = MutationInput<"friends.addStart">;
 
@@ -71,69 +76,14 @@ const okAfter = (reducer: (s: DemoState) => DemoState): { ok: true } => {
   return { ok: true as const };
 };
 
-// This mirrors the server's private kopiaQuickstart method byte-for-byte, so
-// the demo reads exactly like production; keep the two in sync if either changes.
-
-const kopiaCreateTail = (retentionDays: number): string[] => [
-  `  --retention-mode=GOVERNANCE --retention-period=${retentionDays}d`,
-  "",
-  "# Then back up a directory (immutable for the retention window):",
-  "kopia snapshot create /path/to/your/data",
-];
-
-const authKeyJoinLines = (upCommand: string): string[] => [
-  "# Join the tailnet (redeems your single-use key):",
-  upCommand,
-  "",
-];
-
-const inviteJoinLines = (): string[] => [
-  "# After accepting the invite, generate an auth key in your Tailscale admin",
-  "# console (https://login.tailscale.com/admin/settings/keys), then join:",
-  "tailscale up --authkey=<your-tailscale-auth-key>",
-  "",
-];
-
-const kopiaQuickstart = (opts: {
-  endpoint: string;
-  bucket: string;
-  accessKeyId: string;
-  secretKey: string;
-  retentionDays: number;
-  create: boolean;
-  joinLines: string[];
-}): string => {
-  const host = opts.endpoint.replace(/^https?:\/\//, "");
-  const password = opts.create
-    ? "# Choose YOUR OWN password — client-side only, NEVER sent to us, and"
-    : "# Use the SAME KOPIA_PASSWORD you set when the repo was created —";
-  const lastCredFlag = opts.create
-    ? `  --secret-access-key=${opts.secretKey} \\`
-    : `  --secret-access-key=${opts.secretKey}`;
-  const tail = opts.create ? kopiaCreateTail(opts.retentionDays) : [];
-  return [
-    ...opts.joinLines,
-    password,
-    "# UNRECOVERABLE if lost:",
-    "export KOPIA_PASSWORD='change-me-to-a-strong-passphrase'",
-    "",
-    `kopia repository ${opts.create ? "create" : "connect"} s3 \\`,
-    `  --bucket=${opts.bucket} \\`,
-    `  --endpoint=${host} \\`,
-    `  --access-key=${opts.accessKeyId} \\`,
-    lastCredFlag,
-    ...tail,
-  ].join("\n");
-};
-
 const joinLinesFor = (
   includeEnrollment: boolean,
   isInvite: boolean,
   upCommand: string,
 ): string[] => {
   if (!includeEnrollment) return [];
-  if (isInvite) return inviteJoinLines();
-  return authKeyJoinLines(upCommand);
+  if (isInvite) return kopiaInviteJoinLines();
+  return kopiaJoinLines(upCommand);
 };
 
 const bundleFor = (f: DemoFriend, includeEnrollment: boolean): FriendBundle => {
@@ -148,11 +98,10 @@ const bundleFor = (f: DemoFriend, includeEnrollment: boolean): FriendBundle => {
     bucket: f.bucket,
     s3AccessKeyId,
     s3SecretKey,
-    kopiaQuickstart: kopiaQuickstart({
+    kopiaQuickstart: buildKopiaQuickstart({
       endpoint: f.s3Endpoint,
       bucket: f.bucket,
-      accessKeyId: s3AccessKeyId,
-      secretKey: s3SecretKey,
+      cred: { accessKeyId: s3AccessKeyId, secretKey: s3SecretKey },
       retentionDays: f.lockRetentionDays,
       create: includeEnrollment,
       joinLines: joinLinesFor(includeEnrollment, isInvite, upCommand),

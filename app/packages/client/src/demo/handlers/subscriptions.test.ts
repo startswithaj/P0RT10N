@@ -100,12 +100,4 @@ describe("demo subscriptions", () => {
       expect(getDemoState().friends.find((f) => f.id === 1)).toBeUndefined();
     });
   });
-
-  describe("activity.stream", () => {
-    it("emits the current snapshot immediately", () => {
-      const { events, teardown } = collect("activity.stream", { friendId: 1 });
-      expect(events.length).toBeGreaterThan(0);
-      teardown();
-    });
-  });
 });

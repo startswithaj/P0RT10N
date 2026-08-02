@@ -375,6 +375,10 @@ describe("DockerInstanceRuntime", () => {
       .toBe("http://p0rt1on-instance-alice:9100");
   });
 
+  it("workloadName is the container name", () => {
+    expect(build([]).workloadName("alice")).toBe("p0rt1on-instance-alice");
+  });
+
   it("ensureInstance derives every docker-ism from the domain spec", async () => {
     const calls: string[] = [];
     const specs: ContainerRunSpec[] = [];

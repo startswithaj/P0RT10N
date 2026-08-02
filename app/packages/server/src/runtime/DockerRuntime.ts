@@ -314,6 +314,10 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     });
   }
 
+  workloadName(instanceName: string): string {
+    return containerNames(instanceName).container;
+  }
+
   async ensureInstance(spec: InstanceSpec): Promise<ContainerHandle> {
     const names = containerNames(spec.name);
     await this.config.pantry.ensure(spec.name);

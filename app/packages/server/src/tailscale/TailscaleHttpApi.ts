@@ -65,6 +65,13 @@ function matchesGrant(g: AclGrant, want: AclGrant): boolean {
 
 const POLICY_CAS_ATTEMPTS = 3;
 
+/** Status-first so a 404 is still recognised if upstream message wording changes;
+ * the regex is only a fallback for errors constructed without a status. */
+export function isNotFoundError(err: unknown): boolean {
+  return err instanceof ServiceError &&
+    (err.status === 404 || /\(404\)/.test(err.message));
+}
+
 /** A 412 means the policy ETag no longer matched (a concurrent edit); it maps
  * to CONFLICT, which updatePolicy treats as retryable. */
 function codeForStatus(
@@ -128,7 +135,7 @@ export class TailscaleHttpApi implements TailscaleApi {
       await this.request("DELETE", `/tailnet/${this.tn()}/keys/${keyId}`);
     } catch (err) {
       // A key already revoked or expired counts as success.
-      if (err instanceof ServiceError && /\(404\)/.test(err.message)) return;
+      if (isNotFoundError(err)) return;
       throw err;
     }
   }
@@ -168,7 +175,7 @@ export class TailscaleHttpApi implements TailscaleApi {
       const json = await this.request("GET", `/tailnet/${this.tn()}/users`);
       return (json as { users?: { loginName: string }[] }).users ?? [];
     } catch (err) {
-      if (err instanceof ServiceError && /\(404\)/.test(err.message)) {
+      if (isNotFoundError(err)) {
         return null;
       }
       throw err;
@@ -347,6 +354,7 @@ export class TailscaleHttpApi implements TailscaleApi {
     throw new ServiceError(
       codeForStatus(res.status),
       `tailscale ${method} ${path} failed (${res.status}): ${text}`,
+      res.status,
     );
   }
 
@@ -380,6 +388,7 @@ export class TailscaleHttpApi implements TailscaleApi {
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
         `tailscale oauth token exchange failed (${res.status}): ${text}`,
+        res.status,
       );
     }
     const json = await res.json().catch(() => ({})) as {

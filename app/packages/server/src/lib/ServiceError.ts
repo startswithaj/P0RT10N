@@ -6,11 +6,15 @@ import type { TRPC_ERROR_CODE_KEY } from "@trpc/server/rpc";
  */
 export class ServiceError extends Error {
   readonly code: TRPC_ERROR_CODE_KEY;
+  /** The upstream HTTP status, when known — lets callers classify errors
+   * (e.g. 404) without regexing the message text. */
+  readonly status?: number;
 
-  constructor(code: TRPC_ERROR_CODE_KEY, message: string) {
+  constructor(code: TRPC_ERROR_CODE_KEY, message: string, status?: number) {
     super(message);
     this.name = "ServiceError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -32,13 +36,6 @@ export class ConflictError extends ServiceError {
   constructor(message: string) {
     super("CONFLICT", message);
     this.name = "ConflictError";
-  }
-}
-
-export class NotImplementedError extends ServiceError {
-  constructor(message: string) {
-    super("NOT_IMPLEMENTED", message);
-    this.name = "NotImplementedError";
   }
 }
 

@@ -78,20 +78,6 @@ export interface McClient {
   /** Set the audit_webhook config and restart MinIO. Idempotent per
    * instance. */
   setAuditWebhook(endpoint: string, authToken: string): Promise<void>;
-
-  /** `mc admin trace --json` as an async stream; aborts (kills the child) when
-   * `signal` fires. */
-  trace(signal: AbortSignal): AsyncIterable<TraceEvent>;
-}
-
-/** One decoded `mc admin trace` line (subset we surface to the UI). */
-export interface TraceEvent {
-  time: string;
-  api: string;
-  bucket: string;
-  object: string;
-  statusCode: number;
-  callStats?: { rx: number; tx: number; duration: string };
 }
 
 export interface McClientFactory {

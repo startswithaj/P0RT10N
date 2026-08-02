@@ -151,6 +151,12 @@ export class KubernetesRuntime implements InstanceRuntime {
     return `http://${svc}.${this.config.namespace}.svc:${minioPort}`;
   }
 
+  /** The pod name, since that's what diagnoseInstance/instanceHealth actually
+   * inspect — the StatefulSet name is just the instance name again. */
+  workloadName(instanceName: string): string {
+    return resourceNames(instanceName).pod;
+  }
+
   async waitUntilHealthy(instanceName: string): Promise<void> {
     await this.pollHealth(instanceName, 60);
   }

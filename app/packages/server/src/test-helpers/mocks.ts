@@ -235,7 +235,6 @@ export function mockMcClient(calls: Calls): McClient {
       return Promise.resolve([]);
     },
     setAuditWebhook: note("setAuditWebhook"),
-    trace: async function* () {},
   };
 }
 
@@ -346,6 +345,7 @@ export function mockInstanceRuntime(
     instances?: { name: string; state: ContainerState }[];
     healthFor?: (name: string) => InstanceHealth;
     hasDataFor?: (name: string) => boolean;
+    workloadNameFor?: (name: string) => string;
     listError?: Error;
   } = {},
 ): InstanceRuntime {
@@ -355,6 +355,10 @@ export function mockInstanceRuntime(
       return Promise.resolve({ name: spec.name, id: "id", state: "running" });
     },
     adminEndpoint: (_name, minioPort) => `http://127.0.0.1:${minioPort}`,
+    // Distinctive and clearly synthetic, so a test asserting on a display name
+    // fails loudly if InventoryService stops calling the runtime for it.
+    workloadName: (name) =>
+      opts.workloadNameFor?.(name) ?? `mock-workload-${name}`,
     instanceHealth: (name) =>
       Promise.resolve(opts.healthFor?.(name) ?? "healthy"),
     hasData: (name) => Promise.resolve(opts.hasDataFor?.(name) ?? true),

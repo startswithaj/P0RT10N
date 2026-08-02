@@ -74,10 +74,8 @@ export interface SystemHealthService {
   reportServeUnavailable(reason: string): void;
 }
 
-/** stream yields a new ActivityView whenever the aggregator updates the friend's record, not on a poll. */
 export interface ActivityService {
   current(friendId: number): Promise<ActivityView>;
-  stream(friendId: number, signal: AbortSignal): AsyncIterable<ActivityView>;
 }
 
 /** Severity levels ordered from least to most severe; records below the configured level are dropped. */

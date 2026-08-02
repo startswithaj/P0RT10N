@@ -3,6 +3,12 @@
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+// First 3 wrong attempts are unthrottled (covers typos); beyond that the
+// lockout backs off exponentially, capped at MAX_DELAY_MS.
+const FAILURE_THRESHOLD = 3;
+const BASE_DELAY_MS = 1_000;
+const MAX_DELAY_MS = 30_000;
+
 async function hash(value: string): Promise<string> {
   const bits = await crypto.subtle.digest(
     "SHA-256",
@@ -15,6 +21,10 @@ async function hash(value: string): Promise<string> {
 
 export class AdminAuth {
   private readonly sessions = new Map<string, number>();
+  // Deliberately a single global counter, not per-IP/per-username: single-admin
+  // homelab scope, so throttling "the one admin" under attack is an acceptable trade-off.
+  private failureCount = 0;
+  private lockedUntil = 0;
 
   private constructor(
     private readonly creds: { username: string; passHash: string } | null,
@@ -43,8 +53,25 @@ export class AdminAuth {
   // since the underlying hash is one-way.
   async verify(username: string, password: string): Promise<boolean> {
     if (this.creds === null) return false;
-    return (await hash(password)) === this.creds.passHash &&
+    // While locked out, reject without hashing; a rejected attempt made
+    // during lockout does not extend it further.
+    if (this.now() < this.lockedUntil) return false;
+    const ok = (await hash(password)) === this.creds.passHash &&
       username === this.creds.username;
+    if (ok) {
+      this.failureCount = 0;
+      this.lockedUntil = 0;
+      return true;
+    }
+    this.failureCount++;
+    if (this.failureCount > FAILURE_THRESHOLD) {
+      const delay = Math.min(
+        MAX_DELAY_MS,
+        BASE_DELAY_MS * 2 ** (this.failureCount - FAILURE_THRESHOLD),
+      );
+      this.lockedUntil = this.now() + delay;
+    }
+    return false;
   }
 
   createSession(): string {

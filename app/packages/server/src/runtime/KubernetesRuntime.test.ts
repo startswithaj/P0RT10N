@@ -285,6 +285,10 @@ describe("KubernetesRuntime", () => {
       .toBe("http://alice.p0rt1on.svc:9100");
   });
 
+  it("workloadName is the pod name diagnoseInstance/instanceHealth actually inspect", () => {
+    expect(build([]).workloadName("alice")).toBe("alice-0");
+  });
+
   it("instanceHealth maps pod readiness / crashloop / absence", async () => {
     const healthy = build([], () => ({ json: readyPod }));
     expect(await healthy.instanceHealth("alice")).toBe("healthy");

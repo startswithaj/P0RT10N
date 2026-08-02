@@ -26,6 +26,9 @@ export default defineConfig({
       "@p0rt1on/shared/steps": fileURLToPath(
         new URL("../shared/steps.ts", import.meta.url),
       ),
+      "@p0rt1on/shared/kopiaQuickstart": fileURLToPath(
+        new URL("../shared/kopiaQuickstart.ts", import.meta.url),
+      ),
     },
   },
   test: {

@@ -12,8 +12,16 @@ describe("RuntimeInventoryService", () => {
   const runtimeWith = (
     healthFor: (name: string) => InstanceHealth,
     hasData = true,
+    // Defaults to the docker-style format explicitly, not because the mock
+    // knows about docker — a real runtime supplies whatever it provisioned.
+    workloadNameFor: (name: string) => string = (name) =>
+      `p0rt1on-instance-${name}`,
   ): InstanceRuntime => ({
-    ...mockInstanceRuntime([], { healthFor, hasDataFor: () => hasData }),
+    ...mockInstanceRuntime([], {
+      healthFor,
+      hasDataFor: () => hasData,
+      workloadNameFor,
+    }),
     diagnoseInstance: (name) =>
       Promise.resolve({
         // Diagnostics carry the real (container) resource name.
@@ -61,6 +69,19 @@ describe("RuntimeInventoryService", () => {
     expect(snap.tailscale[0].state).toBe("up"); // same container
     expect(snap.tailscale[0].detail).toBe("tag:p0rt1on-serve");
     expect(snap.host[0].state).toBe("up");
+  });
+
+  it("minio row name comes from the runtime's workloadName, not a hardcoded docker format", async () => {
+    // A k8s-shaped name proves InventoryService no longer assumes docker.
+    const snap = await new RuntimeInventoryService(
+      {
+        instancesForStatus: () => Promise.resolve([instance("active")]),
+        requestSeriesByInstance: () => Promise.resolve(new Map()),
+      },
+      runtimeWith(() => "healthy", true, (name) => `${name}-0`),
+      noopLogger(),
+    ).snapshot();
+    expect(snap.minio[0].name).toBe("alice-0");
   });
 
   it("attaches the per-instance request series to its MinIO row", async () => {

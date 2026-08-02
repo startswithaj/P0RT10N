@@ -122,6 +122,10 @@ export interface InstanceRuntime {
 
   adminEndpoint(instanceName: string, minioPort: number): string;
 
+  /** The engine-specific identifier for the workload this runtime actually
+   * provisioned for `instanceName` — what an operator would look up to debug it. */
+  workloadName(instanceName: string): string;
+
   /** MUST be awaited after `ensureInstance` before any admin call, because
    * `docker run` returns before MinIO accepts connections. */
   waitUntilHealthy(instanceName: string): Promise<void>;

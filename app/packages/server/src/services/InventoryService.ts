@@ -4,7 +4,6 @@ import type {
   InstanceHealth,
   InstanceRuntime,
 } from "../runtime/runtime.ts";
-import { containerNames } from "../runtime/names.ts";
 import type { InventoryService, Logger } from "./types.ts";
 
 export interface StatusInstanceRow {
@@ -74,7 +73,7 @@ export class RuntimeInventoryService implements InventoryService {
   private async probe(
     inst: StatusInstanceRow,
   ): Promise<{ minio: ServiceStatus; tailscale: ServiceStatus }> {
-    const names = containerNames(inst.tsHostname);
+    const workloadName = this.runtime.workloadName(inst.tsHostname);
     const health = await this.runtime.instanceHealth(inst.tsHostname);
     // Only a not-healthy instance can be lost; healthy instances skip the extra storage check.
     const dataGone = health !== "healthy" &&
@@ -82,13 +81,13 @@ export class RuntimeInventoryService implements InventoryService {
     const state = serviceState(health, inst.status, dataGone);
     return {
       minio: {
-        name: names.container,
+        name: workloadName,
         detail: `${inst.kind} · :${inst.minioPort}`,
         state,
         instance: inst.tsHostname,
       },
       tailscale: {
-        // Shares the MinIO row's container and deliberately omits `instance`,
+        // Shares the MinIO row's workload and deliberately omits `instance`,
         // since diagnostics belong on the MinIO row only.
         name: `${inst.tsHostname} (serve)`,
         detail: inst.tsTag,
