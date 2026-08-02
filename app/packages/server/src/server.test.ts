@@ -205,8 +205,9 @@ describe("startServer (HTTP)", () => {
   it("staticDir: serves built assets and falls back to index.html", async () => {
     const database = createTestDatabase();
     const context = await buildContext(database, testEnv(), noopLogger());
-    // The temp asset dir lives inside the repo, not /tmp, and is removed in the finally block.
-    const staticDir = await Deno.makeTempDir({ dir: ".", prefix: "static-" });
+    // The temp asset dir lives in the OS temp location, not the repo working tree
+    // (git would otherwise catch it), and is removed in the finally block.
+    const staticDir = await Deno.makeTempDir({ prefix: "static-" });
     await Deno.writeTextFile(`${staticDir}/index.html`, "<!doctype html>app");
     await Deno.writeTextFile(`${staticDir}/app.js`, "console.log(1)");
     const abort = new AbortController();

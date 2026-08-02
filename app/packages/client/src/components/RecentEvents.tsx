@@ -89,7 +89,9 @@ function eventDot(action: AuditAction): string {
 }
 
 // SQLite's datetime('now') returns UTC with no timezone marker, e.g. "2026-07-22 10:30:00".
+// JS-side writers use Date.toISOString(), which already has a "T" and "Z".
 function parseWhen(when: string): number {
+  if (when.includes("T")) return Date.parse(when);
   return Date.parse(`${when.replace(" ", "T")}Z`);
 }
 

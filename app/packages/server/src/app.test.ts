@@ -71,13 +71,20 @@ describe("app wiring (tRPC caller over a real DB)", () => {
   it("management mutations are wired (reject at the external boundary)", async () => {
     // With a real mc factory and a stub Tailscale (no binary in unit tests), these calls
     // reach their service and fail at the external boundary; the service logic itself is covered by mocks in FriendService.test.ts.
-    await expect(caller.friends.get({ friendId })).rejects.toThrow();
+    // Tailscale reads hit the real HTTP client with a bogus test token, so these
+    // fail at the network/API boundary (401), not on validation or a missing mock.
+    await expect(caller.friends.get({ friendId })).rejects.toThrow(
+      "tailscale GET /tailnet/-/devices failed (401)",
+    );
     await expect(
       caller.friends.add(makeAddInput("dave", "dedicated")),
-    ).rejects.toThrow();
+    ).rejects.toThrow("tailscale GET /tailnet/-/acl failed (401)");
+    // resize hits mc first, which has no binary in the unit env.
     await expect(caller.friends.resize({ friendId, quotaBytes: 2048 }))
-      .rejects.toThrow();
-    await expect(caller.friends.suspend({ friendId })).rejects.toThrow();
+      .rejects.toThrow("Failed to spawn 'mc'");
+    await expect(caller.friends.suspend({ friendId })).rejects.toThrow(
+      "tailscale GET /tailnet/-/devices failed (401)",
+    );
   });
 
   // Mutations start detached work that fails at the external boundary in the unit env (no mc/docker).

@@ -24,4 +24,8 @@ describe("addFriendInput name bounds", () => {
     expect(parse("abc").success).toBe(true);
     expect(parse("a".repeat(50)).success).toBe(true);
   });
+
+  it("rejects a trailing hyphen (invalid S3 bucket name and DNS label)", () => {
+    expect(parse("abc-").success).toBe(false);
+  });
 });

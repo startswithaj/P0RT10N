@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import { runBoot } from "./boot.ts";
 
 describe("runBoot", () => {
@@ -36,8 +37,11 @@ describe("runBoot", () => {
 
   it("serve waits for a slow reconcile (listeners never race recovery)", async () => {
     const order: string[] = [];
+    // FakeTime drives the setTimeout below virtually, so the "slow" reconcile
+    // proves real await ordering without a wall-clock wait.
+    using time = new FakeTime();
 
-    await runBoot({
+    const booted = runBoot({
       migrate: () => {},
       recoverStaleProvisioning: () => Promise.resolve(),
       reconcile: () =>
@@ -53,6 +57,9 @@ describe("runBoot", () => {
         order.push("serve");
       },
     });
+
+    await time.tickAsync(10);
+    await booted;
 
     expect(order).toEqual(["reconcile", "serve"]);
   });

@@ -33,6 +33,8 @@ export const instances = sqliteTable("instances", {
   status: text("status", { enum: INSTANCE_STATUS_VALUES })
     .notNull()
     .default("provisioning"),
+  // WARNING: SQL-default timestamps here ("YYYY-MM-DD HH:MM:SS", no Z) vs.
+  // JS-written `new Date().toISOString()` timestamps elsewhere don't sort/compare as equal formats.
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => [
   uniqueIndex("uq_instances_minio_port").on(table.minioPort),

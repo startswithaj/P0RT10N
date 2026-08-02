@@ -76,6 +76,9 @@ export class CompatDatabase implements DatabaseDriver {
     // failures under lock contention, since the sweep and tRPC handlers share this DB.
     this.native.prepare("PRAGMA journal_mode = WAL").get();
     this.native.exec("PRAGMA busy_timeout = 5000");
+    // SQLite defaults FK enforcement OFF per connection; Schema.ts declares FK
+    // references that must actually be enforced at runtime.
+    this.native.exec("PRAGMA foreign_keys = ON");
   }
 
   prepare(sql: string): DatabaseStatement {

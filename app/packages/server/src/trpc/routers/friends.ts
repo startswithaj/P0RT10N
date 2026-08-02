@@ -66,6 +66,8 @@ export const friendsRouter = router({
       ctx.provisioningService.resendInvite(input.friendId)
     ),
 
+  /** Disables the S3 user and revokes any tagged Tailscale node; invite-enrolled
+   * friends have no tagged node, so this is credential-only for them. */
   suspend: protectedProcedure
     .input(suspendFriendInput)
     .mutation(({ ctx, input }) => ctx.friendService.suspend(input.friendId)),

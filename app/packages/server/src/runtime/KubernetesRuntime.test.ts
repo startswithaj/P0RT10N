@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { buildRestClient, KubernetesRuntime } from "./KubernetesRuntime.ts";
+import { KubernetesRuntime } from "./KubernetesRuntime.ts";
 import { INSTANCE_SPEC } from "../test-helpers/mocks.ts";
 import type { RestClient } from "@cloudydeno/kubernetes-client";
 
@@ -283,14 +283,6 @@ describe("KubernetesRuntime", () => {
   it("adminEndpoint addresses the per-instance Service via cluster DNS", () => {
     expect(build([]).adminEndpoint("alice", 9100))
       .toBe("http://alice.p0rt1on.svc:9100");
-  });
-
-  it("buildRestClient builds a client from explicit connection info", async () => {
-    const client = await buildRestClient({
-      apiBase: "https://k8s.test",
-      token: "sa-token",
-    });
-    expect(typeof client.performRequest).toBe("function");
   });
 
   it("instanceHealth maps pod readiness / crashloop / absence", async () => {

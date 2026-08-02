@@ -58,6 +58,8 @@ export class FriendServiceImpl implements FriendService {
         );
     }
     try {
+      // Only removes tagged nodes, which authKey enrollment creates. Invite-enrolled
+      // friends join as untagged tailnet users, so suspend is credential-only for them.
       await this.revokeNodes(ctx.nodeTag, log);
     } catch (err) {
       // If the revoke fails, re-enable the S3 user so status still matches real

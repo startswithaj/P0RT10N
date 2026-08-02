@@ -80,8 +80,8 @@ const friendNameSchema: z.ZodString = z
   .min(3, "at least 3 characters (it becomes the S3 bucket name)")
   .max(50, "at most 50 characters (it becomes part of DNS/container names)")
   .regex(
-    /^[a-z0-9][a-z0-9-]*$/,
-    "lowercase letters/digits/hyphens, starting with a letter or digit",
+    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/,
+    "lowercase letters/digits/hyphens, starting and ending with a letter or digit",
   );
 
 /** A byte count. SQLite INTEGER is 64-bit, so raw bytes are safe. */

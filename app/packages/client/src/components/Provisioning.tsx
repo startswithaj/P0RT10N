@@ -102,7 +102,9 @@ export function Provisioning(
     onViewBundle: () => void;
   },
 ) {
-  const steps = stepLabels(props.enroll, props.inviteApiConfigured ?? true);
+  const steps = () =>
+    stepLabels(props.enroll, props.inviteApiConfigured ?? false);
+
   const complete = () => props.state().kind === "done";
   const failed = () => props.state().kind === "error";
   const status = () => stepStatusFor(activeIndexFor(props.state()), failed());
@@ -135,7 +137,7 @@ export function Provisioning(
         </p>
 
         <div class={card}>
-          <StepChecklist steps={steps} status={status()} />
+          <StepChecklist steps={steps()} status={status()} />
         </div>
 
         <Show when={complete()}>

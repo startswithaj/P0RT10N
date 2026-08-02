@@ -25,7 +25,8 @@ export class AdminAuth {
     return this.creds !== null;
   }
 
-  // Auth being off is only safe on a loopback bind, which the boot guard enforces.
+  // Auth being off is only safe on a loopback bind; a non-loopback bind without
+  // it just logs a startup warning in main.ts, it isn't blocked.
   static disabled(): AdminAuth {
     return new AdminAuth(null, Date.now);
   }

@@ -152,7 +152,8 @@ export class Env {
   }
 
   // ---- admin auth ----
-  /** Null disables auth, which in turn restricts the admin bind to loopback. */
+  /** Null disables auth; pairing that with a non-loopback bind only triggers
+   * a startup warning (main.ts), it is not restricted. */
   get adminAuth(): { username: string; password: string } | null {
     const username = this.#opt(EnvVar.AdminUsername);
     const password = this.#opt(EnvVar.AdminPassword);
