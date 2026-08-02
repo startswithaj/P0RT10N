@@ -10,6 +10,12 @@ describe("Env", () => {
     P0RT1ON_PANTRY: "/srv/p0rt1on",
   };
 
+  /** The kubernetes runtime additionally requires the manager Service name. */
+  const K8S = {
+    P0RT1ON_RUNTIME: "kubernetes",
+    P0RT1ON_K8S_MANAGER_SERVICE_NAME: "p0rt1on-manager",
+  };
+
   const env = (map: Record<string, string>) =>
     new Env({ get: (k) => ({ ...REQUIRED, ...map })[k] });
 
@@ -84,9 +90,30 @@ describe("Env", () => {
       "http://host.docker.internal:8081/internal/minio-events",
     );
     expect(
-      env({ P0RT1ON_RUNTIME: "kubernetes", P0RT1ON_K8S_NAMESPACE: "portions" })
+      env({ ...K8S, P0RT1ON_K8S_NAMESPACE: "portions" })
         .provisioningConfig().auditWebhookUrl,
     ).toBe("http://p0rt1on-manager.portions.svc:8081/internal/minio-events");
+    // The Service name is configurable, so a deployment that names it something
+    // else still hands instances a URL that resolves.
+    expect(
+      env({
+        ...K8S,
+        P0RT1ON_K8S_NAMESPACE: "portions",
+        P0RT1ON_K8S_MANAGER_SERVICE_NAME: "mgr",
+      }).provisioningConfig().auditWebhookUrl,
+    ).toBe("http://mgr.portions.svc:8081/internal/minio-events");
+  });
+
+  it("requires the manager Service name on kubernetes", () => {
+    expect(() =>
+      new Env({
+        get: (k) =>
+          ({ ...REQUIRED, P0RT1ON_RUNTIME: "kubernetes" } as Record<
+            string,
+            string
+          >)[k],
+      })
+    ).toThrow("P0RT1ON_K8S_MANAGER_SERVICE_NAME is not set");
   });
 
   it("construction fails naming every missing required var", () => {
@@ -143,6 +170,7 @@ describe("Env", () => {
             P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
             P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
             P0RT1ON_RUNTIME: "kubernetes",
+            P0RT1ON_K8S_MANAGER_SERVICE_NAME: "p0rt1on-manager",
             P0RT1ON_PANTRY: pantry,
           } as Record<string, string>)[k],
       });
@@ -161,6 +189,7 @@ describe("Env", () => {
             P0RT1ON_TAILSCALE_OAUTH_CLIENT_SECRET: "tok",
             P0RT1ON_TAILSCALE_TAG_OWNER: "tag:p0rt1on",
             P0RT1ON_RUNTIME: "kubernetes",
+            P0RT1ON_K8S_MANAGER_SERVICE_NAME: "p0rt1on-manager",
           } as Record<string, string>)[k],
       })
     ).toThrow("P0RT1ON_PANTRY is not set");
@@ -243,7 +272,7 @@ describe("Env", () => {
   });
 
   it("portion resources are all unset by default (no caps)", () => {
-    expect(env({}).kubeSettings().resources).toEqual({
+    expect(env(K8S).kubeSettings().resources).toEqual({
       cpuRequest: undefined,
       cpuLimit: undefined,
       memoryRequest: undefined,
@@ -260,6 +289,7 @@ describe("Env", () => {
   it("reads the per-portion k8s + docker resource vars", () => {
     expect(
       env({
+        ...K8S,
         P0RT1ON_PORTION_K8S_CPU_REQUEST: "250m",
         P0RT1ON_PORTION_K8S_CPU_LIMIT: "1",
         P0RT1ON_PORTION_K8S_MEMORY_REQUEST: "256Mi",

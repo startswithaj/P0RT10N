@@ -99,6 +99,11 @@ spec:
               value: kubernetes
             - name: P0RT1ON_K8S_NAMESPACE
               value: p0rt1on
+            # The Service below, by name. Instances are handed this inside their
+            # audit webhook URL, so renaming the Service without changing this
+            # breaks audit delivery silently — hence required, never defaulted.
+            - name: P0RT1ON_K8S_MANAGER_SERVICE_NAME
+              value: p0rt1on-manager
             # P0RT1ON_PANTRY is the StorageClass every portion's data PVC is provisioned from (see pantry.yaml); tailscale state uses the cluster default instead, so it stays off the pantry.
             - name: P0RT1ON_PANTRY
               value: p0rt1on-pantry

@@ -37,6 +37,7 @@ export enum EnvVar {
   K8sCaFile = "P0RT1ON_K8S_CA_FILE",
   K8sDataSize = "P0RT1ON_K8S_DATA_SIZE",
   K8sStateSize = "P0RT1ON_K8S_STATE_SIZE",
+  K8sManagerServiceName = "P0RT1ON_K8S_MANAGER_SERVICE_NAME",
   PortionDockerCpuRequest = "P0RT1ON_PORTION_DOCKER_CPU_REQUEST",
   PortionDockerCpuLimit = "P0RT1ON_PORTION_DOCKER_CPU_LIMIT",
   PortionDockerMemoryRequest = "P0RT1ON_PORTION_DOCKER_MEMORY_REQUEST",
@@ -54,9 +55,6 @@ export const EVENT_PORT = 8081;
 /** The audit listener binds outward so instance containers can reach it; what
  * is actually exposed is decided by the published ports. */
 export const EVENT_BIND_HOST = "0.0.0.0";
-/** The Service name the manager answers on in-cluster — must match
- * deploy/k8s/p0rt1on.yaml. */
-const K8S_MANAGER_SERVICE = "p0rt1on-manager";
 /** Host ports dedicated instances are allocated from. The allocator skips DB-known
  * ports and bind-probes the rest, so the range only has to be wide enough, not tuned. */
 const PORT_RANGE = { min: 9100, max: 9999 };
@@ -83,12 +81,22 @@ const HEADSCALE_REQUIRED_VARS: readonly EnvVar[] = [
   EnvVar.HeadscaleBaseDomain,
 ] as const;
 
+/** Required only under the kubernetes runtime. Every instance is handed this
+ * Service name inside its audit webhook URL, and a wrong one breaks audit
+ * delivery silently and permanently — so it must be stated, never assumed. */
+const KUBERNETES_REQUIRED_VARS: readonly EnvVar[] = [
+  EnvVar.K8sManagerServiceName,
+] as const;
+
 export class Env {
   constructor(private readonly src: EnvSource = denoSource) {
     const perBackend: readonly EnvVar[] = this.tailscaleBackend === "headscale"
       ? HEADSCALE_REQUIRED_VARS
       : [EnvVar.TailscaleOauthClientSecret];
-    const missing = [...REQUIRED_VARS, ...perBackend]
+    const perRuntime: readonly EnvVar[] = this.runtimeKind === "kubernetes"
+      ? KUBERNETES_REQUIRED_VARS
+      : [];
+    const missing = [...REQUIRED_VARS, ...perBackend, ...perRuntime]
       .filter((k) => this.#opt(k) === undefined);
     if (missing.length > 0) {
       throw new Error(`${missing.join(", ")} is not set`);
@@ -210,6 +218,7 @@ export class Env {
     caFile?: string;
     dataSize: string;
     stateSize: string;
+    managerServiceName: string;
     resources: {
       cpuRequest?: string;
       cpuLimit?: string;
@@ -224,6 +233,7 @@ export class Env {
       caFile: this.#opt(EnvVar.K8sCaFile),
       dataSize: this.#str(EnvVar.K8sDataSize, "50Gi"),
       stateSize: this.#str(EnvVar.K8sStateSize, "1Gi"),
+      managerServiceName: this.#required(EnvVar.K8sManagerServiceName),
       resources: {
         cpuRequest: this.#opt(EnvVar.PortionK8sCpuRequest),
         cpuLimit: this.#opt(EnvVar.PortionK8sCpuLimit),
@@ -313,7 +323,7 @@ export class Env {
    * 127.0.0.1 — that would be the instance itself. */
   #auditWebhookUrl(): string {
     const host = this.runtimeKind === "kubernetes"
-      ? `${K8S_MANAGER_SERVICE}.${this.kubeSettings().namespace}.svc`
+      ? `${this.kubeSettings().managerServiceName}.${this.kubeSettings().namespace}.svc`
       : "host.docker.internal";
     return `http://${host}:${EVENT_PORT}${MINIO_EVENT_PATH}`;
   }

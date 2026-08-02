@@ -1,31 +1,46 @@
-# Each portion's data lands in its own sub-directory under the pantry path, kubelet-mounted into only that pod, the same per-instance isolation as the docker bind mount.
+# The pantry: where each portion's data PVC is provisioned from. Each portion
+# gets its own sub-directory under BasePath, kubelet-mounted into only that pod
+# — the same per-instance isolation as the docker bind mount.
 #
-# Requires the local-path provisioner (k3s ships it; otherwise install rancher.io/local-path-provisioner).
-# Tailscale node state doesn't use this StorageClass, so the pantry holds friend data only.
+# PREREQUISITE: the OpenEBS localpv provisioner must be installed. It is helm-only;
+# there is no upstream plain-YAML install.
 #
-# reclaimPolicy Delete matches docker's `rm -rf`: offboarding deletes the PVC and the bytes with it, with no orphaned-PV recovery window; the offboard confirm-by-name and tombstone-after-teardown gates are the safety net.
-# Switch to Retain if deletes should be manually reversible instead.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: local-path-config
-  namespace: local-path-storage
-data:
-  config.json: |
-    {
-      "nodePathMap": [
-        {
-          "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
-          "paths": ["/srv/p0rt1on"]
-        }
-      ]
-    }
----
+#   helm repo add openebs https://openebs.github.io/openebs
+#   helm install openebs openebs/openebs -n openebs --create-namespace \
+#     --set engines.local.lvm.enabled=false \
+#     --set engines.local.zfs.enabled=false \
+#     --set engines.replicated.mayastor.enabled=false \
+#     --set loki.enabled=false \
+#     --set alloy.enabled=false
+#
+# The engine flags matter: the chart otherwise installs replicated storage and a
+# bundled Loki/Alloy observability stack backed by its own 3-replica MinIO.
+#
+# Why OpenEBS and not the provisioner k3s/k3d already bundle: rancher's
+# local-path provisioner takes its path from a global config shared by the whole
+# provisioner process, so pointing it at the pantry would move every unrelated
+# volume on the cluster. OpenEBS takes BasePath per StorageClass, so the pantry
+# can have its own path while the cluster default is left alone.
+#
+# To change where portion data lands, edit BasePath below.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: p0rt1on-pantry
-provisioner: rancher.io/local-path
+  annotations:
+    openebs.io/cas-type: local
+    cas.openebs.io/config: |
+      - name: StorageType
+        value: hostpath
+      - name: BasePath
+        value: /srv/p0rt1on
+provisioner: openebs.io/local
+# reclaimPolicy Delete matches docker's `rm -rf`: offboarding deletes the PVC
+# and the bytes with it, with no orphaned-PV recovery window; the offboard
+# confirm-by-name and tombstone-after-teardown gates are the safety net.
+# Switch to Retain if deletes should be manually reversible instead.
 reclaimPolicy: Delete
-# volumeBindingMode WaitForFirstConsumer binds the PV only once a pod needs it, so it lands on the node that runs the portion, since local-path volumes are node-local.
+# volumeBindingMode WaitForFirstConsumer binds the PV only once a pod needs it,
+# so it lands on the node that runs the portion, since local-path volumes are
+# node-local.
 volumeBindingMode: WaitForFirstConsumer
