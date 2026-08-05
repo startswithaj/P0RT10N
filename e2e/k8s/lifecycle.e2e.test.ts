@@ -124,6 +124,12 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
           env: Object.entries(friendClientEnv(bundle, {
             PAYLOAD: "p0rt1on-canary",
             TAILSCALE_LOGIN_SERVER: env("HEADSCALE_URL"),
+            // Proves the snapshot this pod takes is actually readable back
+            // out of the repository, not just that Kopia exited 0. Safe
+            // here (and everywhere, by design): it only reads the
+            // repository, never BACKUP_PATH, so it can't be confused by
+            // this pod's own later writes.
+            VERIFY_RESTORE: "1",
           })).map(([name, value]) => ({ name, value })),
         }],
       },
@@ -234,6 +240,26 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
           `${a}/${bundle.bucket}/${canary}`,
         ]);
         expect(put.code).toBe(0);
+
+        // Confirms the audit webhook actually reached the manager: MinIO's
+        // event for the put above only lands here if DNS resolves the
+        // manager Service from the instance's netns, port 8081 is reachable,
+        // and the webhook token is accepted — none of which the `put` above
+        // exercises, since friend S3 traffic never goes through that
+        // Service. A wrong manager Service name breaks exactly this while
+        // every S3 assertion in this test keeps passing, which is how it
+        // reached a live cluster undetected.
+        await until("friend activity reflects the audit event", async () => {
+          const current = await trpc("friends.list") as {
+            id: string;
+            requests24h: number;
+            lastRequestAt: string | null;
+          }[];
+          const me = current.find((f) => f.id === friendId);
+          return me && (me.requests24h > 0 || me.lastRequestAt !== null)
+            ? true
+            : null;
+        }, 10);
 
         const purge = await asFriend(bundle, (a) => [
           "rm",

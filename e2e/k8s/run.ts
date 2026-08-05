@@ -12,7 +12,7 @@ if (!(MODES as readonly string[]).includes(mode)) {
 }
 
 Deno.chdir(new URL("../..", import.meta.url));
-requireBinaries("docker", "k3d", "kubectl");
+requireBinaries("docker", "k3d", "kubectl", "helm");
 
 const CLUSTER = Deno.env.get("K8S_E2E_CLUSTER") ?? "p0rt1on-e2e";
 const CTX = `k3d-${CLUSTER}`;
@@ -30,6 +30,8 @@ const RUNNER = "p0rt1on-e2e-runner";
 // Every kubectl call pins the k3d context, never the user's current
 // context, since that could be a real cluster this driver must not touch.
 const kc = (args: string[]) => $`kubectl --context ${CTX} ${args}`;
+// Same discipline for helm: --kube-context pins it to the k3d cluster.
+const helm = (args: string[]) => $`helm --kube-context ${CTX} ${args}`;
 
 const headscale = (args: string[]) =>
   kc(["exec", "deploy/headscale", "-n", "p0rt1on", "--", "headscale", ...args]);
@@ -75,6 +77,7 @@ async function setup(): Promise<void> {
     await $`k3d cluster create ${CLUSTER} --wait --timeout 120s --kubeconfig-switch-context=false`;
     state.createdCluster = true;
   }
+  await installPantryProvisioner();
   await kc(["apply", "-f", "deploy/k8s/p0rt1on.yaml"]);
   await kc(["apply", "-f", "e2e/k8s/manifests.yaml"]);
   // The manager runs only during the lifecycle suite; parked at 0 otherwise.
@@ -85,6 +88,47 @@ async function setup(): Promise<void> {
     "-n",
     "p0rt1on",
     "--replicas=0",
+  ]);
+}
+
+// deploy/k8s/pantry.yaml is only the StorageClass; it depends on the
+// OpenEBS localpv provisioner, which is helm-only (no upstream plain-YAML
+// install). Every non-hostpath engine and the bundled Loki/Alloy stack are
+// disabled: the chart's defaults otherwise stand up replicated storage plus
+// a 3-replica MinIO-backed observability stack that can't schedule on a
+// single-node k3d cluster. Flags match deploy/k8s/pantry.yaml's own header.
+async function installPantryProvisioner(): Promise<void> {
+  await $`helm repo add openebs https://openebs.github.io/openebs`.noThrow()
+    .quiet();
+  await helm([
+    "upgrade",
+    "--install",
+    "openebs",
+    "openebs/openebs",
+    "-n",
+    "openebs",
+    "--create-namespace",
+    "--set",
+    "engines.local.lvm.enabled=false",
+    "--set",
+    "engines.local.zfs.enabled=false",
+    "--set",
+    "engines.replicated.mayastor.enabled=false",
+    "--set",
+    "loki.enabled=false",
+    "--set",
+    "alloy.enabled=false",
+  ]);
+  await kc(["apply", "-f", "deploy/k8s/pantry.yaml"]);
+  // The first PVC races the provisioner and fails with ExternalProvisioning
+  // if it isn't Ready yet — a sleep here would be a guess, this isn't.
+  await kc([
+    "rollout",
+    "status",
+    "deployment/openebs-localpv-provisioner",
+    "-n",
+    "openebs",
+    "--timeout=120s",
   ]);
 }
 

@@ -1,8 +1,11 @@
 # Every test-only k8s object for the e2e suites, in one file: the headscale
-# control plane, the manager admin Service, the friend-client namespace + its
-# RBAC, and the pantry StorageClass. The namespace, ServiceAccount, manager
-# Deployment and Role are NOT here — those come from the SHIPPED
-# deploy/k8s/p0rt1on.yaml, because testing the real artifacts is the point.
+# control plane, the manager admin Service, and the friend-client namespace +
+# its RBAC. The namespace, ServiceAccount, manager Deployment and Role are
+# NOT here — those come from the SHIPPED deploy/k8s/p0rt1on.yaml, because
+# testing the real artifacts is the point. The pantry StorageClass is the
+# same reasoning taken further: e2e/k8s/run.ts applies the SHIPPED
+# deploy/k8s/pantry.yaml directly, after installing the OpenEBS provisioner
+# it depends on.
 #
 # Headscale gives the portion test a real tailnet (real tailscaled enrollment,
 # WireGuard, node lifecycle) with no Tailscale account. Not a production
@@ -159,18 +162,3 @@ roleRef:
   kind: Role
   name: p0rt1on-e2e-client-runner
   apiGroup: rbac.authorization.k8s.io
----
-# Portion DATA PVCs are provisioned from this class. deploy/k8s/pantry.yaml
-# can't be applied here: its ConfigMap targets the upstream provisioner's
-# local-path-storage namespace (k3s uses kube-system) and would repoint the
-# cluster's storage at /srv/p0rt1on. The class alone is what the tests need —
-# k3d's built-in rancher.io/local-path provisioner serves it from its default
-# path. Keep the fields below in step with deploy/k8s/pantry.yaml.
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: p0rt1on-pantry
-provisioner: rancher.io/local-path
-reclaimPolicy: Delete
-# Bind the PV only once a pod needs it — local-path volumes are node-local.
-volumeBindingMode: WaitForFirstConsumer

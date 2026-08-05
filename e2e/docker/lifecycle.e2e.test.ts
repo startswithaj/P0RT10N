@@ -9,6 +9,7 @@ import {
   friendClientEnv,
   requireConfig,
   SEED_THEN_BACKUP,
+  sha256Hex,
   trpcClient,
   until,
 } from "../helpers.ts";
@@ -147,8 +148,23 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         const friends = await trpc("friends.list") as { id: string }[];
         friendId = friends[0].id;
 
+        const canaryPayload = "p0rt1on-canary";
         friendEnv = await writeEnvFile(
-          Object.entries(friendClientEnv(bundle, { PAYLOAD: "p0rt1on-canary" }))
+          Object.entries(
+            friendClientEnv(bundle, {
+              PAYLOAD: canaryPayload,
+              // VERIFY_RESTORE checks the snapshot is intact and retrievable
+              // straight from the repository (safe on live data). DIFF
+              // additionally restores it and compares byte-for-byte against
+              // BACKUP_PATH — only safe here because nothing else touches
+              // /backup after the seed step. VERBOSE prints a checksum per
+              // restored file so this test can assert on it below,
+              // independent of the entrypoint's own pass/fail logic.
+              VERIFY_RESTORE: "1",
+              VERIFY_RESTORE_DIFF: "1",
+              VERIFY_RESTORE_VERBOSE: "1",
+            }),
+          )
             .map(([k, v]) => `${k}=${v}`).join("\n") + "\n",
         );
         const backup = await docker([
@@ -166,8 +182,18 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         if (backup.code !== 0) {
           console.error("friend backup log:\n", backup.stdout, backup.stderr);
         }
-        // Exit 0 means Kopia connected over the tailnet and wrote a snapshot.
+        // Exit 0 now means Kopia connected over the tailnet, wrote a
+        // snapshot, the repository copy verified intact, AND a restore of
+        // it matched BACKUP_PATH byte for byte.
         expect(backup.code).toBe(0);
+        // Independent of entrypoint.sh's own pass/fail logic: recompute the
+        // canary's checksum here and require the exact line the restore step
+        // printed, so a broken verify inside the image (e.g. one that always
+        // logs success) can't silently pass this test.
+        const canaryHash = await sha256Hex(canaryPayload);
+        expect(backup.stdout).toContain(
+          `VERIFY_RESTORE_DIFF: sha256(canary.txt)=${canaryHash}`,
+        );
 
         // Waits for offboard to finish, because tearing down while the job
         // runs can leak a node on the real tailnet.

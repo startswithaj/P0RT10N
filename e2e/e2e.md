@@ -57,10 +57,13 @@ deno task test:e2e:docker run    # images already built
 ## k8s — `deno task test:e2e:k8s`
 
 Every test-only k8s object (headscale, the manager admin Service, the
-friend-client namespace + RBAC, the `p0rt1on-pantry` StorageClass) lives in
-`k8s/manifests.yaml`. The namespace, ServiceAccount, manager **Deployment** and
-Role come from the shipped `deploy/k8s/p0rt1on.yaml` — testing the real
-artifacts is the point.
+friend-client namespace + RBAC) lives in `k8s/manifests.yaml`. The namespace,
+ServiceAccount, manager **Deployment** and Role come from the shipped
+`deploy/k8s/p0rt1on.yaml` — testing the real artifacts is the point. The pantry
+`StorageClass` is the same reasoning taken further: `k8s/run.ts` installs the
+OpenEBS localpv provisioner via helm, then applies the shipped
+`deploy/k8s/pantry.yaml` directly, rather than hand-rolling a class pointed at
+k3d's bundled provisioner.
 
 - **`k8s/rbac-psa.e2e.test.ts`** — black-box, as the manager ServiceAccount: the
   least-privilege Role contains it (no cross-namespace reads, no
@@ -72,8 +75,9 @@ artifacts is the point.
   quota refusal → suspend/resume → rotate (old key dead, new key live) →
   offboard, then a leak check that no PVC/Secret/Service outlives the friend.
 
-**Needs:** a Docker daemon, `k3d`, `kubectl`. No Tailscale account or secrets —
-the driver mints headscale keys and writes the manager's config Secret itself.
+**Needs:** a Docker daemon, `k3d`, `kubectl`, `helm` (installs the pantry's
+OpenEBS provisioner). No Tailscale account or secrets — the driver mints
+headscale keys and writes the manager's config Secret itself.
 
 ```sh
 deno task test:e2e:k8s            # build images + both suites
@@ -100,3 +104,6 @@ keeps it either way for a fast rerun loop.
 - **`deploy/docker-compose.yml`** — the dev stack.
 - **`deploy/k8s/p0rt1on.yaml`** — the production Kubernetes manifest; the k8s
   driver applies it to the test cluster, so a bug in it fails the suite.
+- **`deploy/k8s/pantry.yaml`** — the production pantry `StorageClass`; the k8s
+  driver applies it (after installing its OpenEBS provisioner via helm), so a
+  bug in it fails the suite too.

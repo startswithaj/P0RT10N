@@ -94,6 +94,19 @@ export const SEED_THEN_BACKUP =
   'mkdir -p /backup && printf %s "$PAYLOAD" > /backup/canary.txt && ' +
   "exec /entrypoint.sh";
 
+// Recomputes what entrypoint.sh's VERIFY_RESTORE step should have printed
+// for a restored file, so the suites can assert the canary's content was
+// actually restored — independent of whether the image's own verify/diff
+// logic is correct.
+export async function sha256Hex(payload: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(payload),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function trpcClient(base: string) {
   const jar = { cookie: "" };
   return async (proc: string, input?: unknown): Promise<unknown> => {
