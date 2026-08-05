@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { maskSecrets, safeArgs } from "./redact.ts";
+import { maskEnvSecrets, maskSecrets, safeArgs } from "./redact.ts";
 
 describe("redact", () => {
   it("maskSecrets masks every occurrence, including inside key=value", () => {
@@ -26,5 +26,23 @@ describe("redact", () => {
   it("safeArgs leaves argv without -- unchanged", () => {
     expect(safeArgs(["rb", "--force", "alias/backup"]))
       .toBe("rb --force alias/backup");
+  });
+
+  it("maskEnvSecrets strips values for named env vars without knowing them in advance", () => {
+    const masked = maskEnvSecrets(
+      "boot failed\nMINIO_ROOT_PASSWORD=hunter2 TAILSCALE_AUTHKEY=tskey-abc123\nretrying",
+      ["MINIO_ROOT_PASSWORD", "TAILSCALE_AUTHKEY"],
+    );
+    expect(masked).not.toContain("hunter2");
+    expect(masked).not.toContain("tskey-abc123");
+    expect(masked).toBe(
+      "boot failed\nMINIO_ROOT_PASSWORD=«redacted» TAILSCALE_AUTHKEY=«redacted»\nretrying",
+    );
+  });
+
+  it("maskEnvSecrets leaves unrelated text (including the var name alone) untouched", () => {
+    expect(maskEnvSecrets("couldn't find key MINIO_ROOT_PASSWORD in Secret", [
+      "MINIO_ROOT_PASSWORD",
+    ])).toBe("couldn't find key MINIO_ROOT_PASSWORD in Secret");
   });
 });

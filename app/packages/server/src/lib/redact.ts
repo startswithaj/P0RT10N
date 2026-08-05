@@ -9,6 +9,18 @@ export function maskSecrets(text: string, secrets: string[]): string {
   );
 }
 
+/** Strips values for known secret-carrying env var NAMES out of free text
+ * (pod logs, k8s event messages). Unlike `maskSecrets`, this doesn't need the
+ * actual secret VALUE in scope — so it still catches a leak from a workload
+ * whose secret was minted in a past request the current caller never saw. */
+export function maskEnvSecrets(text: string, envNames: string[]): string {
+  return envNames.reduce(
+    (masked, name) =>
+      masked.replace(new RegExp(`\\b${name}=\\S+`, "g"), `${name}=«redacted»`),
+    text,
+  );
+}
+
 /** Everything after a `--` separator becomes a count placeholder in the rendered argv; it is never interpolated. */
 export function safeArgs(args: string[]): string {
   const sep = args.indexOf("--");

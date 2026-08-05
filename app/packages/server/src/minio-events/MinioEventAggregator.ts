@@ -40,6 +40,20 @@ export class MinioEventAggregator {
     }
   }
 
+  /** Reads the friend's recorded activity and clears it in one go. Used at the
+   * end of provisioning: the smoke test's own traffic proves the audit webhook
+   * reaches the manager, but it is not the friend's usage and must not show as
+   * such. Safe as a plain read-then-delete because this class is the only
+   * writer to the row. */
+  takeActivity(friendId: number): Promise<{ lastRequestAt: string | null }> {
+    return defer(() => {
+      const row = this.db.select({ lastRequestAt: activity.lastRequestAt })
+        .from(activity).where(eq(activity.friendId, friendId)).get();
+      this.db.delete(activity).where(eq(activity.friendId, friendId)).run();
+      return { lastRequestAt: row?.lastRequestAt ?? null };
+    });
+  }
+
   fold(fe: FriendEvent): Promise<void> {
     // The synchronous SQLite work is deferred so a throw becomes a promise
     // rejection instead of escaping synchronously.
