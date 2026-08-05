@@ -12,7 +12,12 @@ metadata:
   name: p0rt1on-manager
   namespace: p0rt1on
 ---
-# This Role is the manager's entire permission surface: nothing cluster-scoped, no RBAC verbs to self-escalate, and no access outside this namespace.
+# This Role is the manager's primary permission surface: no RBAC verbs to
+# self-escalate, and no access to other namespaces' resources. Two narrow,
+# read-only, cluster-scoped exceptions exist below (ClusterRole
+# p0rt1on-manager-preflight) purely for boot-time health checks: reading the
+# pantry StorageClass and the manager's own namespace's PSA label. Neither
+# grants pods:list or any other cluster-wide resource read.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

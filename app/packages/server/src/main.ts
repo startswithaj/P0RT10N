@@ -1,24 +1,17 @@
-import { openDatabase } from "./db/Database.ts";
+import { assertDbDirWritable, openDatabase } from "./db/Database.ts";
 import { runMigrations } from "./db/MigrationRunner.ts";
 import { ConsoleLogger } from "./lib/ConsoleLogger.ts";
-import { CryptoKeyGen } from "./provisioning/CryptoKeyGen.ts";
 import { Env, EVENT_BIND_HOST, EVENT_PORT } from "./lib/Env.ts";
-import { FriendQueries } from "./db/FriendQueries.ts";
 import { buildApp } from "./app.ts";
 import { runBoot } from "./boot/boot.ts";
+import { reportPreflight } from "./boot/reportPreflight.ts";
 import { startMinioEventServer, startServer } from "./server.ts";
-import { UsageSampler } from "./minio-events/UsageSampler.ts";
-import { MinioEventBus } from "./minio-events/MinioEventBus.ts";
-import { MinioEventAggregator } from "./minio-events/MinioEventAggregator.ts";
-import { MinioEventForwarder } from "./minio-events/MinioEventForwarder.ts";
-import { parseMinioEvents } from "./minio-events/parseMinioEvent.ts";
-import {
-  type FriendLookup,
-  resolveFriend,
-} from "./minio-events/resolveFriend.ts";
 
-// Entry point: reads env, opens the database, wires services, then runs the boot sequence.
-// The exact ordering (migrate, flip stale provisioning, reconcile, sweep, serve) lives in boot.ts.
+// Entry point: lifecycle only — read env, open the database, then boot, time,
+// serve and shut down. Every dependency is constructed in buildApp (app.ts),
+// which is the single composition root; nothing is wired here.
+// The boot ordering (migrate, flip stale provisioning, reconcile, sweep, serve)
+// lives in boot.ts.
 
 const env = new Env(); // Validates required vars; refuses to boot when any are missing.
 const distDir = `${import.meta.dirname}/../dist`;
@@ -28,45 +21,24 @@ const staticDir = await Deno.stat(distDir)
 const logger = new ConsoleLogger({ level: env.logLevel });
 logger.info("p0rt1on starting", { level: env.logLevel, pid: Deno.pid });
 
+// Fatal, not a health check: an unwritable DB means the manager cannot
+// function at all, so this fails loudly here rather than showing an admin
+// UI that can never do anything (unlike preflight below, which is best-effort).
+await assertDbDirWritable(env.dbPath).catch((err) => {
+  logger.error("database directory is not usable", { error: String(err) });
+  throw err;
+});
+
 logger.debug("opening database", { dbPath: env.dbPath });
 const database = openDatabase(env.dbPath);
 
 const app = await buildApp(database, env, logger);
 const context = app.context;
 
-const queries = new FriendQueries(database.db);
-const lookup: FriendLookup = (bucket) => queries.friendByBucket(bucket);
-
-// The bus owns the shared shutdown signal: SIGTERM aborts it, tearing down every subscription.
-// Each consumer catches its own errors and never rejects.
-const consumersAbort = new AbortController();
-const bus = new MinioEventBus(logger, consumersAbort);
-
-const friendEvents = (name: string) =>
-  bus.subscribe(name)
-    .pipe(parseMinioEvents)
-    .pipe(resolveFriend(lookup));
-
-const sampler = new UsageSampler(
-  friendEvents("sampler"),
-  queries,
-  app.mcFactory,
-  logger,
-);
-new MinioEventAggregator(friendEvents("aggregator"), database.db, logger);
-
-if (env.minioForwardUrl) {
-  new MinioEventForwarder(
-    bus.subscribe("forwarder"),
-    { url: env.minioForwardUrl, authorization: env.minioForwardAuthorization },
-    logger,
-  );
-}
-
 const sweep = () =>
   context.provisioningService.sweepFailed()
     // Same cadence: cap the append-only usage-sample history.
-    .then(() => queries.pruneUsage())
+    .then(() => app.queries.pruneUsage())
     .catch((err) =>
       logger.error("cleanup sweep failed", { error: String(err) })
     );
@@ -82,21 +54,11 @@ await runBoot({
       logger.error("boot reconcile failed", { error: String(err) })
     ),
   sweep,
-  // Probes tailnet prerequisites so the UI can gate portion creation.
+  // Probes deployment prerequisites so the UI can gate portion creation.
   // Failures are logged but never fatal, because the admin UI must come up to surface the problem.
   preflight: () =>
     context.systemHealthService.probe()
-      .then((h) => {
-        if (h.canProvision) {
-          logger.info("preflight ok", { checks: h.checks.length });
-        } else {
-          logger.warn("preflight found blocking issues", {
-            blocked: h.checks
-              .filter((c) => c.status === "blocked")
-              .map((c) => c.id),
-          });
-        }
-      })
+      .then((h) => reportPreflight(h, logger))
       .catch((err) =>
         logger.error("preflight probe failed", { error: String(err) })
       ),
@@ -107,7 +69,7 @@ await runBoot({
     // Usage samples: once now (dashboard never empty after a restart) and
     // hourly as the idle baseline; the audit debounce covers active friends.
     const sampleAll = () =>
-      sampler.sampleAll().catch((err) =>
+      app.sampler.sampleAll().catch((err) =>
         logger.error("usage sampling failed", { error: String(err) })
       );
 
@@ -139,10 +101,10 @@ await runBoot({
       port: EVENT_PORT,
       hostname: EVENT_BIND_HOST,
       sink: {
-        // Derived from the master key. This is the same value buildApp wires into
-        // setAuditWebhook, so instances and the listener always agree on it.
-        token: new CryptoKeyGen(env.masterKey).auditWebhookToken(),
-        onEvent: (raw) => bus.publish(raw),
+        // The same value buildApp wires into setAuditWebhook, so instances and
+        // the listener always agree on it.
+        token: app.auditWebhookToken,
+        onEvent: (raw) => app.bus.publish(raw),
       },
       onListen: ({ port }) =>
         logger.info(
@@ -150,7 +112,7 @@ await runBoot({
         ),
     });
     Deno.addSignalListener("SIGTERM", () => {
-      consumersAbort.abort();
+      app.consumersAbort.abort();
       Deno.exit(0);
     });
   },

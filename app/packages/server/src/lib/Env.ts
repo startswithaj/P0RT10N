@@ -97,23 +97,23 @@ export class Env {
       ? KUBERNETES_REQUIRED_VARS
       : [];
     const missing = [...REQUIRED_VARS, ...perBackend, ...perRuntime]
-      .filter((k) => this.#opt(k) === undefined);
+      .filter((k) => this.opt(k) === undefined);
     if (missing.length > 0) {
       throw new Error(`${missing.join(", ")} is not set`);
     }
   }
 
-  #required(key: EnvVar): string {
-    const v = this.#opt(key);
+  private required(key: EnvVar): string {
+    const v = this.opt(key);
     if (v === undefined) throw new Error(`${key} is not set`);
     return v;
   }
 
-  #str(key: EnvVar, fallback: string): string {
+  private str(key: EnvVar, fallback: string): string {
     const v = this.src.get(key);
     return v && v.length > 0 ? v : fallback;
   }
-  #num(key: EnvVar, fallback: number): number {
+  private num(key: EnvVar, fallback: number): number {
     const v = this.src.get(key);
     if (!v || v.length === 0) return fallback;
     const n = Number(v);
@@ -124,7 +124,7 @@ export class Env {
     }
     return n;
   }
-  #opt(key: EnvVar): string | undefined {
+  private opt(key: EnvVar): string | undefined {
     const v = this.src.get(key);
     return v && v.length > 0 ? v : undefined;
   }
@@ -137,7 +137,7 @@ export class Env {
   /** Must differ from the audit listener's port: the admin API stays loopback-only while
    * the audit listener faces the container network — a collision would expose the admin surface. */
   get port(): number {
-    const p = this.#num(EnvVar.Port, 8080);
+    const p = this.num(EnvVar.Port, 8080);
     if (p === EVENT_PORT) {
       throw new Error(
         `${EnvVar.Port} (${p}) must differ from the audit listener's port ` +
@@ -151,32 +151,32 @@ export class Env {
   /** An operator webhook every MinIO event is forwarded to byte-identically;
    * unset disables forwarding. */
   get minioForwardUrl(): string | undefined {
-    return this.#opt(EnvVar.MinioForwardUrl);
+    return this.opt(EnvVar.MinioForwardUrl);
   }
   /** Sent verbatim as the Authorization header on forwarded events. It is a
    * secret: env-only, never logged, and preferred over a token in the URL. */
   get minioForwardAuthorization(): string | undefined {
-    return this.#opt(EnvVar.MinioForwardAuthorization);
+    return this.opt(EnvVar.MinioForwardAuthorization);
   }
 
   // ---- admin auth ----
   /** Null disables auth; pairing that with a non-loopback bind only triggers
    * a startup warning (main.ts), it is not restricted. */
   get adminAuth(): { username: string; password: string } | null {
-    const username = this.#opt(EnvVar.AdminUsername);
-    const password = this.#opt(EnvVar.AdminPassword);
+    const username = this.opt(EnvVar.AdminUsername);
+    const password = this.opt(EnvVar.AdminPassword);
     return username && password ? { username, password } : null;
   }
   get adminBindHost(): string {
-    return this.#str(EnvVar.AdminBindHost, "127.0.0.1");
+    return this.str(EnvVar.AdminBindHost, "127.0.0.1");
   }
   get dbPath(): string {
-    return this.#str(EnvVar.DbPath, "./data/p0rt1on.db");
+    return this.str(EnvVar.DbPath, "./data/p0rt1on.db");
   }
   /** On docker an absolute host directory ($PANTRY/<instance>); on k8s a
    * StorageClass name. Required in both. */
   get pantry(): string {
-    const value = this.#required(EnvVar.Pantry);
+    const value = this.required(EnvVar.Pantry);
     if (this.runtimeKind === "kubernetes") {
       if (value.startsWith("/")) {
         throw new Error(
@@ -205,7 +205,7 @@ export class Env {
 
   // ---- runtime selection ----
   get runtimeKind(): "docker" | "kubernetes" {
-    return this.#str(EnvVar.Runtime, "docker") === "kubernetes"
+    return this.str(EnvVar.Runtime, "docker") === "kubernetes"
       ? "kubernetes"
       : "docker";
   }
@@ -227,18 +227,18 @@ export class Env {
     };
   } {
     return {
-      namespace: this.#str(EnvVar.K8sNamespace, "p0rt1on"),
-      apiBase: this.#opt(EnvVar.K8sApi),
-      tokenInline: this.#opt(EnvVar.K8sToken),
-      caFile: this.#opt(EnvVar.K8sCaFile),
-      dataSize: this.#str(EnvVar.K8sDataSize, "50Gi"),
-      stateSize: this.#str(EnvVar.K8sStateSize, "1Gi"),
-      managerServiceName: this.#required(EnvVar.K8sManagerServiceName),
+      namespace: this.str(EnvVar.K8sNamespace, "p0rt1on"),
+      apiBase: this.opt(EnvVar.K8sApi),
+      tokenInline: this.opt(EnvVar.K8sToken),
+      caFile: this.opt(EnvVar.K8sCaFile),
+      dataSize: this.str(EnvVar.K8sDataSize, "50Gi"),
+      stateSize: this.str(EnvVar.K8sStateSize, "1Gi"),
+      managerServiceName: this.required(EnvVar.K8sManagerServiceName),
       resources: {
-        cpuRequest: this.#opt(EnvVar.PortionK8sCpuRequest),
-        cpuLimit: this.#opt(EnvVar.PortionK8sCpuLimit),
-        memoryRequest: this.#opt(EnvVar.PortionK8sMemoryRequest),
-        memoryLimit: this.#opt(EnvVar.PortionK8sMemoryLimit),
+        cpuRequest: this.opt(EnvVar.PortionK8sCpuRequest),
+        cpuLimit: this.opt(EnvVar.PortionK8sCpuLimit),
+        memoryRequest: this.opt(EnvVar.PortionK8sMemoryRequest),
+        memoryLimit: this.opt(EnvVar.PortionK8sMemoryLimit),
       },
     };
   }
@@ -251,10 +251,10 @@ export class Env {
     memoryLimit?: string;
   } {
     return {
-      cpuShares: this.#opt(EnvVar.PortionDockerCpuRequest),
-      cpus: this.#opt(EnvVar.PortionDockerCpuLimit),
-      memoryReservation: this.#opt(EnvVar.PortionDockerMemoryRequest),
-      memoryLimit: this.#opt(EnvVar.PortionDockerMemoryLimit),
+      cpuShares: this.opt(EnvVar.PortionDockerCpuRequest),
+      cpus: this.opt(EnvVar.PortionDockerCpuLimit),
+      memoryReservation: this.opt(EnvVar.PortionDockerMemoryRequest),
+      memoryLimit: this.opt(EnvVar.PortionDockerMemoryLimit),
     };
   }
 
@@ -263,18 +263,18 @@ export class Env {
    * stable and backed up — losing or changing it loses admin access to every
    * instance. */
   get masterKey(): string {
-    return this.#required(EnvVar.MasterKey);
+    return this.required(EnvVar.MasterKey);
   }
 
   // ---- Tailscale ----
   get tailscaleOauthClientSecret(): string {
-    return this.#required(EnvVar.TailscaleOauthClientSecret);
+    return this.required(EnvVar.TailscaleOauthClientSecret);
   }
   /** Optional, and deliberately separate from the OAuth client: user-invites
    * need a user-owned token, which OAuth clients are not. When unset, invites
    * fall back to manual console steps. */
   get tailscaleApiToken(): string | undefined {
-    return this.#opt(EnvVar.TailscaleApiToken);
+    return this.opt(EnvVar.TailscaleApiToken);
   }
   /** Required on the real Tailscale backend: keys mint only for tags the OAuth
    * client owns, and the fallback owner 400s at the authkey step after the
@@ -282,13 +282,13 @@ export class Env {
    * own default, so it is optional there. */
   get tagOwner(): string | undefined {
     return this.tailscaleBackend === "tailscale"
-      ? this.#required(EnvVar.TailscaleTagOwner)
-      : this.#opt(EnvVar.TailscaleTagOwner);
+      ? this.required(EnvVar.TailscaleTagOwner)
+      : this.opt(EnvVar.TailscaleTagOwner);
   }
   /** `headscale` is the self-hosted test-tier backend — see HeadscaleHttpApi
    * for what it can't do (HTTPS certs). */
   get tailscaleBackend(): "tailscale" | "headscale" {
-    return this.#str(EnvVar.TailscaleBackend, "tailscale") === "headscale"
+    return this.str(EnvVar.TailscaleBackend, "tailscale") === "headscale"
       ? "headscale"
       : "tailscale";
   }
@@ -299,10 +299,10 @@ export class Env {
     baseDomain: string;
   } {
     return {
-      baseUrl: this.#required(EnvVar.HeadscaleUrl),
-      apiKey: this.#required(EnvVar.HeadscaleApiKey),
-      user: this.#str(EnvVar.HeadscaleUser, "p0rt1on"),
-      baseDomain: this.#required(EnvVar.HeadscaleBaseDomain),
+      baseUrl: this.required(EnvVar.HeadscaleUrl),
+      apiKey: this.required(EnvVar.HeadscaleApiKey),
+      user: this.str(EnvVar.HeadscaleUser, "p0rt1on"),
+      baseDomain: this.required(EnvVar.HeadscaleBaseDomain),
     };
   }
   /** Headscale needs an explicit login server, derived from its API base rather
@@ -313,7 +313,7 @@ export class Env {
       loginServer: this.tailscaleBackend === "headscale"
         ? this.headscaleSettings().baseUrl
         : undefined,
-      serveMode: this.#str(EnvVar.TailscaleServeMode, "https") === "http"
+      serveMode: this.str(EnvVar.TailscaleServeMode, "https") === "http"
         ? "http"
         : "https",
     };
@@ -321,7 +321,7 @@ export class Env {
 
   /** Derived, not configured: it is the manager's own listener. Never
    * 127.0.0.1 — that would be the instance itself. */
-  #auditWebhookUrl(): string {
+  private auditWebhookUrl(): string {
     const host = this.runtimeKind === "kubernetes"
       ? `${this.kubeSettings().managerServiceName}.${this.kubeSettings().namespace}.svc`
       : "host.docker.internal";
@@ -332,26 +332,26 @@ export class Env {
    * app.ts composes it in. */
   provisioningConfig(): Omit<ProvisioningConfig, "auditWebhookToken"> {
     return {
-      instanceImage: this.#str(EnvVar.InstanceImage, "p0rt1on-instance:latest"),
+      instanceImage: this.str(EnvVar.InstanceImage, "p0rt1on-instance:latest"),
       // `network` means a containerized manager reaching instances by container
       // name — published loopback ports are unreachable cross-container.
       instanceAddressing:
-        this.#str(EnvVar.InstanceAddressing, "host") === "network"
+        this.str(EnvVar.InstanceAddressing, "host") === "network"
           ? "network"
           : "host",
       portRange: PORT_RANGE,
-      sharedInstanceName: this.#str(EnvVar.SharedInstanceName, "pool"),
+      sharedInstanceName: this.str(EnvVar.SharedInstanceName, "pool"),
       // Same source as the instance's TAILSCALE_SERVE_MODE: the friend endpoint
       // scheme and the ACL grant port must match how instances serve.
       serveMode: this.instanceTailscale().serveMode,
-      serveNodeTag: this.#str(
+      serveNodeTag: this.str(
         EnvVar.TailscaleServeNodeTag,
         "tag:p0rt1on-serve",
       ),
-      aclMode: this.#str(EnvVar.TailscaleAclMode, "auto") === "manual"
+      aclMode: this.str(EnvVar.TailscaleAclMode, "auto") === "manual"
         ? "manual"
         : "auto",
-      auditWebhookUrl: this.#auditWebhookUrl(),
+      auditWebhookUrl: this.auditWebhookUrl(),
     };
   }
 }

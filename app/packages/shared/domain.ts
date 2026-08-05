@@ -353,8 +353,7 @@ export type HealthCheckId =
   | "httpsServe"
   | "managerService"
   | "instanceImage"
-  | "pantry"
-  | "podSecurity";
+  | "pantry";
 export type HealthCheck = {
   id: HealthCheckId;
   status: HealthStatus;
