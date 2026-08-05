@@ -86,9 +86,8 @@ function Section(
     setExpanded: (k: string | null) => void;
   },
 ) {
-  // Keyed by name, not by object identity: every poll returns fresh objects, so
-  // an identity-keyed <For> rebuilds every row and throws away any expanded
-  // diagnostics panel along with its scroll position. Names are stable strings.
+  // Keyed by name, not object identity: every poll returns fresh objects, so an
+  // identity-keyed <For> rebuilds every row and discards any expanded panel.
   const names = () => props.items.map((s) => s.name);
   return (
     <div class={section}>

@@ -1,25 +1,16 @@
 import type { SystemHealth } from "@p0rt1on/shared/domain";
 import type { Logger } from "../services/types.ts";
 
-/**
- * Writes the preflight result to the log in full.
- *
- * Every non-ok check gets its own line with its title and detail, because the
- * person hitting these is usually reading container logs on a manager that
- * won't work, not looking at the admin UI. `ok` checks are named in the
- * summary but not explained — their detail on every healthy boot would be
- * pure noise.
- *
- * Lives here rather than in main.ts so it can be tested: main.ts runs its
- * whole boot sequence on import.
- */
+/** Writes the preflight result to the log in full: whoever hits these is
+ * reading container logs on a manager that won't work, not the admin UI. `ok`
+ * checks are named but not explained. Lives here, not main.ts, so it can be
+ * tested — main.ts runs its whole boot sequence on import. */
 export function reportPreflight(health: SystemHealth, logger: Logger): void {
   health.checks.filter((c) => c.status !== "ok").forEach((c) => {
     const message = `preflight ${c.status}: ${c.title} — ${c.detail}`;
     const meta = { check: c.id, ...(c.fixUrl ? { fixUrl: c.fixUrl } : {}) };
-    // Called as methods rather than picked into a variable: the real logger's
-    // methods are class methods that use `this`, so a bare `logger.warn`
-    // reference is unbound and throws on call.
+    // Called as methods, not picked into a variable: the real logger's are
+    // class methods using `this`, so a bare reference is unbound and throws.
     if (c.status === "blocked") logger.error(message, meta);
     else logger.warn(message, meta);
   });

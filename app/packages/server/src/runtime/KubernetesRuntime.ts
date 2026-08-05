@@ -495,17 +495,10 @@ export class KubernetesRuntime implements InstanceRuntime {
     }
   }
 
-  /** Best-effort: [] on failure. This is the ONE signal that survives when a
-   * pod never gets scheduled at all — an unbound PVC never produces a
-   * container status, so container-level diagnostics alone would miss it
-   * entirely. Requires `events: list`, which the Role already grants.
-   *
-   * The PVCs are read as well as the pod, because the two carry different
-   * halves of a storage failure: the pod only ever says its claims are
-   * unbound, while the PVC names the actual cause — a StorageClass that
-   * doesn't exist, or a provisioner that never answered. Nothing checks for a
-   * missing class ahead of time (that would need a cluster-scoped read the
-   * manager deliberately doesn't hold), so this is where it gets reported. */
+  /** Best-effort: [] on failure. The only signal that survives when a pod is
+   * never scheduled, since an unbound PVC produces no container status. The
+   * PVCs are read too: the pod only says its claims are unbound, while the PVC
+   * names the cause — a missing StorageClass, or a silent provisioner. */
   private async instanceEvents(instanceName: string): Promise<string[]> {
     const names = resourceNames(instanceName);
     const involved = [names.pod, names.dataPvc, names.statePvc];

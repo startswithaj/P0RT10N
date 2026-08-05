@@ -99,10 +99,8 @@ export function capturingLogger(): {
     meta?: Record<string, unknown>;
   }[] = [];
 
-  // Methods go through `this`, exactly like the real ConsoleLogger. A caller
-  // that picks one off into a variable — `(cond ? logger.error : logger.warn)`
-  // — loses the binding and throws here too, instead of passing the tests and
-  // then failing on every boot that has something to report.
+  // Methods go through `this` like the real ConsoleLogger, so a caller that
+  // picks one off into a variable loses the binding and fails here too.
   const impl = {
     record(level: string, message: string, meta?: Record<string, unknown>) {
       lines.push({ level, message, meta });

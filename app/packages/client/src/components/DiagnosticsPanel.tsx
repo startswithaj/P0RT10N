@@ -54,11 +54,9 @@ const panelLogs = css({
 
 const panelMutedText = css({ color: "fg.muted", fontSize: "xs" });
 
-// Logs render a line at a time, not as one text blob: a blob is replaced whole
-// on every poll, which collapses the scroll box and snaps the reader back to
-// the top. Unchanged lines compare equal, keep their DOM nodes, and scroll
-// position survives. A blank line renders as a space so it still occupies its
-// row rather than collapsing.
+// A line at a time, not one text blob: a blob is replaced whole on every poll,
+// collapsing the scroll box back to the top. Unchanged lines keep their DOM
+// nodes. A blank line renders as a space so it still occupies its row.
 const logLines = (raw: string): string[] => raw.replace(/\n$/, "").split("\n");
 
 export function DiagnosticsPanel(props: { instance: string }) {

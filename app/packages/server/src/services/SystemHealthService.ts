@@ -24,15 +24,11 @@ export type ManagerServiceProbe =
   | { ok: false; service: string; namespace: string; error: string };
 
 /** Checks the pantry isn't also the cluster's default StorageClass; absent on
- * the docker runtime, where the pantry is a host path.
- *
- * Deliberately does NOT check the class exists. Reading a StorageClass needs a
- * cluster-scoped grant, and the manager holds none — so instead it submits a
- * PVC that names no class at all and reads back whichever class admission
- * fills in. That needs only the namespaced PVC permission it already has, and
- * creates nothing. A class that doesn't exist can't be caught this way: the
- * API accepts a PVC naming a missing class and only fails later, so that case
- * is reported at provisioning time from the PVC's own events instead. */
+ * docker, where the pantry is a host path. Reading a StorageClass needs a
+ * cluster-scoped grant the manager doesn't hold, so it submits a PVC naming no
+ * class and reads back what admission fills in. A missing class can't be
+ * caught this way — admission accepts it — so that surfaces at provisioning
+ * time from the PVC's events. */
 export type PantryProbe =
   | { ok: true; className: string; clusterDefault: string | null }
   | { ok: false; className: string; reason: "is-default" }
@@ -69,7 +65,6 @@ function hasRegistryHost(image: string): boolean {
   return first.includes(".") || first.includes(":") || first === "localhost";
 }
 
-/** cloudydeno throws an Error carrying the HTTP status as `httpCode`. */
 /** The Kubernetes-backed probes behind the k8s checks below. Absent on the
  * docker runtime, where those checks are omitted entirely rather than
  * reported as passing. Exported for direct unit testing against a fake
