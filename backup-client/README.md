@@ -36,6 +36,59 @@ Optional volumes:
 
 See [`.env.example`](.env.example) for all variables.
 
+## Completion hooks
+
+Two optional ways to be told a run finished. Both fire on **success and
+failure** — a backup that silently stops running is the case worth hearing about
+— and neither can fail the backup, since a notifier being down is not a backup
+failure. Both also fire when a run dies before it ever reaches a snapshot, e.g.
+it couldn't reach your bucket.
+
+### A URL
+
+`BACKUP_HOOK_URL` gets a JSON POST. `BACKUP_HOOK_BODY` sets the payload, with
+`{status}` (`ok`/`failed`), `{exit_code}`, `{bucket}`, `{host}` and
+`{duration_s}` substituted. Omit it for a generic p0rt1on payload.
+
+Telegram takes this shape directly, so no relay is needed:
+
+```bash
+BACKUP_HOOK_URL=https://api.telegram.org/bot<TOKEN>/sendMessage
+BACKUP_HOOK_BODY={"chat_id":"<CHAT_ID>","text":"backup {status}: {bucket} in {duration_s}s"}
+```
+
+Note the bot token sits in the URL, so it reaches `wget`'s argv and is visible
+in `ps` **inside this container**. Everyone who can read that already holds your
+bucket credentials, so it grants nothing new — but it is worth knowing.
+
+### A script
+
+Mount an executable at `/hooks/on-complete` (or point `BACKUP_HOOK_SCRIPT`
+elsewhere) for anything a URL can't express:
+
+```bash
+docker run --rm --env-file backup.env \
+  -v /my/data:/data:ro -v /my/notify.sh:/hooks/on-complete:ro \
+  p0rt1on-backup-client
+```
+
+It runs with `BACKUP_STATUS`, `BACKUP_EXIT_CODE`, `BACKUP_BUCKET`,
+`BACKUP_HOST`, `BACKUP_PATH`, `BACKUP_STARTED_AT` and `BACKUP_DURATION_S`.
+Everything else is scrubbed, so a hook never sees `KOPIA_PASSWORD`, your S3
+secret or your auth key: a notifier copied off the internet must not be handed
+the keys to the repository it reports on.
+
+Give the hook its own credentials by prefixing them `HOOK_` — those are
+forwarded, nothing else is:
+
+```bash
+HOOK_TELEGRAM_TOKEN=...
+HOOK_NTFY_PASSWORD=...
+```
+
+Unlike the URL above this keeps a token in the environment rather than on a
+command line, so it never reaches `ps`.
+
 ## Local testing without a tailnet
 
 Set `SKIP_TAILSCALE=1` and point `S3_ENDPOINT` at a reachable MinIO (e.g.

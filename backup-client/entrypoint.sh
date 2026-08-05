@@ -21,6 +21,14 @@ TAILSCALE_LOGIN_SERVER="${TAILSCALE_LOGIN_SERVER:-}"
 # SKIP_TAILSCALE=1 talks to S3_ENDPOINT directly (local testing without a tailnet).
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-}"
 
+# Completion hooks. Both are optional, both fire on success AND failure — a
+# backup that silently stops running is the case worth being told about — and
+# neither can fail the run, since a notifier being down is not a backup failure.
+BACKUP_HOOK_URL="${BACKUP_HOOK_URL:-}"
+BACKUP_HOOK_BODY="${BACKUP_HOOK_BODY:-}"
+HOOK_SCRIPT="${BACKUP_HOOK_SCRIPT:-/hooks/on-complete}"
+DEFAULT_HOOK_BODY='{"status":"{status}","exit_code":{exit_code},"bucket":"{bucket}","host":"{host}","duration_s":{duration_s}}'
+
 [ -d "$BACKUP_PATH" ] || die "BACKUP_PATH '$BACKUP_PATH' is not a directory — did you mount your data into the container?"
 
 # Kopia's S3 --endpoint wants host[:port], not a full URL, matching the manager's kopiaQuickstart which also strips the scheme.
@@ -31,8 +39,76 @@ case "$S3_ENDPOINT" in
   http://*) KOPIA_TLS_ARGS="--disable-tls" ;;
 esac
 
+STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+START_S=$(date +%s)
+HOOKS_RAN=""
+
+# Substitutes {placeholders} in a hook body. Values are DNS labels, a status
+# word and integers, so none can contain the `|` delimiter or break the JSON.
+render_hook_body() {
+  printf '%s' "$1" |
+    sed -e "s|{status}|$2|g" \
+      -e "s|{exit_code}|$3|g" \
+      -e "s|{bucket}|$S3_BUCKET|g" \
+      -e "s|{host}|$TAILSCALE_HOSTNAME|g" \
+      -e "s|{duration_s}|$4|g"
+}
+
+# Called from the EXIT trap, so it fires however the run ends — including a
+# failure to reach the repository at all, which never gets as far as a
+# snapshot and is the silent failure most worth being told about.
+notify() {
+  code=$1
+  [ -z "$HOOKS_RAN" ] || return 0
+  HOOKS_RAN=1
+  if [ "$code" -eq 0 ]; then hook_status=ok; else hook_status=failed; fi
+  duration=$(( $(date +%s) - START_S ))
+
+  if [ -n "$BACKUP_HOOK_URL" ]; then
+    log "posting completion hook ($hook_status)"
+    # The URL may carry a token (Telegram puts one in the path), so it is never
+    # logged — only whether the call worked.
+    wget -qO- --timeout=10 --header="Content-Type: application/json" \
+      --post-data="$(
+        render_hook_body "${BACKUP_HOOK_BODY:-$DEFAULT_HOOK_BODY}" \
+          "$hook_status" "$code" "$duration"
+      )" \
+      "$BACKUP_HOOK_URL" >/dev/null 2>&1 ||
+      log "completion hook URL failed (non-fatal)"
+  fi
+
+  if [ -x "$HOOK_SCRIPT" ]; then
+    log "running $HOOK_SCRIPT ($hook_status)"
+    # Anything named HOOK_* is forwarded, so a hook can hold its own
+    # credentials — a bot token, an ntfy password — without the blanket scrub
+    # below also starving it of them. Names are matched strictly and values
+    # read by name, so a value with spaces or `=` in it survives intact.
+    set --
+    for hook_name in $(env | sed -n 's/^\(HOOK_[A-Za-z0-9_]*\)=.*/\1/p'); do
+      eval "hook_value=\${$hook_name}"
+      set -- "$@" "$hook_name=$hook_value"
+    done
+    # env -i so a hook never inherits KOPIA_PASSWORD, the S3 secret or the auth
+    # key: a notifier copied off the internet must not be handed the keys to
+    # the repository it is reporting on.
+    env -i PATH="$PATH" \
+      BACKUP_STATUS="$hook_status" \
+      BACKUP_EXIT_CODE="$code" \
+      BACKUP_BUCKET="$S3_BUCKET" \
+      BACKUP_HOST="$TAILSCALE_HOSTNAME" \
+      BACKUP_PATH="$BACKUP_PATH" \
+      BACKUP_STARTED_AT="$STARTED_AT" \
+      BACKUP_DURATION_S="$duration" \
+      "$@" \
+      "$HOOK_SCRIPT" || log "completion hook script failed (non-fatal)"
+  fi
+}
+
 TAILSCALED_PID=""
 cleanup() {
+  rc=$?
+  # Before the tailnet goes away, since a hook may need to reach the network.
+  notify "$rc"
   if [ -n "$TAILSCALED_PID" ]; then
     log "tearing down Tailscale"
     tailscale down >/dev/null 2>&1 || true
