@@ -96,6 +96,13 @@ export interface ProvisioningRepo {
 
   recordServeNodeId(instanceId: number, serveNodeId: string): Promise<void>;
 
+  /** Repins the instance's stored tsHostname to whatever was actually
+   * confirmed (Tailscale can grant a collision suffix instead). */
+  recordConfirmedHostname(
+    instanceId: number,
+    tsHostname: string,
+  ): Promise<void>;
+
   /** Atomically count live friends and mark the instance `reaping`; returns
    * false when `requireEmpty` is set and friends remain. Once marked, reserve
    * refuses to adopt the instance, so an add can't race the reap. */
@@ -146,6 +153,7 @@ export interface ProvisioningRepo {
       tsHostname: string;
       minioPort: number;
       status: string;
+      serveNodeId: string | null;
     }[]
   >;
 

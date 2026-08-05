@@ -15,6 +15,7 @@ import type {
   InstanceSpec,
 } from "../runtime/runtime.ts";
 import type { TailnetNode, TailscaleApi } from "../tailscale/tailscale.ts";
+import type { HostnameHealthChecker } from "../provisioning/HostnameHealthChecker.ts";
 import type { UserInviteApi } from "../tailscale/userInvite.ts";
 import { TailscaleUserInviteApi } from "../tailscale/TailscaleUserInviteApi.ts";
 import type {
@@ -25,6 +26,7 @@ import type {
   ProvisioningRepo,
 } from "../provisioning/deps.ts";
 import { ProvisioningService } from "../provisioning/ProvisioningService.ts";
+import type { MinioEventAggregator } from "../minio-events/MinioEventAggregator.ts";
 import type { Logger } from "../services/types.ts";
 import type { AddFriendInput } from "@p0rt1on/shared/domain";
 
@@ -32,6 +34,28 @@ import type { AddFriendInput } from "@p0rt1on/shared/domain";
 // assert ordering across deps. Import these; never redefine mocks inline.
 
 export type Calls = string[];
+
+/**
+ * A partial mock that fails loudly. Anything the test didn't stub throws when
+ * touched, naming the member — unlike an `as` cast, where an unstubbed method
+ * is `undefined` and blows up somewhere unrelated with "x is not a function".
+ *
+ * For mocking a concrete class where a test only ever reaches a method or two;
+ * prefer a full hand-written mock when the type is a small interface.
+ */
+export function strictMock<T extends object>(
+  name: string,
+  impl: Partial<T>,
+): T {
+  return new Proxy(impl, {
+    get(target, prop) {
+      if (prop in target) return target[prop as keyof typeof target];
+      // `then` must read as undefined, or awaiting the mock would throw.
+      if (prop === "then" || typeof prop === "symbol") return undefined;
+      throw new Error(`${name}.${String(prop)} was accessed but not mocked`);
+    },
+  }) as T;
+}
 
 export function noopLogger(): Logger {
   const logger: Logger = {
@@ -44,6 +68,14 @@ export function noopLogger(): Logger {
   return logger;
 }
 
+/** Always reports no mismatch; tests exercising the checker's own behavior
+ * live in HostnameHealthChecker.test.ts. */
+export function mockHostnameHealthChecker(): HostnameHealthChecker {
+  return strictMock<HostnameHealthChecker>("HostnameHealthChecker", {
+    checkHostname: () => Promise.resolve(null),
+  });
+}
+
 /** Recorded warns let tests assert log-backstop behaviour. */
 export function recordingLogger(): { logger: Logger; warns: string[] } {
   const warns: string[] = [];
@@ -53,6 +85,33 @@ export function recordingLogger(): { logger: Logger; warns: string[] } {
     child: () => logger,
   };
   return { logger, warns };
+}
+
+/** Captures every level with its message and meta, for asserting on what an
+ * operator would actually see in the logs. */
+export function capturingLogger(): {
+  logger: Logger;
+  lines: { level: string; message: string; meta?: Record<string, unknown> }[];
+} {
+  const lines: {
+    level: string;
+    message: string;
+    meta?: Record<string, unknown>;
+  }[] = [];
+
+  const at =
+    (level: string) => (message: string, meta?: Record<string, unknown>) => {
+      lines.push({ level, message, meta });
+    };
+
+  const logger: Logger = {
+    debug: at("debug"),
+    info: at("info"),
+    warn: at("warn"),
+    error: at("error"),
+    child: () => logger,
+  };
+  return { logger, lines };
 }
 
 export const TEST_CONFIG: ProvisioningConfig = {
@@ -345,6 +404,7 @@ export function mockInstanceRuntime(
     instances?: { name: string; state: ContainerState }[];
     healthFor?: (name: string) => InstanceHealth;
     hasDataFor?: (name: string) => boolean;
+    hasCredentialsFor?: (name: string) => boolean;
     workloadNameFor?: (name: string) => string;
     listError?: Error;
   } = {},
@@ -362,6 +422,8 @@ export function mockInstanceRuntime(
     instanceHealth: (name) =>
       Promise.resolve(opts.healthFor?.(name) ?? "healthy"),
     hasData: (name) => Promise.resolve(opts.hasDataFor?.(name) ?? true),
+    hasCredentials: (name) =>
+      Promise.resolve(opts.hasCredentialsFor?.(name) ?? true),
     listInstances: () =>
       opts.listError
         ? Promise.reject(opts.listError)
@@ -384,7 +446,10 @@ export function mockInstanceRuntime(
         exitError: null,
         recentLogs: "",
       }),
-    stopInstance: () => Promise.resolve(),
+    stopInstance: (name) => {
+      calls.push(`runtime:stopInstance:${name}`);
+      return Promise.resolve();
+    },
     removeInstance: () => {
       calls.push("runtime:removeInstance");
       return Promise.resolve();
@@ -400,7 +465,9 @@ export function mockProvisioningRepo(
   return {
     reserveFriend: (_input: AddFriendInput, _naming: FriendNaming) => {
       calls.push("repo:reserveFriend");
-      return Promise.resolve(reservation);
+      // Fresh copy, matching a real DB read — callers repin tsHostname on
+      // what they're given, which must not leak into the shared fixture.
+      return Promise.resolve({ ...reservation });
     },
     recordAccessKey: () => {
       calls.push("repo:recordAccessKey");
@@ -416,6 +483,10 @@ export function mockProvisioningRepo(
     },
     recordServeNodeId: (_instanceId, serveNodeId) => {
       calls.push(`repo:recordServeNodeId:${serveNodeId}`);
+      return Promise.resolve();
+    },
+    recordConfirmedHostname: (_instanceId, tsHostname) => {
+      calls.push(`repo:recordConfirmedHostname:${tsHostname}`);
       return Promise.resolve();
     },
     setQuota: () => {
@@ -548,6 +619,8 @@ export interface ProvisioningParts {
   /** Invite API; default is unconfigured (authKey-only flow). */
   userInvite?: UserInviteApi;
   config?: Partial<ProvisioningConfig>;
+  /** Default records a request, i.e. the audit webhook worked. */
+  activityStats?: Pick<MinioEventAggregator, "takeActivity">;
 }
 
 export function buildProvisioningService(
@@ -555,12 +628,21 @@ export function buildProvisioningService(
   reservation: InstanceReservation,
   parts: ProvisioningParts = {},
 ): ProvisioningService {
+  // confirmHostname needs a serve node to find; give callers a matching
+  // default unless they pass their own `nodes` to test node state directly.
+  const defaultNode: TailnetNode = {
+    nodeId: "srv-default",
+    hostname: reservation.tsHostname,
+    tags: [],
+    online: true,
+  };
+  const nodes = parts.nodes ?? [defaultNode];
   return new ProvisioningService(
     { ...TEST_CONFIG, ...parts.config },
     mockProvisioningRepo(calls, reservation, parts.repo),
     mockMcFactory({ ...mockMcClient(calls), ...parts.mc }),
     { ...mockInstanceRuntime(calls), ...parts.runtime },
-    { ...mockTailscaleApi(calls, parts.nodes), ...parts.tailscale },
+    { ...mockTailscaleApi(calls, nodes), ...parts.tailscale },
     parts.userInvite ?? new TailscaleUserInviteApi({}),
     {
       generateS3Credential: () => TEST_CRED,
@@ -572,6 +654,17 @@ export function buildProvisioningService(
         return Promise.resolve();
       }),
     },
+    // Only takeActivity is reached from provisioning; the rest of the
+    // aggregator drives itself off an event stream a unit test has no use for.
+    strictMock<MinioEventAggregator>(
+      "MinioEventAggregator",
+      parts.activityStats ?? {
+        takeActivity: (friendId: number) => {
+          calls.push(`audit:takeActivity:${friendId}`);
+          return Promise.resolve({ lastRequestAt: "2026-01-01T00:00:00Z" });
+        },
+      },
+    ),
     noopLogger(),
   );
 }

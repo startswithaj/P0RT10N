@@ -42,6 +42,14 @@ import type {
   ProvisioningRepo,
   SmokeTester,
 } from "./deps.ts";
+import type { MinioEventAggregator } from "../minio-events/MinioEventAggregator.ts";
+
+/** MinIO enqueues audit entries and flushes them from a background goroutine,
+ * so the event has not necessarily reached the manager the instant the smoke
+ * test's `mc` exits. Re-read a few times rather than once: the healthy path
+ * returns on the first attempt and waits not at all. */
+const AUDIT_READ_ATTEMPTS = 5;
+const AUDIT_READ_GAP_MS = 300;
 
 type InstanceRef = {
   instanceId: number;
@@ -77,6 +85,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     private readonly userInvite: UserInviteApi,
     private readonly keyGen: KeyGen,
     private readonly smokeTester: SmokeTester,
+    private readonly aggregator: MinioEventAggregator,
     private readonly logger: Logger,
   ) {}
 
@@ -136,6 +145,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
         instanceState: diag?.state,
         instanceHealth: diag?.health,
         healthReason: diag?.healthReason,
+        podEvents: diag?.events,
       });
       if (diag?.recentLogs) {
         log.debug("instance logs", { logs: diag.recentLogs });
@@ -250,6 +260,56 @@ export class ProvisioningService implements ProvisioningServiceContract {
     };
   }
 
+  /** Pins tsHostname to the instance's current live hostname. */
+  async acceptHostname(friendId: number): Promise<void> {
+    const log = this.logger.child({ op: "acceptHostname", friendId });
+    const ctx = await this.repo.context(friendId);
+    const node = (await this.tailscale.nodesByTag(this.config.serveNodeTag))
+      .find((n) => n.nodeId === ctx.serveNodeId);
+    if (!node) {
+      throw new ServiceError(
+        "INTERNAL_SERVER_ERROR",
+        `instance ${ctx.tsHostname} has no serve node to accept`,
+      );
+    }
+    await this.repo.recordConfirmedHostname(ctx.instanceId, node.hostname);
+    await this.repo.audit(
+      friendId,
+      "instance_hostname_accepted",
+      `${ctx.tsHostname} -> ${node.hostname}`,
+    );
+    log.info("accepted new hostname", {
+      from: ctx.tsHostname,
+      to: node.hostname,
+    });
+  }
+
+  /** Restarts the instance to re-request its pinned hostname. Refuses if
+   * an ONLINE device still holds it — a restart can't fix that. */
+  async retryHostnameClaim(
+    friendId: number,
+  ): Promise<{ reclaimed: boolean; hostname: string }> {
+    const log = this.logger.child({ op: "retryHostnameClaim", friendId });
+    const ctx = await this.repo.context(friendId);
+    const free = await this.reclaimHostnameIfOffline(ctx.tsHostname, log);
+    if (!free) {
+      return { reclaimed: false, hostname: ctx.tsHostname };
+    }
+    await this.runtime.stopInstance(ctx.tsHostname);
+    await this.runtime.ensureRunning(ctx.tsHostname);
+    await this.runtime.waitUntilHealthy(ctx.tsHostname);
+    const confirmed = await this.confirmHostname(
+      ctx.instanceId,
+      ctx.tsHostname,
+      log,
+    );
+    log.info("retried hostname claim", {
+      requested: ctx.tsHostname,
+      confirmed,
+    });
+    return { reclaimed: confirmed === ctx.tsHostname, hostname: confirmed };
+  }
+
   async resendInvite(friendId: number): Promise<void> {
     const ctx = await this.repo.context(friendId);
     if (ctx.enrollmentMode !== "invite" || !ctx.inviteId) {
@@ -350,20 +410,23 @@ export class ProvisioningService implements ProvisioningServiceContract {
       ),
     );
     await this.runtime.waitUntilHealthy(instance.tsHostname);
-    // Record the freshly-enrolled serve node's stable ID (offboard deletes by it).
-    const serveNode =
-      (await this.tailscale.nodesByTag(this.config.serveNodeTag))
-        .find((n) => n.hostname === instance.tsHostname);
-    if (serveNode) {
-      await this.repo.recordServeNodeId(instance.instanceId, serveNode.nodeId);
-    }
-    await this.realignInstanceLocked(instance);
+    // A fresh registration can still land on a collision suffix; everything
+    // below must use the confirmed name, not the requested one.
+    const current: InstanceRef = {
+      ...instance,
+      tsHostname: await this.confirmHostname(
+        instance.instanceId,
+        instance.tsHostname,
+        log,
+      ),
+    };
+    await this.realignInstanceLocked(current);
     // System audit row (friendId null): the event is instance-level and may
     // span several pooled friends.
     await this.repo.audit(
       null,
       "instance_recovered",
-      `${instance.tsHostname} recreated over surviving data`,
+      `${current.tsHostname} recreated over surviving data`,
     );
     if (this.config.aclMode === "manual") {
       log.warn(
@@ -374,6 +437,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log.info("instance recreated over existing data");
   }
 
+  /** Frees tsHostname unconditionally — only call when the caller already
+   * has independent proof (e.g. container confirmed gone) that nothing is
+   * really alive behind it; Tailscale's `online` flag lags too much to
+   * trust for that call. */
   private async deleteServeNodes(
     tsHostname: string,
     log: Logger,
@@ -390,6 +457,67 @@ export class ProvisioningService implements ProvisioningServiceContract {
         )
       ),
     );
+  }
+
+  /** Frees tsHostname from an OFFLINE serve node before requesting it — an
+   * unfreed name gets silently suffixed. Unlike deleteServeNodes, never
+   * touches an ONLINE holder. Returns whether the name ended up free. */
+  private async reclaimHostnameIfOffline(
+    tsHostname: string,
+    log: Logger,
+  ): Promise<boolean> {
+    const holders = (await this.tailscale.nodesByTag(this.config.serveNodeTag))
+      .filter((n) => n.hostname === tsHostname);
+    const stale = holders.filter((n) => !n.online);
+    const live = holders.filter((n) => n.online);
+    if (live.length > 0) {
+      log.error(
+        "tsHostname is held by an ONLINE device — refusing to delete; " +
+          "this instance may register under a suffixed hostname instead",
+        { tsHostname, nodeIds: live.map((n) => n.nodeId) },
+      );
+    }
+    await Promise.all(
+      stale.map((n) =>
+        this.tailscale.deleteNode(n.nodeId).catch((err) =>
+          log.warn("stale serve node delete failed (continuing)", {
+            nodeId: n.nodeId,
+            error: String(err),
+          })
+        )
+      ),
+    );
+    return live.length === 0;
+  }
+
+  /** Records the serve node's stable ID and repins tsHostname if Tailscale
+   * granted a collision suffix instead of what was requested. Returns the
+   * confirmed hostname. */
+  private async confirmHostname(
+    instanceId: number,
+    requestedHostname: string,
+    log: Logger,
+  ): Promise<string> {
+    const node = (await this.tailscale.nodesByTag(this.config.serveNodeTag))
+      .find((n) =>
+        n.hostname === requestedHostname ||
+        n.hostname.startsWith(`${requestedHostname}-`)
+      );
+    if (!node) {
+      throw new ServiceError(
+        "INTERNAL_SERVER_ERROR",
+        `instance ${requestedHostname} has no serve node yet`,
+      );
+    }
+    await this.repo.recordServeNodeId(instanceId, node.nodeId);
+    if (node.hostname !== requestedHostname) {
+      log.warn("tailscale granted a different hostname than requested", {
+        requested: requestedHostname,
+        actual: node.hostname,
+      });
+      await this.repo.recordConfirmedHostname(instanceId, node.hostname);
+    }
+    return node.hostname;
   }
 
   /** Ensure the serve tag is owned first (auto mode only) — it never appears as
@@ -486,12 +614,19 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log.info("step: ensure instance + ACL");
     // MUST precede minting the friend key: Tailscale rejects an auth key for a
     // tag that isn't yet declared in tagOwners, and ensureFriendAcl declares it.
-    const manualAcl = yield* this.ensureInfraSteps(reservation, aclSrc, log);
+    const { manualAcl, tsHostname } = yield* this.ensureInfraSteps(
+      reservation,
+      aclSrc,
+      log,
+    );
+    // reservation.tsHostname may be stale (Tailscale can grant a collision
+    // suffix); every step below must see the confirmed name instead.
+    const confirmed: InstanceReservation = { ...reservation, tsHostname };
     yield { type: "step", step: "authkey" };
     const enroll = await this.enrollFriend(
       input,
       naming,
-      reservation.friendId,
+      confirmed.friendId,
       log,
     );
     log.info("step: create bucket + user", { bucket: naming.bucket });
@@ -499,21 +634,29 @@ export class ProvisioningService implements ProvisioningServiceContract {
       mc,
       naming,
       cred,
-      reservation.friendId,
+      confirmed.friendId,
       log,
     );
     log.info("step: smoke-test + arm retention/quota");
-    yield* this.smokeAndArmSteps(mc, input, naming, reservation, cred, log);
-    log.info("step: finalize (audit webhook + activate)");
-    yield* this.finalizeSteps(mc, reservation, input, log);
+    const auditWarning = yield* this.smokeAndArmSteps(
+      mc,
+      input,
+      naming,
+      confirmed,
+      cred,
+      log,
+    );
+    log.info("step: finalize (activate)");
+    yield* this.finalizeSteps(confirmed, input, log);
     log.debug("rendering credentials bundle");
     return this.buildAddBundle(
       input,
       naming,
-      reservation,
+      confirmed,
       cred,
       enroll,
       manualAcl,
+      auditWarning,
     );
   }
 
@@ -603,28 +746,27 @@ export class ProvisioningService implements ProvisioningServiceContract {
     reservation: InstanceReservation,
     aclSrc: string,
     log: Logger,
-  ): AsyncGenerator<StepEvent<ProvisionStepKey>, string | undefined> {
+  ): AsyncGenerator<
+    StepEvent<ProvisionStepKey>,
+    { manualAcl: string | undefined; tsHostname: string }
+  > {
     yield { type: "step", step: "instance" };
     await this.ensurePair(reservation, log);
     yield { type: "step", step: "tailnet" };
+    // Caller must use the returned value downstream, not reservation.tsHostname
+    // — Tailscale can grant a collision suffix instead of what was requested.
+    const tsHostname = await this.confirmHostname(
+      reservation.instanceId,
+      reservation.tsHostname,
+      log,
+    );
     // ACL dst must be an IP (Tailscale rejects a MagicDNS FQDN); the node has
     // joined by now (ensurePair waited for healthy), so its IP is assigned.
-    const ip = await this.tailscale.nodeIpv4(reservation.tsHostname);
+    const ip = await this.tailscale.nodeIpv4(tsHostname);
     if (!ip) {
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        `instance ${reservation.tsHostname} has no tailnet IP yet`,
-      );
-    }
-    // Capture the serve node's stable ID now, while it's freshly enrolled and
-    // its hostname is unambiguous — offboard deletes by ID, not hostname.
-    const serveNode =
-      (await this.tailscale.nodesByTag(this.config.serveNodeTag))
-        .find((n) => n.hostname === reservation.tsHostname);
-    if (serveNode) {
-      await this.repo.recordServeNodeId(
-        reservation.instanceId,
-        serveNode.nodeId,
+        `instance ${tsHostname} has no tailnet IP yet`,
       );
     }
     const endpointHostPort = `${ip}:${
@@ -635,14 +777,21 @@ export class ProvisioningService implements ProvisioningServiceContract {
         src: aclSrc,
       });
       // The admin owns their own tags when pasting into their policy.
-      return manualAclInstructions(aclSrc, endpointHostPort, "autogroup:admin");
+      return {
+        manualAcl: manualAclInstructions(
+          aclSrc,
+          endpointHostPort,
+          "autogroup:admin",
+        ),
+        tsHostname,
+      };
     }
     log.debug("applying friend ACL", {
       src: aclSrc,
       endpointHostPort,
     });
     await this.tailscale.ensureFriendAcl(aclSrc, endpointHostPort);
-    return undefined;
+    return { manualAcl: undefined, tsHostname };
   }
 
   private async ensurePair(
@@ -660,6 +809,9 @@ export class ProvisioningService implements ProvisioningServiceContract {
       await this.runtime.waitUntilHealthy(reservation.tsHostname);
       return;
     }
+    // Free an offline squatter (e.g. a friend name reused after removal)
+    // before requesting it — an unfreed hostname gets silently suffixed.
+    await this.reclaimHostnameIfOffline(reservation.tsHostname, log);
     // The instance's own serve key (not the friend's) and the derived root
     // cred travel on the spec in memory only; the runtime picks the secret
     // transport (env-file or Secret).
@@ -705,8 +857,18 @@ export class ProvisioningService implements ProvisioningServiceContract {
     reservation: InstanceReservation,
     cred: S3Credential,
     log: Logger,
-  ): AsyncGenerator<StepEvent<ProvisionStepKey>, void> {
+  ): AsyncGenerator<StepEvent<ProvisionStepKey>, string | undefined> {
     yield { type: "step", step: "smoke" };
+    // Before the smoke test, so its traffic is the first thing audited: a
+    // portion whose webhook is broken then shows no activity from the moment
+    // it exists, instead of looking identical to one nobody has used yet.
+    // Idempotent per instance; the shared pool already has it. Internally
+    // waits for MinIO to be serving again after the restart it triggers.
+    log.debug("configuring audit webhook");
+    await mc.setAuditWebhook(
+      this.config.auditWebhookUrl,
+      this.config.auditWebhookToken,
+    );
     // Smoke-test over the ADMIN endpoint (same MinIO) — the manager isn't on
     // the tailnet and can't reach the serve URL.
     const adminEndpoint = this.runtime.adminEndpoint(
@@ -722,6 +884,11 @@ export class ProvisioningService implements ProvisioningServiceContract {
       bucket: naming.bucket,
       cred,
     });
+    const auditWarning = await this.checkAuditDelivery(
+      reservation.friendId,
+      naming.bucket,
+      log,
+    );
     yield { type: "step", step: "retention" };
     log.debug("arming default retention", {
       bucket: naming.bucket,
@@ -738,21 +905,55 @@ export class ProvisioningService implements ProvisioningServiceContract {
       quotaBytes: input.quotaBytes,
     });
     await mc.setHardQuota(naming.bucket, input.quotaBytes);
+    return auditWarning;
+  }
+
+  /** The smoke test's traffic is the first thing MinIO audits, so a recorded
+   * request proves the webhook reaches the manager. Reading also clears the
+   * row: that traffic is provisioning's own and must not show as the friend's
+   * usage. Never throws — a broken audit pipeline degrades a portion's stats,
+   * it does not stop it backing up. */
+  private async checkAuditDelivery(
+    friendId: number,
+    bucket: string,
+    log: Logger,
+  ): Promise<string | undefined> {
+    const lastRequestAt = await this.readAuditActivity(friendId);
+    if (lastRequestAt) {
+      log.debug("audit delivery confirmed", { bucket });
+      return undefined;
+    }
+    log.warn(
+      "no audit event recorded for the smoke test — portion is degraded " +
+        "(activity stats will stay empty; backups are unaffected)",
+      { bucket, friendId },
+    );
+    return "Audit delivery could not be confirmed during provisioning — " +
+      "activity stats may stay empty until the instance's audit webhook " +
+      "reaches the manager. Backups are unaffected.";
+  }
+
+  /** Reads (and clears) the friend's activity, retrying briefly so a slow
+   * webhook flush isn't mistaken for a broken one. Recursive rather than a
+   * loop, matching `pollHealth` and `McShellClient.awaitReady`. Re-reading is
+   * safe: takeActivity is read-then-delete, so a delete on an empty row is a
+   * no-op and an event landing between attempts is caught by the next one. */
+  private async readAuditActivity(
+    friendId: number,
+    attemptsLeft = AUDIT_READ_ATTEMPTS,
+  ): Promise<string | null> {
+    const { lastRequestAt } = await this.aggregator.takeActivity(friendId);
+    if (lastRequestAt || attemptsLeft <= 1) return lastRequestAt;
+    await new Promise((resolve) => setTimeout(resolve, AUDIT_READ_GAP_MS));
+    return this.readAuditActivity(friendId, attemptsLeft - 1);
   }
 
   private async *finalizeSteps(
-    mc: McClient,
     reservation: InstanceReservation,
     input: AddFriendInput,
     log: Logger,
   ): AsyncGenerator<StepEvent<ProvisionStepKey>, void> {
     yield { type: "step", step: "finalize" };
-    log.debug("configuring audit webhook");
-    // Idempotent per instance; the shared pool already has it.
-    await mc.setAuditWebhook(
-      this.config.auditWebhookUrl,
-      this.config.auditWebhookToken,
-    );
     log.debug("activating friend", {
       friendId: reservation.friendId,
       instanceId: reservation.instanceId,
@@ -1242,6 +1443,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
     cred: S3Credential,
     enroll: EnrollmentResult,
     manualAclInstructions?: string,
+    auditWarning?: string,
   ): Promise<FriendBundle> {
     const endpoint = await this.endpointFor(reservation.tsHostname);
     const base: FriendBundle = {
@@ -1263,11 +1465,18 @@ export class ProvisioningService implements ProvisioningServiceContract {
           : kopiaInviteJoinLines(),
       }),
     };
+    // Audit degradation isn't enrollment-specific, so it applies to both.
+    const warnings = [
+      enroll.mode === "invite" ? enroll.warning : undefined,
+      auditWarning,
+    ]
+      .filter((w): w is string => w !== undefined);
     if (enroll.mode === "authKey") {
       return {
         ...base,
         tsAuthKey: enroll.tsAuthKey,
         tailscaleUpCommand: `tailscale up --authkey=${enroll.tsAuthKey}`,
+        warnings: warnings.length > 0 ? warnings : undefined,
       };
     }
     return {
@@ -1276,7 +1485,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
       inviteUrl: enroll.inviteUrl,
       inviteEmailedAt: enroll.inviteEmailedAt,
       manualInviteInstructions: enroll.manualInstructions,
-      warnings: enroll.warning ? [enroll.warning] : undefined,
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
   }
 

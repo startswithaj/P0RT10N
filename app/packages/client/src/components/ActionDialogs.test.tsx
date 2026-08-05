@@ -12,6 +12,8 @@ vi.mock("../trpc.ts", () => ({
       resendInvite: { mutate: vi.fn() },
       resize: { mutate: vi.fn() },
       offboardStart: { mutate: vi.fn() },
+      acceptHostname: { mutate: vi.fn() },
+      retryHostnameClaim: { mutate: vi.fn() },
     },
     jobs: { progress: { subscribe: vi.fn() } },
   },
@@ -26,6 +28,7 @@ import { RotateS3Dialog } from "./RotateS3Dialog.tsx";
 import { RotateTsDialog } from "./RotateTsDialog.tsx";
 import { ResendInviteDialog } from "./ResendInviteDialog.tsx";
 import { OffboardDialog } from "./OffboardDialog.tsx";
+import { HostnameMismatchDialog } from "./HostnameMismatchDialog.tsx";
 
 const { mutateOf } = vi.hoisted(() => ({
   // deno-lint-ignore no-explicit-any -- The mocked mutate is a vi.fn under a real tRPC type.
@@ -132,6 +135,103 @@ describe("SuspendDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(await screen.findByText("boom")).toBeInTheDocument();
     create.mockRestore();
+  });
+});
+
+describe("HostnameMismatchDialog", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const friend = () =>
+    makeFriend({
+      id: 9,
+      name: "bob",
+      hostnameWarning: "p0rt1on-bob-1 is currently reachable at p0rt1on-bob",
+    });
+
+  it("accept: mutate → success toast → invalidate → close", async () => {
+    mutateOf(trpc.friends.acceptHostname.mutate).mockResolvedValue(undefined);
+    const create = vi.spyOn(toaster, "create");
+    const onClose = vi.fn();
+    render(() => (
+      <HostnameMismatchDialog
+        friend={friend()}
+        onClose={onClose}
+      />
+    ));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Accept new hostname" }),
+    );
+
+    await waitFor(() =>
+      expect(trpc.friends.acceptHostname.mutate).toHaveBeenCalledWith({
+        friendId: 9,
+      })
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "success",
+        title: "Accepted the new hostname for bob",
+      }),
+    );
+    create.mockRestore();
+  });
+
+  it("retry: reclaimed → success toast → close", async () => {
+    mutateOf(trpc.friends.retryHostnameClaim.mutate).mockResolvedValue({
+      reclaimed: true,
+      hostname: "p0rt1on-bob",
+    });
+    const create = vi.spyOn(toaster, "create");
+    const onClose = vi.fn();
+    render(() => (
+      <HostnameMismatchDialog
+        friend={friend()}
+        onClose={onClose}
+      />
+    ));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry hostname claim" }),
+    );
+
+    await waitFor(() =>
+      expect(trpc.friends.retryHostnameClaim.mutate).toHaveBeenCalledWith({
+        friendId: 9,
+      })
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "success",
+        title: "Reclaimed the original hostname for bob",
+      }),
+    );
+    create.mockRestore();
+  });
+
+  it("retry: still held online → inline error, stays open", async () => {
+    mutateOf(trpc.friends.retryHostnameClaim.mutate).mockResolvedValue({
+      reclaimed: false,
+      hostname: "p0rt1on-bob-1",
+    });
+    const onClose = vi.fn();
+    render(() => (
+      <HostnameMismatchDialog
+        friend={friend()}
+        onClose={onClose}
+      />
+    ));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry hostname claim" }),
+    );
+
+    expect(
+      await screen.findByText(/Still held by another device/),
+    ).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

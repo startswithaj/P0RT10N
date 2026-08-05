@@ -52,6 +52,18 @@ export const friendsRouter = router({
       ctx.provisioningService.reissueTsKey(input.friendId)
     ),
 
+  acceptHostname: protectedProcedure
+    .input(getFriendInput)
+    .mutation(({ ctx, input }) =>
+      ctx.provisioningService.acceptHostname(input.friendId)
+    ),
+
+  retryHostnameClaim: protectedProcedure
+    .input(getFriendInput)
+    .mutation(({ ctx, input }) =>
+      ctx.provisioningService.retryHostnameClaim(input.friendId)
+    ),
+
   capabilities: protectedProcedure.query(({ ctx }) => ctx.capabilities),
 
   inviteStatus: protectedProcedure

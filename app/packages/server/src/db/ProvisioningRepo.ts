@@ -91,6 +91,16 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
     });
   }
 
+  recordConfirmedHostname(
+    instanceId: number,
+    tsHostname: string,
+  ): Promise<void> {
+    return defer(() => {
+      this.db.update(instances).set({ tsHostname })
+        .where(eq(instances.id, instanceId)).run();
+    });
+  }
+
   setQuota(friendId: number, quotaBytes: number): Promise<void> {
     return defer(() => {
       this.db.update(friends).set({ quotaBytes })
@@ -230,6 +240,7 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
       tsHostname: string;
       minioPort: number;
       status: string;
+      serveNodeId: string | null;
     }[]
   > {
     return defer(() =>
@@ -238,6 +249,7 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
         tsHostname: instances.tsHostname,
         minioPort: instances.minioPort,
         status: instances.status,
+        serveNodeId: instances.serveNodeId,
       }).from(instances).where(ne(instances.status, "failed")).all()
     );
   }

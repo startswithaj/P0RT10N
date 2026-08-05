@@ -3,6 +3,7 @@ import { css } from "styled-system/css";
 import { Activity, Lock, TriangleAlert } from "lucide-solid";
 import * as Card from "./ui/card.tsx";
 import { Badge } from "./ui/badge.tsx";
+import { Button } from "./ui/button.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { InviteStatusBadge } from "./InviteStatusBadge.tsx";
 import { PortionMenu } from "./PortionMenu.tsx";
@@ -59,6 +60,17 @@ export function PortionCard(
             <Lock size={14} /> {props.friend.lockRetentionDays}d
           </span>
         </div>
+        <Show when={props.friend.hostnameWarning}>
+          <Button
+            variant="link"
+            size="2xs"
+            class={css({ color: "warning", justifyContent: "flex-start" })}
+            onClick={() =>
+              props.onAction({ friend: props.friend, kind: "hostname-issue" })}
+          >
+            <TriangleAlert size={14} /> Hostname mismatch
+          </Button>
+        </Show>
         <div
           class={css({
             display: "flex",

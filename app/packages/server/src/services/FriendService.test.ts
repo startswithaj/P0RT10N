@@ -14,6 +14,7 @@ import {
   buildProvisioningService,
   type Calls,
   DEDICATED_RES,
+  mockHostnameHealthChecker,
   mockMcClient,
   mockMcFactory,
   mockTailscaleApi,
@@ -93,6 +94,7 @@ describe("FriendServiceImpl", () => {
       mockMcFactory(mockMcClient(calls)),
       mockTailscaleApi(calls, nodes),
       serveMode,
+      mockHostnameHealthChecker(),
       noopLogger(),
     );
     return { calls, service };
@@ -137,6 +139,7 @@ describe("FriendServiceImpl", () => {
       // The node isn't registered, so nodeFqdn is null; with no composed guess, the error surfaces instead.
       { ...mockTailscaleApi(calls, []), nodeFqdn: () => Promise.resolve(null) },
       "https",
+      mockHostnameHealthChecker(),
       noopLogger(),
     );
     await expect(service.get(res.friendId)).rejects.toThrow(
@@ -232,6 +235,7 @@ describe("FriendServiceImpl", () => {
       mockMcFactory(mockMcClient(calls)),
       brokenTs,
       "https",
+      mockHostnameHealthChecker(),
       noopLogger(),
     );
 
@@ -265,6 +269,7 @@ describe("FriendServiceImpl", () => {
       mockMcFactory(brokenMc),
       mockTailscaleApi(calls),
       "https",
+      mockHostnameHealthChecker(),
       noopLogger(),
     );
 

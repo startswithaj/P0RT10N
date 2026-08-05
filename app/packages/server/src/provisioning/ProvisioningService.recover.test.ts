@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
 import {
@@ -8,11 +8,13 @@ import {
 } from "../test-helpers/mocks.ts";
 
 describe("ProvisioningService boot recovery", () => {
-  const instance = {
-    instanceId: 1,
-    tsHostname: "p0rt1on-alice",
-    minioPort: 9100,
-  };
+  // Reassigned fresh before each test: recoverInstanceLocked repins
+  // tsHostname on whatever it's given, so a reused object would leak state
+  // across tests.
+  let instance: { instanceId: number; tsHostname: string; minioPort: number };
+  beforeEach(() => {
+    instance = { instanceId: 1, tsHostname: "p0rt1on-alice", minioPort: 9100 };
+  });
 
   // A serve node still holding the hostname on the tailnet (the DR case).
   const staleNode = (): TailnetNode[] => [
@@ -47,6 +49,24 @@ describe("ProvisioningService boot recovery", () => {
     expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("ts:ensureFriendAcl");
     // Recorded in the audit trail so the recovery is visible after the fact.
+    expect(calls).toContain("repo:audit:instance_recovered");
+  });
+
+  it("recover repins tsHostname when the fresh registration lands on a collision-suffixed name", async () => {
+    const calls: Calls = [];
+    // Nothing holds the bare name anymore (already freed/expired elsewhere);
+    // the fresh registration still lands on "-1" because something else
+    // claimed the bare name in the interim.
+    const nodes: TailnetNode[] = [
+      { nodeId: "new", hostname: "p0rt1on-alice-1", tags: [], online: true },
+    ];
+    await buildProvisioningService(calls, DEDICATED_RES, {
+      nodes,
+      repo: oneFriend,
+    }).recoverInstance(instance);
+
+    expect(calls).toContain("repo:recordServeNodeId:new");
+    expect(calls).toContain("repo:recordConfirmedHostname:p0rt1on-alice-1");
     expect(calls).toContain("repo:audit:instance_recovered");
   });
 

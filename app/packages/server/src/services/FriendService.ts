@@ -4,6 +4,7 @@ import type { McClientFactory } from "../minio/mc.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
 import { serveEndpoint } from "../tailscale/serveEndpoint.ts";
 import type { ProvisioningRepo } from "../provisioning/deps.ts";
+import type { HostnameHealthChecker } from "../provisioning/HostnameHealthChecker.ts";
 import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
 import type { FriendService, Logger } from "./types.ts";
 
@@ -15,11 +16,21 @@ export class FriendServiceImpl implements FriendService {
     private readonly tailscale: TailscaleApi,
     /** Endpoint scheme that must match how instances actually serve. */
     private readonly serveMode: "https" | "http",
+    private readonly hostnameChecker: HostnameHealthChecker,
     private readonly logger: Logger,
   ) {}
 
   list(): Promise<FriendListItem[]> {
-    return this.queries.list();
+    return this.queries.list().then((rows) =>
+      Promise.all(rows.map(async (r) => ({
+        ...r,
+        hostnameWarning: await this.hostnameChecker.checkHostname(
+          r.instanceId,
+          r.tsHostname,
+          r.serveNodeId,
+        ),
+      })))
+    );
   }
 
   async get(friendId: number): Promise<FriendDetail> {

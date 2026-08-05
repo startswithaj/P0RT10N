@@ -78,7 +78,9 @@ describe("app wiring (tRPC caller over a real DB)", () => {
     );
     await expect(
       caller.friends.add(makeAddInput("dave", "dedicated")),
-    ).rejects.toThrow("tailscale GET /tailnet/-/acl failed (401)");
+      // confirmHostname's device lookup now runs before the ACL step, so
+      // that's the first real Tailscale call this reaches and fails on.
+    ).rejects.toThrow("tailscale GET /tailnet/-/devices failed (401)");
     // resize hits mc first, which has no binary in the unit env.
     await expect(caller.friends.resize({ friendId, quotaBytes: 2048 }))
       .rejects.toThrow("Failed to spawn 'mc'");

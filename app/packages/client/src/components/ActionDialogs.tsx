@@ -6,6 +6,7 @@ import { SuspendDialog } from "./SuspendDialog.tsx";
 import { ResumeDialog } from "./ResumeDialog.tsx";
 import { ResendInviteDialog } from "./ResendInviteDialog.tsx";
 import { OffboardDialog } from "./OffboardDialog.tsx";
+import { HostnameMismatchDialog } from "./HostnameMismatchDialog.tsx";
 import type { AddBundle, Pending } from "./action-dialog-shared.ts";
 
 /**
@@ -45,6 +46,12 @@ export function ActionDialogs(props: {
           </Match>
           <Match when={p().kind === "offboard"}>
             <OffboardDialog friend={p().friend} onClose={props.onClose} />
+          </Match>
+          <Match when={p().kind === "hostname-issue"}>
+            <HostnameMismatchDialog
+              friend={p().friend}
+              onClose={props.onClose}
+            />
           </Match>
         </Switch>
       )}

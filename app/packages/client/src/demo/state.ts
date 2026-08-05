@@ -145,6 +145,7 @@ export const toListItem = (f: DemoFriend): FriendListItem => ({
   lastRequestAt: f.activity.lastRequestAt,
   enrollmentMode: f.enrollmentMode,
   inviteStatus: f.inviteStatus,
+  hostnameWarning: null,
 });
 
 export const toDetail = (f: DemoFriend): FriendDetail => ({

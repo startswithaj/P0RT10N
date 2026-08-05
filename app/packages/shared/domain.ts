@@ -45,6 +45,12 @@ export const AUDIT_ACTION_VALUES = [
   "offboard",
   "instance_recovered",
   "instance_data_lost",
+  // The instance's serve node couldn't reclaim its assigned tailnet hostname
+  // because another ONLINE device holds it — a real, unexplained collision,
+  // not a stale leftover. The instance may be reachable on a different
+  // (suffixed) hostname than its bundle promised.
+  "instance_hostname_unclaimed",
+  "instance_hostname_accepted",
   "login",
   "logout",
   // Recorded for any admin mutation that errors; the failing path and reason
@@ -297,6 +303,7 @@ export type FriendListItem = {
   enrollmentMode: EnrollmentMode;
   /** Null for authKey friends, since only invite enrollment has an invite to track. */
   inviteStatus: InviteStatus | null;
+  hostnameWarning: string | null;
 };
 
 export type FriendDetail = {
@@ -343,7 +350,11 @@ export type HealthCheckId =
   | "tailscaleApi"
   | "magicDns"
   | "serveTag"
-  | "httpsServe";
+  | "httpsServe"
+  | "managerService"
+  | "instanceImage"
+  | "pantry"
+  | "podSecurity";
 export type HealthCheck = {
   id: HealthCheckId;
   status: HealthStatus;

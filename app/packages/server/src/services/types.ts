@@ -47,6 +47,10 @@ export interface ProvisioningService {
   /** Rate-limited to 1 per minute. */
   resendInvite(friendId: number): Promise<void>;
   inviteStatus(friendId: number): Promise<InviteStatusView>;
+  acceptHostname(friendId: number): Promise<void>;
+  retryHostnameClaim(
+    friendId: number,
+  ): Promise<{ reclaimed: boolean; hostname: string }>;
 }
 
 export interface UsageService {

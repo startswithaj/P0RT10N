@@ -49,11 +49,23 @@ export class FriendQueries {
   // Each query is a synchronous SQLite read exposed as a Promise via defer(),
   // so a throw rejects instead of escaping synchronously.
 
-  list(): Promise<FriendListItem[]> {
+  // instanceId/tsHostname/serveNodeId ride along for FriendServiceImpl's
+  // hostname check — not part of the public FriendListItem type.
+  list(): Promise<
+    (FriendListItem & {
+      instanceId: number;
+      tsHostname: string;
+      serveNodeId: string | null;
+    })[]
+  > {
     return defer(() => this.listSync());
   }
 
-  private listSync(): FriendListItem[] {
+  private listSync(): (FriendListItem & {
+    instanceId: number;
+    tsHostname: string;
+    serveNodeId: string | null;
+  })[] {
     const rows = this.db.select({
       id: friends.id,
       name: friends.name,
@@ -66,8 +78,12 @@ export class FriendQueries {
       inviteStatus: friends.inviteStatus,
       requestBuckets: activity.requestBuckets,
       lastRequestAt: activity.lastRequestAt,
+      instanceId: friends.instanceId,
+      tsHostname: instances.tsHostname,
+      serveNodeId: instances.serveNodeId,
     }).from(friends)
       .leftJoin(activity, eq(activity.friendId, friends.id))
+      .innerJoin(instances, eq(friends.instanceId, instances.id))
       // Stable creation order (id breaks same-timestamp ties).
       .orderBy(friends.createdAt, friends.id)
       .all();
@@ -86,6 +102,10 @@ export class FriendQueries {
       lastRequestAt: r.lastRequestAt ?? null,
       enrollmentMode: r.enrollmentMode,
       inviteStatus: r.inviteStatus as FriendListItem["inviteStatus"],
+      hostnameWarning: null,
+      instanceId: r.instanceId,
+      tsHostname: r.tsHostname,
+      serveNodeId: r.serveNodeId,
     }));
   }
 

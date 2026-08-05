@@ -320,6 +320,15 @@ export const mutationHandlers: MutationHandlers = {
     // This mutation returns void in the real API, so there is nothing to return here.
   },
 
+  // Demo friends never carry a hostname mismatch, so these are no-ops that
+  // just satisfy the type — nothing in demo state models the real behavior.
+  "friends.acceptHostname": () => {},
+
+  "friends.retryHostnameClaim": (input) => {
+    const f = requireFriend(getDemoState(), input.friendId);
+    return { reclaimed: true, hostname: f.name };
+  },
+
   "jobs.claimBundle": (input) => {
     const job = getDemoState().jobs[input.jobId];
     if (!job || !job.bundle) {

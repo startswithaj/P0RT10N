@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import { OFFBOARD_STEPS, PROVISION_STEPS } from "@p0rt1on/shared/domain";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
 import type { InstanceSpec } from "../runtime/runtime.ts";
@@ -26,6 +27,13 @@ describe("ProvisioningService.addFriend", () => {
       calls.indexOf("mc:setDefaultRetention"),
     );
     expect(calls.indexOf("mc:makeBucketWithLock")).toBeLessThan(
+      calls.indexOf("smoke:run"),
+    );
+    // The audit webhook must be configured BEFORE the smoke test, so the
+    // smoke traffic is itself audited. Configured after, a portion records no
+    // activity until its first real backup, making a broken webhook
+    // indistinguishable from a friend who simply hasn't used it yet.
+    expect(calls.indexOf("mc:setAuditWebhook")).toBeLessThan(
       calls.indexOf("smoke:run"),
     );
     expect(calls).toContain("runtime:ensureInstance");
@@ -75,6 +83,38 @@ describe("ProvisioningService.addFriend", () => {
       .addFriend(ADD_INPUT);
 
     expect(calls).toContain("repo:recordServeNodeId:srv1");
+  });
+
+  it("repins tsHostname when Tailscale grants a collision-suffixed name", async () => {
+    const calls: Calls = [];
+    // Tailscale requested "p0rt1on-alice" but granted "-1" — something else
+    // already held the bare name at registration time.
+    const nodes: TailnetNode[] = [
+      { nodeId: "srv1", hostname: "p0rt1on-alice-1", tags: [], online: true },
+    ];
+    const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
+      nodes,
+    })
+      .addFriend(ADD_INPUT);
+
+    expect(calls).toContain("repo:recordConfirmedHostname:p0rt1on-alice-1");
+    // Every downstream use of the hostname (here: the bundle's own endpoint)
+    // must see the confirmed name, not the one that was merely requested.
+    expect(bundle.s3Endpoint).toBe("https://p0rt1on-alice-1.tailnet.ts.net");
+  });
+
+  it("does not repin tsHostname when Tailscale grants exactly what was requested", async () => {
+    const calls: Calls = [];
+    const nodes: TailnetNode[] = [
+      { nodeId: "srv1", hostname: "p0rt1on-alice", tags: [], online: true },
+    ];
+    await buildProvisioningService(calls, DEDICATED_RES, { nodes })
+      .addFriend(ADD_INPUT);
+
+    expect(calls.some((c) => c.startsWith("repo:recordConfirmedHostname")))
+      .toBe(
+        false,
+      );
   });
 
   it("auto ACL mode edits the tailnet policy; no manual instructions", async () => {
@@ -727,5 +767,64 @@ describe("ProvisioningService.offboardStream", () => {
     expect(error).toBeNull();
     expect(stepKeys(events)).toEqual(OFFBOARD_STEPS.map((s) => s.key));
     expect(events.at(-1)?.type).toBe("done");
+  });
+});
+
+describe("ProvisioningService audit-delivery check", () => {
+  it("clears the smoke test's activity so it never shows as the friend's usage", async () => {
+    const calls: Calls = [];
+    await buildProvisioningService(calls, DEDICATED_RES).addFriend(ADD_INPUT);
+
+    // takeActivity both reads and clears; provisioning's own traffic must not
+    // look like the friend has already started backing up.
+    expect(calls).toContain(`audit:takeActivity:${DEDICATED_RES.friendId}`);
+    expect(calls.indexOf("smoke:run")).toBeLessThan(
+      calls.indexOf(`audit:takeActivity:${DEDICATED_RES.friendId}`),
+    );
+  });
+
+  it("degrades the portion when the smoke test recorded no audit event", async () => {
+    const calls: Calls = [];
+    const bundle = await buildProvisioningService(calls, DEDICATED_RES, {
+      activityStats: {
+        takeActivity: () => Promise.resolve({ lastRequestAt: null }),
+      },
+    }).addFriend(ADD_INPUT);
+
+    // Provisioning still succeeded — broken audit is a stats problem only.
+    expect(calls).toContain("repo:activate");
+    expect(bundle.warnings?.[0]).toContain("Audit delivery");
+    expect(bundle.warnings?.[0]).toContain("Backups are unaffected");
+  });
+
+  it("retries a briefly-empty read rather than calling a slow webhook broken", async () => {
+    // MinIO flushes audit entries from a background queue, so the first read
+    // can land before the event does. Only the first attempt is empty here.
+    // FakeTime drives the retry gap virtually — no real wall-clock wait.
+    using time = new FakeTime();
+    let reads = 0;
+    const pending = buildProvisioningService([], DEDICATED_RES, {
+      activityStats: {
+        takeActivity: () => {
+          reads += 1;
+          return Promise.resolve({
+            lastRequestAt: reads === 1 ? null : "2026-01-01T00:00:00Z",
+          });
+        },
+      },
+    }).addFriend(ADD_INPUT);
+
+    await time.runMicrotasks();
+    await time.tickAsync(1000);
+    const bundle = await pending;
+
+    expect(reads).toBe(2);
+    expect(bundle.warnings).toBeUndefined();
+  });
+
+  it("no warning when the smoke test's traffic was audited", async () => {
+    const bundle = await buildProvisioningService([], DEDICATED_RES)
+      .addFriend(ADD_INPUT);
+    expect(bundle.warnings).toBeUndefined();
   });
 });

@@ -52,7 +52,8 @@ export type ActionKind =
   | "suspend"
   | "resume"
   | "resend-invite"
-  | "offboard";
+  | "offboard"
+  | "hostname-issue";
 export type Pending = { friend: FriendRow; kind: ActionKind };
 
 /** Offboard streams progress; the other dialogs' actions just mutate. */

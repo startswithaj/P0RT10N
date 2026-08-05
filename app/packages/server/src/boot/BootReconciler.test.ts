@@ -17,6 +17,7 @@ describe("BootReconciler", () => {
     tsHostname: "alice",
     minioPort: 9100,
     status: "active",
+    serveNodeId: null,
   };
   const running = { name: "alice", state: "running" as ContainerState };
   const stopped = { name: "alice", state: "stopped" as ContainerState };
@@ -28,6 +29,7 @@ describe("BootReconciler", () => {
       instances?: { name: string; state: ContainerState }[];
       healthFor?: (name: string) => "healthy" | "unhealthy";
       hasDataFor?: (name: string) => boolean;
+      hasCredentialsFor?: (name: string) => boolean;
       listError?: Error;
       repo?: Partial<ProvisioningRepo>;
     } = {},
@@ -90,6 +92,23 @@ describe("BootReconciler", () => {
     expect(summary.recovered).toBe(1);
     expect(calls).toContain("ops:recover:alice");
     // When data survives, the instance is never marked failed or realigned separately.
+    expect(calls.some((c) => c.startsWith("repo:failInstanceMissing")))
+      .toBe(false);
+  });
+
+  it("running but its credentials Secret is gone: recreates instead of waiting it out", async () => {
+    // Deleting the Secret leaves the StatefulSet up but its pod unable to
+    // start, which no amount of health-waiting fixes. Recovery re-applies it.
+    const calls: Calls = [];
+    const summary = await build(calls, {
+      hasCredentialsFor: () => false,
+    }).run();
+
+    expect(summary.recovered).toBe(1);
+    expect(calls).toContain("ops:recover:alice");
+    // The bounded health wait is skipped entirely — it could never succeed.
+    expect(calls).not.toContain("runtime:ensureRunning:alice");
+    // Never marked failed: failed feeds the sweep, which deletes data.
     expect(calls.some((c) => c.startsWith("repo:failInstanceMissing")))
       .toBe(false);
   });

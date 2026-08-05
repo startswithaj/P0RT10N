@@ -73,6 +73,8 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   offboard: "Offboarded",
   instance_recovered: "Recovered",
   instance_data_lost: "Data lost",
+  instance_hostname_unclaimed: "Hostname mismatch",
+  instance_hostname_accepted: "Hostname accepted",
   login: "Signed in",
   logout: "Signed out",
   action_failed: "Failed",

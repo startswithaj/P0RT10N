@@ -192,6 +192,10 @@ is required; its shape depends on the runtime.
   - `dedicated` — one friend per instance.
   - `shared` — one pooled instance; buckets split by MinIO IAM + Tailscale ACLs.
 
+Server-side test mocks: for a class/type a test only reaches a method or two of,
+use `strictMock<T>(name, partial)` from `test-helpers/mocks.ts` — it throws on
+any unmocked access, instead of a hand-rolled `as unknown as T`.
+
 ## UI
 
 ### Use Park UI components — never hand-rolled / native

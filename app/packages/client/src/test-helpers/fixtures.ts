@@ -28,6 +28,7 @@ export function makeFriend(
     lastRequestAt: null,
     enrollmentMode: "authKey",
     inviteStatus: null,
+    hostnameWarning: null,
     ...overrides,
   };
 }
