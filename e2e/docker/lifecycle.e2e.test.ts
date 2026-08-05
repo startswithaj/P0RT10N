@@ -12,6 +12,7 @@ import {
   sha256Hex,
   trpcClient,
   until,
+  VERIFY_REPOSITORY,
 } from "../helpers.ts";
 
 describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
@@ -79,6 +80,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
       // Both env files hold live secrets, so they must be removed even if
       // the test throws mid-flow.
       let friendEnv: string | null = null;
+      let verifyEnv: string | null = null;
 
       const trpc = trpcClient(base);
 
@@ -121,6 +123,24 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
           password: adminPass,
         });
 
+        // Only this suite can say anything true about these: headscale fakes
+        // the same reads, so they are trivially "ok" in the k8s suite.
+        const health = await trpc("status.recheckHealth", {}) as {
+          canProvision: boolean;
+          checks: { id: string; status: string; detail: string }[];
+        };
+        const check = (id: string) => health.checks.find((c) => c.id === id);
+        // Both gate provisioning: no MagicDNS means no stable name to serve
+        // on, no certificates means serve can't do HTTPS.
+        expect(check("magicDns")?.status).toBe("ok");
+        expect(check("httpsServe")?.status).toBe("ok");
+        expect(check("tailscaleApi")?.status).toBe("ok");
+        expect(check("serveTag")?.status).toBe("ok");
+        // The pantry is a host path here, so the check must be absent rather
+        // than falsely passing.
+        expect(check("pantry")).toBeUndefined();
+        expect(health.canProvision).toBe(true);
+
         const { jobId } = await trpc("friends.addStart", {
           name: portion,
           isolationMode: "dedicated",
@@ -151,19 +171,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         const canaryPayload = "p0rt1on-canary";
         friendEnv = await writeEnvFile(
           Object.entries(
-            friendClientEnv(bundle, {
-              PAYLOAD: canaryPayload,
-              // VERIFY_RESTORE checks the snapshot is intact and retrievable
-              // straight from the repository (safe on live data). DIFF
-              // additionally restores it and compares byte-for-byte against
-              // BACKUP_PATH — only safe here because nothing else touches
-              // /backup after the seed step. VERBOSE prints a checksum per
-              // restored file so this test can assert on it below,
-              // independent of the entrypoint's own pass/fail logic.
-              VERIFY_RESTORE: "1",
-              VERIFY_RESTORE_DIFF: "1",
-              VERIFY_RESTORE_VERBOSE: "1",
-            }),
+            friendClientEnv(bundle, { PAYLOAD: canaryPayload }),
           )
             .map(([k, v]) => `${k}=${v}`).join("\n") + "\n",
         );
@@ -182,17 +190,47 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         if (backup.code !== 0) {
           console.error("friend backup log:\n", backup.stdout, backup.stderr);
         }
-        // Exit 0 now means Kopia connected over the tailnet, wrote a
-        // snapshot, the repository copy verified intact, AND a restore of
-        // it matched BACKUP_PATH byte for byte.
+        // Exit 0 only means Kopia wrote a snapshot; whether it READS BACK is
+        // proved below, not by the client grading its own work.
         expect(backup.code).toBe(0);
-        // Independent of entrypoint.sh's own pass/fail logic: recompute the
-        // canary's checksum here and require the exact line the restore step
-        // printed, so a broken verify inside the image (e.g. one that always
-        // logs success) can't silently pass this test.
-        const canaryHash = await sha256Hex(canaryPayload);
-        expect(backup.stdout).toContain(
-          `VERIFY_RESTORE_DIFF: sha256(canary.txt)=${canaryHash}`,
+
+        // A throwaway container on the same network runs stock kopia straight
+        // at the instance, so the shipped entrypoint.sh stays test-free.
+        const instancePort = ((await trpc("status.get")) as {
+          minio: { detail: string }[];
+        }).minio[0].detail.split(":").pop()?.trim();
+        expect(instancePort).toBeTruthy();
+        verifyEnv = await writeEnvFile(
+          Object.entries({
+            ...friendClientEnv(bundle),
+            S3_ENDPOINT:
+              `http://p0rt1on-instance-p0rt1on-${portion}:${instancePort}`,
+            // Kopia scopes snapshots by user@host; the backup defaulted this
+            // to the bucket name, so a mismatch would verify nothing.
+            TAILSCALE_HOSTNAME: bundle.bucket,
+          }).map(([k, v]) => `${k}=${v}`).join("\n") + "\n",
+        );
+        const verify = await docker([
+          "run",
+          "--rm",
+          "--env-file",
+          verifyEnv,
+          "--network",
+          network,
+          "--entrypoint",
+          "sh",
+          Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE,
+          "-c",
+          VERIFY_REPOSITORY,
+        ]);
+        if (verify.code !== 0) {
+          console.error("verify log:\n", verify.stdout, verify.stderr);
+        }
+        expect(verify.code).toBe(0);
+        // The hash, not just the exit code: an always-succeeding verifier
+        // would still have to produce the canary's real checksum.
+        expect(verify.stdout).toContain(
+          `canary-sha256=${await sha256Hex(canaryPayload)}`,
         );
 
         // Waits for offboard to finish, because tearing down while the job
@@ -223,6 +261,7 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         await docker(["rm", "-f", `p0rt1on-instance-p0rt1on-${portion}`]);
         await Deno.remove(managerEnv).catch(() => undefined);
         if (friendEnv) await Deno.remove(friendEnv).catch(() => undefined);
+        if (verifyEnv) await Deno.remove(verifyEnv).catch(() => undefined);
         await Deno.remove(pantry, { recursive: true }).catch(() => undefined);
       }
     },

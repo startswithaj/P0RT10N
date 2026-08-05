@@ -34,6 +34,11 @@ that tailnet with the minted bundle key to write a real Kopia backup through
 `tailscale serve`. Only this suite can prove **HTTPS serve with a real cert** —
 headscale issues none.
 
+It also asserts the **health checks that only mean something on real
+Tailscale**: `tailscaleApi`, `magicDns`, `httpsServe` and `serveTag` all read
+the live API, and it confirms `pantry` is absent rather than falsely passing
+(the docker pantry is a host path, so that check is not applicable).
+
 The test process never joins the tailnet — the friend container does, exactly
 like a friend's machine. So **no host Tailscale is needed**.
 
@@ -69,6 +74,15 @@ k3d's bundled provisioner.
   least-privilege Role contains it (no cross-namespace reads, no
   self-escalation, no cluster-scoped lists, `get` but not `list` on PVCs), and
   PSA `restricted` refuses a privileged pod.
+- **`k8s/health.e2e.test.ts`** — the startup health checks, against a cluster
+  that is genuinely broken. `run.ts` breaks one thing from the host (the
+  manager's own ServiceAccount deliberately can't), then runs this suite
+  in-cluster to ask the manager what its checks say; `HEALTH_SCENARIO` names the
+  break in effect. Covers `pantry` and `managerService` on both their ok and
+  blocked paths, `instanceImage` warning without gating, and `serveTag`.
+  `tailscaleApi`, `magicDns` and `httpsServe` are **not** here — the headscale
+  adapter answers those from constants, so they'd read `ok` no matter what;
+  they're asserted in the docker suite, on real Tailscale.
 - **`k8s/lifecycle.e2e.test.ts`** — runs in-cluster against the **real manager
   Deployment** over HTTP: add → friend backs up over the tailnet → ransomware
   refusal (delete marker written, versions survive, bytes still readable) →
@@ -83,6 +97,7 @@ headscale keys and writes the manager's config Secret itself.
 deno task test:e2e:k8s            # build images + both suites
 deno task test:e2e:k8s build      # (re)build + import images only
 deno task test:e2e:k8s rbac-psa   # security checks (images built)
+deno task test:e2e:k8s health     # health checks vs a broken cluster
 deno task test:e2e:k8s lifecycle  # portion lifecycle (images built)
 deno task test:e2e:k8s clean      # delete the k3d cluster
 ```

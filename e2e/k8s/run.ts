@@ -4,7 +4,14 @@ import $ from "@david/dax";
 import { parseKeyOutput, requireBinaries } from "../driver.ts";
 import { DEFAULT_HEADSCALE_URL, until } from "../helpers.ts";
 
-const MODES = ["all", "build", "rbac-psa", "lifecycle", "clean"] as const;
+const MODES = [
+  "all",
+  "build",
+  "rbac-psa",
+  "health",
+  "lifecycle",
+  "clean",
+] as const;
 const mode = Deno.args[0] ?? "all";
 if (!(MODES as readonly string[]).includes(mode)) {
   console.error(`usage: deno task test:e2e:k8s [${MODES.join("|")}]`);
@@ -209,6 +216,104 @@ async function lifecycle(): Promise<void> {
   }
 }
 
+const isDefaultAnnotation = "storageclass.kubernetes.io/is-default-class";
+
+function annotateClass(className: string, isDefault: boolean) {
+  return kc([
+    "annotate",
+    "storageclass",
+    className,
+    `${isDefaultAnnotation}=${isDefault}`,
+    "--overwrite",
+  ]);
+}
+
+// Each scenario breaks ONE thing from the host, since the manager's own
+// ServiceAccount deliberately can't. Breaks are undone in a `finally` so a
+// failed assertion can't leave the cluster wrong for the next scenario.
+async function health(): Promise<void> {
+  // The healthy scenario needs headscale up and owning the p0rt1on user;
+  // lifecycle does this too, but health runs first.
+  await kc([
+    "rollout",
+    "status",
+    "deployment/headscale",
+    "-n",
+    "p0rt1on",
+    "--timeout=120s",
+  ]);
+  await ensureHeadscaleUser();
+  await resetManagerState();
+  await writeManagerSecret();
+  await startManager();
+  try {
+    await runHealthScenario("healthy");
+
+    // k3d's own default steps aside; two defaults make admission ambiguous.
+    await annotateClass("local-path", false);
+    await annotateClass("p0rt1on-pantry", true);
+    try {
+      await runHealthScenario("pantry-is-default");
+    } finally {
+      await annotateClass("p0rt1on-pantry", false).noThrow();
+      await annotateClass("local-path", true).noThrow();
+    }
+
+    // The mistake that silently broke audit delivery in production: manager
+    // still runs, instances just can't reach it.
+    await setManagerEnv("P0RT1ON_K8S_MANAGER_SERVICE_NAME", "does-not-exist");
+    try {
+      await runHealthScenario("manager-service-missing");
+    } finally {
+      await setManagerEnv(
+        "P0RT1ON_K8S_MANAGER_SERVICE_NAME",
+        "p0rt1on-manager",
+      );
+    }
+
+    // No tailscaleApi / magicDns / httpsServe scenario: the headscale adapter
+    // answers those from constants, so they read "ok" whatever we break here.
+    // The docker suite covers them on real Tailscale.
+  } finally {
+    await kc([
+      "scale",
+      "deployment",
+      "p0rt1on-manager",
+      "-n",
+      "p0rt1on",
+      "--replicas=0",
+    ]).noThrow().quiet();
+  }
+}
+
+function runHealthScenario(scenario: string): Promise<void> {
+  console.log(`\n=== health scenario: ${scenario} ===`);
+  return runRunnerPod("e2e/k8s/health.e2e.test.ts", [
+    { name: "HEALTH_SCENARIO", value: scenario },
+  ]);
+}
+
+/** Sets one env var on the manager container and waits for the new pod, so the
+ * next probe runs against the changed configuration rather than the old one. */
+async function setManagerEnv(name: string, value: string): Promise<void> {
+  await kc([
+    "set",
+    "env",
+    "deployment/p0rt1on-manager",
+    "-n",
+    "p0rt1on",
+    `${name}=${value}`,
+  ]);
+  await kc([
+    "rollout",
+    "status",
+    "deployment/p0rt1on-manager",
+    "-n",
+    "p0rt1on",
+    "--timeout=120s",
+  ]);
+}
+
 // Wipes the manager's PVC before each run; a kept cluster would otherwise
 // carry stale friend rows and fail addStart on the unique name.
 async function resetManagerState(): Promise<void> {
@@ -319,7 +424,10 @@ async function startManager(): Promise<void> {
 
 // The pod manifest holds no secrets inline; admin creds and the headscale
 // key come from the Secret by reference.
-function runnerPodManifest(): unknown {
+function runnerPodManifest(
+  testFile = "e2e/k8s/lifecycle.e2e.test.ts",
+  extraEnv: { name: string; value: string }[] = [],
+): unknown {
   const secretEnv = (name: string, key = name) => ({
     name,
     valueFrom: { secretKeyRef: { name: MANAGER_SECRET, key } },
@@ -350,7 +458,7 @@ function runnerPodManifest(): unknown {
           "--allow-env",
           "--allow-net",
           "--allow-run",
-          "e2e/k8s/lifecycle.e2e.test.ts",
+          testFile,
         ],
         env: [
           { name: "K8S_NAMESPACE", value: "p0rt1on" },
@@ -365,6 +473,7 @@ function runnerPodManifest(): unknown {
             value: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
           },
           { name: "HOME", value: "/tmp" },
+          ...extraEnv,
         ],
         securityContext: {
           allowPrivilegeEscalation: false,
@@ -389,11 +498,14 @@ async function podPhase(): Promise<string> {
 
 // The pod's terminal phase is the verdict, not the log stream, since a
 // dropped stream re-attaches with --tail=0 instead of failing the run.
-async function runRunnerPod(): Promise<void> {
+async function runRunnerPod(
+  testFile?: string,
+  extraEnv?: { name: string; value: string }[],
+): Promise<void> {
   await kc(["delete", "pod", RUNNER, "-n", "p0rt1on", "--ignore-not-found"]);
   try {
     await kc(["apply", "-f", "-"]).stdinText(
-      JSON.stringify(runnerPodManifest()),
+      JSON.stringify(runnerPodManifest(testFile, extraEnv)),
     );
     await until(
       "runner pod to start",
@@ -473,11 +585,14 @@ const exitCode = await (async () => {
       await buildImages();
     } else if (mode === "rbac-psa") {
       await rbacPsa();
+    } else if (mode === "health") {
+      await health();
     } else if (mode === "lifecycle") {
       await lifecycle();
     } else {
       await buildImages();
       await rbacPsa();
+      await health();
       await lifecycle();
     }
     return 0;

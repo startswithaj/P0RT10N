@@ -94,10 +94,33 @@ export const SEED_THEN_BACKUP =
   'mkdir -p /backup && printf %s "$PAYLOAD" > /backup/canary.txt && ' +
   "exec /entrypoint.sh";
 
-// Recomputes what entrypoint.sh's VERIFY_RESTORE step should have printed
-// for a restored file, so the suites can assert the canary's content was
-// actually restored — independent of whether the image's own verify/diff
-// logic is correct.
+// Reads the backup back out of the repository with stock kopia. Runs as a
+// throwaway container's COMMAND, never entrypoint.sh — friends run that, so it
+// stays free of test code. Takes the backup's env with S3_ENDPOINT pointed
+// straight at the instance, and prints `canary-sha256=<hex>` for the caller.
+export const VERIFY_REPOSITORY = String.raw`set -e
+S3_HOST=$(printf '%s' "$S3_ENDPOINT" | sed -e 's#^https://##' -e 's#^http://##' -e 's#/$##')
+TLS=""
+case "$S3_ENDPOINT" in http://*) TLS="--disable-tls" ;; esac
+# Kopia scopes snapshots by user@host, so these must match what the backup
+# used, or the snapshot listing is empty and nothing is actually checked.
+HOST_OVERRIDE="$TAILSCALE_HOSTNAME"
+[ -n "$HOST_OVERRIDE" ] || HOST_OVERRIDE="$S3_BUCKET"
+kopia repository connect s3 --bucket="$S3_BUCKET" --endpoint="$S3_HOST" \
+  --access-key="$S3_ACCESS_KEY_ID" --secret-access-key="$S3_SECRET_ACCESS_KEY" \
+  --override-username=p0rt1on --override-hostname="$HOST_OVERRIDE" $TLS
+# Reads every object back out of the repository and checks it decodes; it
+# never looks at the source directory, so a live workload can't fool it.
+kopia snapshot verify --verify-files-percent=100
+SNAP=$(kopia snapshot list --json | grep '"id"' | tail -1 | cut -d'"' -f4)
+[ -n "$SNAP" ] || { echo "no snapshot found in repository" >&2; exit 1; }
+mkdir -p /verify
+kopia restore "$SNAP" /verify
+echo "canary-sha256=$(sha256sum /verify/canary.txt | cut -d' ' -f1)"
+`;
+
+// Recomputes the canary's checksum so a suite can require the exact hash the
+// external verifier printed, rather than trusting its exit code.
 export async function sha256Hex(payload: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",

@@ -32,13 +32,7 @@ case "$S3_ENDPOINT" in
 esac
 
 TAILSCALED_PID=""
-# Set only when VERIFY_RESTORE=1 runs a restore; cleaned up here so it's
-# removed on every exit path (success, die, or signal), not just the happy one.
-RESTORE_DIR=""
 cleanup() {
-  if [ -n "$RESTORE_DIR" ]; then
-    rm -rf "$RESTORE_DIR"
-  fi
   if [ -n "$TAILSCALED_PID" ]; then
     log "tearing down Tailscale"
     tailscale down >/dev/null 2>&1 || true
@@ -123,69 +117,6 @@ set +e
 kopia snapshot create "$BACKUP_PATH"
 STATUS=$?
 set -e
-
-# VERIFY_RESTORE=1 (default off) proves the snapshot just taken is actually
-# recoverable, instead of trusting Kopia's exit code alone. This has to run
-# now, before `cleanup` (trap EXIT) tears down Tailscale below — once that
-# fires there is no tailnet left to reach the repository.
-if [ "$STATUS" -eq 0 ] && [ "${VERIFY_RESTORE:-}" = "1" ]; then
-  # kopia lists snapshots oldest-first, so the last "id" in --json output is
-  # the one just created above.
-  SNAPSHOT_ID=$(kopia snapshot list "$BACKUP_PATH" --json |
-    grep -o '"id" *: *"[^"]*"' | tail -1 | sed -e 's/.*"\([^"]*\)"$/\1/')
-  [ -n "$SNAPSHOT_ID" ] || die "VERIFY_RESTORE: could not determine latest snapshot ID"
-
-  # Percent of file content actually read back per run (0 disables content
-  # reads entirely and only walks the object graph — checked against this
-  # exact kopia build to miss corrupted blobs completely, so treat 0 as "no
-  # real check"). 100 is the only setting that catches corruption in a
-  # single run; a lower value reads less data (and less tailnet bandwidth)
-  # per run at the cost of a corrupt blob taking longer to be noticed, since
-  # kopia samples a different subset each time. Defaults to 100 so
-  # correctness is what you get unless you deliberately trade it away for a
-  # large repo on a metered/slow link.
-  VERIFY_RESTORE_PERCENT="${VERIFY_RESTORE_PERCENT:-100}"
-  log "VERIFY_RESTORE=1 — verifying the snapshot is intact and retrievable (${VERIFY_RESTORE_PERCENT}% content read)"
-  # `snapshot verify` reads objects back out of the REPOSITORY and checks
-  # they decode; it never looks at BACKUP_PATH, so it can't be fooled by a
-  # live workload writing new files after the snapshot was taken.
-  kopia snapshot verify --verify-files-percent="$VERIFY_RESTORE_PERCENT" "$SNAPSHOT_ID" ||
-    die "VERIFY_RESTORE: snapshot failed integrity verification (contents unreadable from the repository)"
-  log "VERIFY_RESTORE: snapshot verified intact and retrievable"
-
-  # VERIFY_RESTORE_DIFF=1 additionally restores the snapshot and diffs it
-  # byte-for-byte against BACKUP_PATH. Unlike the check above, this DOES
-  # compare against the live source, so it only belongs on data known to be
-  # quiescent for the duration of the backup (a stopped DB, a seeded test
-  # fixture) — on live data it will false-positive the moment something else
-  # writes a file mid-run. Off by default for that reason.
-  if [ "${VERIFY_RESTORE_DIFF:-}" = "1" ]; then
-    log "VERIFY_RESTORE_DIFF=1 — restoring the snapshot to diff against BACKUP_PATH"
-    RESTORE_DIR=$(mktemp -d)
-    kopia restore "$SNAPSHOT_ID" "$RESTORE_DIR" >/dev/null ||
-      die "VERIFY_RESTORE_DIFF: kopia restore failed"
-    # -q (names only): BACKUP_PATH can hold arbitrary friend data, so a
-    # mismatch must never dump file contents into container logs.
-    if ! DIFF_OUT=$(diff -rq "$BACKUP_PATH" "$RESTORE_DIR" 2>&1); then
-      log "VERIFY_RESTORE_DIFF: mismatch between $BACKUP_PATH and the restored snapshot:"
-      echo "$DIFF_OUT" >&2
-      die "VERIFY_RESTORE_DIFF: restored content does not match $BACKUP_PATH"
-    fi
-    # VERIFY_RESTORE_VERBOSE=1 additionally logs a checksum per restored
-    # file, so a caller (the e2e suite) can independently confirm exact
-    # bytes without trusting the diff/die logic above. Off by default: a
-    # real friend's directory listing is itself sensitive metadata this
-    # product otherwise never puts in logs.
-    if [ "${VERIFY_RESTORE_VERBOSE:-}" = "1" ]; then
-      find "$RESTORE_DIR" -type f | sort | while read -r f; do
-        log "VERIFY_RESTORE_DIFF: sha256(${f#"$RESTORE_DIR"/})=$(sha256sum "$f" | cut -d' ' -f1)"
-      done
-    fi
-    FILE_COUNT=$(find "$RESTORE_DIR" -type f | wc -l | tr -d ' ')
-    BYTE_COUNT=$(find "$RESTORE_DIR" -type f -exec cat {} + 2>/dev/null | wc -c | tr -d ' ')
-    log "VERIFY_RESTORE_DIFF: restored content matches source ($FILE_COUNT files, $BYTE_COUNT bytes)"
-  fi
-fi
 
 # Object Lock holds objects for the retention window, so maintenance must run within that window to reclaim space; it is best-effort and never fails the run.
 kopia maintenance run >/dev/null 2>&1 || log "maintenance skipped/failed (non-fatal)"

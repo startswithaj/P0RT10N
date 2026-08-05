@@ -65,6 +65,21 @@ describe("Manager RBAC containment + PSA rejection (e2e)", () => {
     );
     expect(list.status).toBe(403);
     await list.body?.cancel();
+
+    // The manager holds NO cluster-scoped grant of any kind. Both of these
+    // were once read by boot checks; those checks were rewritten to work
+    // from namespaced permissions instead, and these assertions are what
+    // stops a ClusterRole quietly coming back to make a check easier.
+    const storageClass = await asManager(
+      "/apis/storage.k8s.io/v1/storageclasses/p0rt1on-pantry",
+    );
+    expect(storageClass.status).toBe(403);
+    await storageClass.body?.cancel();
+
+    // Cluster-scoped even though it names the manager's own namespace.
+    const ownNamespace = await asManager("/api/v1/namespaces/p0rt1on");
+    expect(ownNamespace.status).toBe(403);
+    await ownNamespace.body?.cancel();
   });
 
   it(

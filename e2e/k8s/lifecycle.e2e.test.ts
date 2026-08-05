@@ -7,8 +7,10 @@ import {
   mcHostEnvFor,
   requireConfig,
   SEED_THEN_BACKUP,
+  sha256Hex,
   trpcClient,
   until,
+  VERIFY_REPOSITORY,
 } from "../helpers.ts";
 
 describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
@@ -16,6 +18,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
   const INSTANCE = `p0rt1on-${PORTION}`;
   const CLIENT_NS = "p0rt1on-e2e-clients";
   const CLIENT_POD = "p0rt1on-e2e-client";
+  const VERIFY_POD = "p0rt1on-e2e-verify";
+  const CANARY = "p0rt1on-canary";
 
   beforeAll(() =>
     requireConfig({
@@ -122,14 +126,8 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
           image: Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE,
           command: ["sh", "-c", SEED_THEN_BACKUP],
           env: Object.entries(friendClientEnv(bundle, {
-            PAYLOAD: "p0rt1on-canary",
+            PAYLOAD: CANARY,
             TAILSCALE_LOGIN_SERVER: env("HEADSCALE_URL"),
-            // Proves the snapshot this pod takes is actually readable back
-            // out of the repository, not just that Kopia exited 0. Safe
-            // here (and everywhere, by design): it only reads the
-            // repository, never BACKUP_PATH, so it can't be confused by
-            // this pod's own later writes.
-            VERIFY_RESTORE: "1",
           })).map(([name, value]) => ({ name, value })),
         }],
       },
@@ -157,6 +155,55 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
     const ls = await asFriend(bundle, (a) => ["ls", `${a}/${bundle.bucket}`]);
     expect(ls.code).toBe(0);
     expect(ls.stdout.trim().length).toBeGreaterThan(0);
+
+    await verifyRepositoryExternally(bundle);
+  };
+
+  // A separate pod runs stock kopia against the instance's Service, so the
+  // shipped entrypoint.sh carries no verification code. No tailnet leg: the
+  // backup above already proved that path.
+  const verifyRepositoryExternally = async (
+    bundle: ClaimedBundle,
+  ): Promise<void> => {
+    await k8s("DELETE", `/api/v1/namespaces/${CLIENT_NS}/pods/${VERIFY_POD}`)
+      .catch(() => undefined);
+    await k8s("POST", `/api/v1/namespaces/${CLIENT_NS}/pods`, {
+      apiVersion: "v1",
+      kind: "Pod",
+      metadata: { name: VERIFY_POD, namespace: CLIENT_NS },
+      spec: {
+        restartPolicy: "Never",
+        containers: [{
+          name: "verify",
+          image: Deno.env.get("CLIENT_IMAGE") ?? DEFAULT_CLIENT_IMAGE,
+          command: ["sh", "-c", VERIFY_REPOSITORY],
+          env: Object.entries({
+            ...friendClientEnv(bundle),
+            // Straight at the instance, not the tailnet URL in the bundle.
+            S3_ENDPOINT: await instanceEndpoint(),
+            // Must match the backup's identity or kopia lists no snapshots.
+            TAILSCALE_HOSTNAME: bundle.bucket,
+          }).map(([name, value]) => ({ name, value })),
+        }],
+      },
+    });
+
+    const phase = await until("verify pod terminal phase", async () => {
+      const p = await podPhase(CLIENT_NS, VERIFY_POD);
+      return p === "Succeeded" || p === "Failed" ? p : null;
+    }, 60).catch(() => "Pending");
+
+    const logs = await fetch(
+      `https://kubernetes.default.svc/api/v1/namespaces/${CLIENT_NS}` +
+        `/pods/${VERIFY_POD}/log?tailLines=200`,
+      { headers: { Authorization: `Bearer ${saToken()}` } },
+    );
+    const out = logs.ok ? await logs.text() : "<no log>";
+    if (phase !== "Succeeded") console.error("verify log:", out);
+    expect(phase).toBe("Succeeded");
+    // The hash, not just the exit code: an always-succeeding verifier would
+    // still have to produce the canary's real checksum.
+    expect(out).toContain(`canary-sha256=${await sha256Hex(CANARY)}`);
   };
 
   afterAll(async () => {
@@ -164,6 +211,10 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
     await k8s(
       "DELETE",
       `/api/v1/namespaces/${CLIENT_NS}/pods/${CLIENT_POD}`,
+    ).catch(() => undefined);
+    await k8s(
+      "DELETE",
+      `/api/v1/namespaces/${CLIENT_NS}/pods/${VERIFY_POD}`,
     ).catch(() => undefined);
     await trpc("friends.list").then(async (friends) => {
       const left = friends as { id: string }[];
@@ -194,6 +245,18 @@ describe("Portion lifecycle against the real manager on k8s (e2e)", () => {
         username: env("P0RT1ON_ADMIN_USERNAME"),
         password: env("P0RT1ON_ADMIN_PASSWORD"),
       });
+
+      // Asking the manager is what proves the dry-run PVC path works; calling
+      // the Kubernetes API directly would only prove it's possible.
+      const health = await trpc("status.recheckHealth", {}) as {
+        canProvision: boolean;
+        checks: { id: string; status: string; detail: string }[];
+      };
+      const pantry = health.checks.find((c) => c.id === "pantry");
+      expect(pantry?.status).toBe("ok");
+      // "can't verify" would mean the probe threw and degraded silently.
+      expect(pantry?.detail).toContain("isn't the cluster default");
+      expect(health.canProvision).toBe(true);
 
       // friends.addStart detaches a job, so retrying claimBundle is the wait.
       const { jobId } = await trpc("friends.addStart", {
