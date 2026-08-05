@@ -14,12 +14,15 @@ import type { Logger } from "../services/types.ts";
  * whole boot sequence on import.
  */
 export function reportPreflight(health: SystemHealth, logger: Logger): void {
-  health.checks.filter((c) => c.status !== "ok").forEach((c) =>
-    (c.status === "blocked" ? logger.error : logger.warn)(
-      `preflight ${c.status}: ${c.title} — ${c.detail}`,
-      { check: c.id, ...(c.fixUrl ? { fixUrl: c.fixUrl } : {}) },
-    )
-  );
+  health.checks.filter((c) => c.status !== "ok").forEach((c) => {
+    const message = `preflight ${c.status}: ${c.title} — ${c.detail}`;
+    const meta = { check: c.id, ...(c.fixUrl ? { fixUrl: c.fixUrl } : {}) };
+    // Called as methods rather than picked into a variable: the real logger's
+    // methods are class methods that use `this`, so a bare `logger.warn`
+    // reference is unbound and throws on call.
+    if (c.status === "blocked") logger.error(message, meta);
+    else logger.warn(message, meta);
+  });
 
   const idsWith = (status: string) =>
     health.checks.filter((c) => c.status === status).map((c) => c.id);
