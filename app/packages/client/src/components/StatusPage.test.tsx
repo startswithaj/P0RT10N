@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { makeService, makeStatusView } from "../test-helpers/fixtures.ts";
 
@@ -129,6 +129,64 @@ describe("StatusPage", () => {
       expect(dot?.className).toContain("bg_warning");
 
       expect(container.innerHTML.toLowerCase()).not.toContain("#e0a83e");
+    });
+  });
+
+  // Both polls (status every 5s, diagnostics every 5s) used to destroy DOM the
+  // reader was looking at. Identity assertions are the only way to catch that:
+  // the text is identical either way, but a replaced node loses scroll position.
+  describe("polling preserves the expanded diagnostics panel", () => {
+    const viewWith = (detail: string) =>
+      makeStatusView({
+        minio: [makeService({ name: "alice-minio", detail })],
+        tailscale: [],
+        host: [],
+      });
+
+    const diagnosticsWith = (recentLogs: string) => ({
+      state: "running",
+      health: "healthy",
+      exitCode: null,
+      exitError: null,
+      healthReason: null,
+      recentLogs,
+    });
+
+    const expandRow = async (logs: string) => {
+      asMock(trpc.status.get.query).mockResolvedValue(viewWith("alice.ts.net"));
+      asMock(trpc.status.diagnose.query).mockResolvedValue(
+        diagnosticsWith(logs),
+      );
+      renderPage();
+      fireEvent.click(await screen.findByText("alice-minio"));
+    };
+
+    it("keeps existing log lines' nodes when new lines arrive", async () => {
+      await expandRow("first\nsecond");
+      const firstLine = await screen.findByText("first");
+
+      queryClient.setQueryData(
+        ["diagnose", "alice-minio"],
+        diagnosticsWith("first\nsecond\nthird"),
+      );
+
+      expect(await screen.findByText("third")).toBeInTheDocument();
+      // Rendered as one text blob, this node would have been replaced wholesale.
+      expect(screen.getByText("first")).toBe(firstLine);
+    });
+
+    it("keeps the panel when a status poll changes the row's own data", async () => {
+      await expandRow("first\nsecond");
+      const firstLine = await screen.findByText("first");
+
+      // A fresh object for the same service, exactly what each poll returns.
+      queryClient.setQueryData(["status"], viewWith("alice.ts.net — busy"));
+
+      // Assert the new data actually reached the DOM first: without this the
+      // identity check below passes even when nothing re-rendered at all.
+      expect(await screen.findByText("alice.ts.net — busy"))
+        .toBeInTheDocument();
+      expect(screen.getByText("first")).toBe(firstLine);
     });
   });
 });

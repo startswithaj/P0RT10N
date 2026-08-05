@@ -86,6 +86,10 @@ function Section(
     setExpanded: (k: string | null) => void;
   },
 ) {
+  // Keyed by name, not by object identity: every poll returns fresh objects, so
+  // an identity-keyed <For> rebuilds every row and throws away any expanded
+  // diagnostics panel along with its scroll position. Names are stable strings.
+  const names = () => props.items.map((s) => s.name);
   return (
     <div class={section}>
       <h2 class={sectionTitle}>{props.title}</h2>
@@ -94,14 +98,18 @@ function Section(
           when={props.items.length}
           fallback={<span class={empty}>None.</span>}
         >
-          <For each={props.items}>
-            {(s) => (
-              <ServiceRow
-                svc={s}
-                icon={props.icon}
-                expanded={props.expanded}
-                setExpanded={props.setExpanded}
-              />
+          <For each={names()}>
+            {(name) => (
+              <Show when={props.items.find((s) => s.name === name)}>
+                {(svc) => (
+                  <ServiceRow
+                    svc={svc()}
+                    icon={props.icon}
+                    expanded={props.expanded}
+                    setExpanded={props.setExpanded}
+                  />
+                )}
+              </Show>
             )}
           </For>
         </Show>

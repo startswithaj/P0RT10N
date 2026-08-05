@@ -1,5 +1,5 @@
 import { createQuery } from "@tanstack/solid-query";
-import { Show } from "solid-js";
+import { For, Show } from "solid-js";
 import { css } from "styled-system/css";
 import { trpc } from "../trpc.ts";
 import { pollMs } from "./helpers.ts";
@@ -54,6 +54,13 @@ const panelLogs = css({
 
 const panelMutedText = css({ color: "fg.muted", fontSize: "xs" });
 
+// Logs render a line at a time, not as one text blob: a blob is replaced whole
+// on every poll, which collapses the scroll box and snaps the reader back to
+// the top. Unchanged lines compare equal, keep their DOM nodes, and scroll
+// position survives. A blank line renders as a space so it still occupies its
+// row rather than collapsing.
+const logLines = (raw: string): string[] => raw.replace(/\n$/, "").split("\n");
+
 export function DiagnosticsPanel(props: { instance: string }) {
   const diag = createQuery(() => ({
     queryKey: ["diagnose", props.instance],
@@ -92,7 +99,15 @@ export function DiagnosticsPanel(props: { instance: string }) {
             <Show when={d().healthReason}>
               <div class={panelReason}>⚠ {d().healthReason}</div>
             </Show>
-            <pre class={panelLogs}>{d().recentLogs || "(no logs)"}</pre>
+            <pre class={panelLogs}>
+              <Show when={d().recentLogs} fallback="(no logs)">
+                {(raw) => (
+                  <For each={logLines(raw())}>
+                    {(line) => <div>{line || " "}</div>}
+                  </For>
+                )}
+              </Show>
+            </pre>
           </>
         )}
       </Show>
