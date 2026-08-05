@@ -20,6 +20,13 @@ export interface InstanceDiagnostics {
   exitCode: number | null;
   exitError: string | null;
   recentLogs: string;
+  /** The image the workload is actually running, when known. Kubernetes-only. */
+  image?: string | null;
+  /** Recent pod-level events (scheduling failures, unbound PVCs, image
+   * pulls), most recent first. Kubernetes-only — the one signal that
+   * survives when a pod never gets a container status at all (e.g. an
+   * unbound PVC), which container diagnostics alone would miss entirely. */
+  events?: string[];
 }
 
 /** Secrets (`rootCred`, `tsAuthKey`) exist in memory only and must never
@@ -144,6 +151,12 @@ export interface InstanceRuntime {
    * Boot recovery keys off this: surviving data is recreated over, and missing
    * data is surfaced — never silently replaced with an empty instance. */
   hasData(instanceName: string): Promise<boolean>;
+
+  /** Do the instance's credentials still exist, independent of the pod? On
+   * Kubernetes they live in a Secret that can be deleted out from under a
+   * running StatefulSet, leaving a pod that can never start. Always true on
+   * docker, where the env-file is rewritten on every run. */
+  hasCredentials(instanceName: string): Promise<boolean>;
 
   /** Returns every runtime-managed instance with its state; names are instance
    * (tailnet-hostname) names, not engine resource names. */

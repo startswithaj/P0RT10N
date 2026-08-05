@@ -384,6 +384,13 @@ export class DockerInstanceRuntime implements InstanceRuntime {
     return this.config.pantry.exists(instanceName);
   }
 
+  /** Always true: the root cred reaches the container through an env-file
+   * written fresh on every `docker run`, so there is no standing object to
+   * lose. */
+  hasCredentials(_instanceName: string): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
   async listInstances(): Promise<
     { name: string; state: ContainerState }[]
   > {

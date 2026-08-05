@@ -139,6 +139,18 @@ export class BootReconciler {
       });
       return "failed";
     }
+    // A missing credentials Secret cannot fix itself: the pod can never start
+    // without it, so the bounded health wait below would burn its full budget
+    // and then leave the instance broken. Safe to rebuild — the root cred is
+    // derived from the master key and the serve key is re-minted, and
+    // ensureInstance re-applies the Secret over the surviving data.
+    if (!(await this.runtime.hasCredentials(row.tsHostname))) {
+      log.warn("instance credentials are gone — recreating", {
+        instance: row.tsHostname,
+      });
+      await this.ops.recoverInstance(row);
+      return "recovered";
+    }
     // The instance is adopted regardless of its current state, meaning it is started if stopped
     // and any config drift, such as the restart policy, is converged even when already running.
     await this.runtime.ensureRunning(row.tsHostname);

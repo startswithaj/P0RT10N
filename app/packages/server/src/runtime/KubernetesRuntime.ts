@@ -9,6 +9,7 @@ import type {
 } from "./runtime.ts";
 import { tailscaleEnv } from "./runtime.ts";
 import { ServiceError } from "../lib/ServiceError.ts";
+import { maskEnvSecrets } from "../lib/redact.ts";
 import type { RestClient } from "@cloudydeno/kubernetes-client";
 import {
   KubeConfig as ClientKubeConfig,
@@ -17,6 +18,8 @@ import {
 import { CoreV1Api } from "@cloudydeno/kubernetes-apis/core/v1";
 import { AppsV1Api } from "@cloudydeno/kubernetes-apis/apps/v1";
 import type { Pod } from "@cloudydeno/kubernetes-apis/core/v1";
+// Aliased: `Event` collides with the DOM/lib.deno.d.ts global.
+import type { Event as PodEvent } from "@cloudydeno/kubernetes-apis/core/v1";
 import type { StatefulSet } from "@cloudydeno/kubernetes-apis/apps/v1";
 import { toQuantity } from "@cloudydeno/kubernetes-apis/common.ts";
 
@@ -54,6 +57,15 @@ const LABEL_KEY = "app.kubernetes.io/managed-by";
 const LABEL_VALUE = "p0rt1on";
 const LABEL_SELECTOR = `${LABEL_KEY}=${LABEL_VALUE}`;
 const FIELD_MANAGER = "p0rt1on";
+
+/** The Secret keys `ensureInstance` writes that actually carry secret
+ * material (see `stringData` below) — `MINIO_ROOT_USER` is an access key ID,
+ * not secret, so it's deliberately excluded (same convention as elsewhere:
+ * IDs are logged, secrets never are). Redacting by NAME here, not by value,
+ * means diagnostics stay safe even when the caller never had the value in
+ * scope (an adopted instance, a boot reconcile, any future call site) — a
+ * value-based mask can only be applied by whoever minted the secret. */
+const SECRET_ENV_NAMES = ["MINIO_ROOT_PASSWORD", "TAILSCALE_AUTHKEY"];
 
 /** Resource names derived from the instance name, which is already a DNS label. */
 function resourceNames(instance: string) {
@@ -191,6 +203,15 @@ export class KubernetesRuntime implements InstanceRuntime {
     return pvc !== null;
   }
 
+  async hasCredentials(instanceName: string): Promise<boolean> {
+    // Deleting this Secret leaves the StatefulSet intact but its pod unable to
+    // start (CreateContainerConfigError), which no amount of waiting fixes.
+    const secret = await this.getOrNull(() =>
+      this.core.getSecret(resourceNames(instanceName).secret)
+    );
+    return secret !== null;
+  }
+
   async listInstances(): Promise<{ name: string; state: ContainerState }[]> {
     const list = await this.apps.getStatefulSetList({
       labelSelector: LABEL_SELECTOR,
@@ -251,7 +272,7 @@ export class KubernetesRuntime implements InstanceRuntime {
     const container = pod.status?.containerStatuses?.[0];
     const waiting = container?.state?.waiting;
     const terminated = container?.state?.terminated;
-    return {
+    return this.redactDiagnostics({
       name: names.pod,
       state: pod.status?.phase === "Running" ? "running" : "stopped",
       health: this.healthOf(pod),
@@ -259,6 +280,26 @@ export class KubernetesRuntime implements InstanceRuntime {
       exitCode: terminated?.exitCode ?? null,
       exitError: terminated?.message ?? null,
       recentLogs: await this.logs(names.pod),
+      image: pod.spec?.containers?.[0]?.image ?? null,
+      events: await this.instanceEvents(instanceName),
+    });
+  }
+
+  /** The one place every diagnostics field is assembled — the UI's "diagnose
+   * instance" panel (`status.diagnose`) and the health-timeout error both
+   * flow through this return, so redaction applied here can't be skipped by
+   * a future caller the way a value-based mask at some OTHER call site
+   * could be. */
+  private redactDiagnostics(diag: InstanceDiagnostics): InstanceDiagnostics {
+    const clean = (s: string) => maskEnvSecrets(s, SECRET_ENV_NAMES);
+    return {
+      ...diag,
+      healthReason: diag.healthReason
+        ? clean(diag.healthReason)
+        : diag.healthReason,
+      exitError: diag.exitError ? clean(diag.exitError) : diag.exitError,
+      recentLogs: clean(diag.recentLogs),
+      events: diag.events?.map(clean),
     };
   }
 
@@ -454,13 +495,83 @@ export class KubernetesRuntime implements InstanceRuntime {
     }
   }
 
+  /** Best-effort: [] on failure. This is the ONE signal that survives when a
+   * pod never gets scheduled at all — an unbound PVC never produces a
+   * container status, so container-level diagnostics alone would miss it
+   * entirely. Requires `events: list`, which the Role already grants.
+   *
+   * The PVCs are read as well as the pod, because the two carry different
+   * halves of a storage failure: the pod only ever says its claims are
+   * unbound, while the PVC names the actual cause — a StorageClass that
+   * doesn't exist, or a provisioner that never answered. Nothing checks for a
+   * missing class ahead of time (that would need a cluster-scoped read the
+   * manager deliberately doesn't hold), so this is where it gets reported. */
+  private async instanceEvents(instanceName: string): Promise<string[]> {
+    const names = resourceNames(instanceName);
+    const involved = [names.pod, names.dataPvc, names.statePvc];
+
+    // eventTime is a MicroTime (baseDate + micros), not a plain Date.
+    const timeOf = (e: PodEvent) => {
+      const t = e.lastTimestamp ?? e.metadata.creationTimestamp;
+      if (t) return t.getTime();
+      return e.eventTime?.baseDate.getTime() ?? 0;
+    };
+
+    // fieldSelector has no OR, so each object is queried separately; one
+    // failing read must not lose the others.
+    const perObject = await Promise.all(
+      involved.map((name) =>
+        this.core.getEventList({ fieldSelector: `involvedObject.name=${name}` })
+          .then((list) =>
+            list.items.map((e) => ({
+              at: timeOf(e),
+              text: `${name}: ${e.reason ?? "Event"}: ${e.message ?? ""}`
+                .trim(),
+            }))
+          )
+          .catch(() => [])
+      ),
+    );
+
+    return perObject
+      .flat()
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 5)
+      .map((e) => e.text);
+  }
+
+  /** Turns diagnostics into the detail that makes a "did not become healthy"
+   * timeout self-diagnosing instead of a bare status word: the container
+   * waiting reason and image, pod-level scheduling events, and a log tail. */
+  private describeFailure(diag: InstanceDiagnostics): string {
+    const parts: string[] = [];
+    if (diag.healthReason) {
+      parts.push(
+        `container waiting: ${diag.healthReason}` +
+          (diag.image ? ` (image ${diag.image})` : ""),
+      );
+    }
+    if (diag.exitError) parts.push(`container error: ${diag.exitError}`);
+    if (diag.events && diag.events.length > 0) {
+      parts.push(`events: ${diag.events.join("; ")}`);
+    }
+    if (diag.recentLogs) parts.push(`recent logs: ${diag.recentLogs}`);
+    return parts.length > 0 ? ` — ${parts.join(" | ")}` : "";
+  }
+
   private async pollHealth(name: string, attemptsLeft: number): Promise<void> {
     const health = await this.instanceHealth(name);
     if (health === "healthy") return;
     if (attemptsLeft <= 0) {
+      // diagnoseInstance never throws (it's best-effort internally), but the
+      // whole call is wrapped anyway so a timeout error is never masked by a
+      // diagnostics failure.
+      const diag = await this.diagnoseInstance(name).catch(() => null);
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
-        `instance ${name} did not become healthy (last status: ${health})`,
+        `instance ${name} did not become healthy (last status: ${health})${
+          diag ? this.describeFailure(diag) : ""
+        }`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
