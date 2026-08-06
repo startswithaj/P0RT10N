@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { makeFriend } from "../test-helpers/fixtures.ts";
+import { makeRow } from "../test-helpers/fixtures.ts";
 
 vi.mock("../trpc.ts", () => ({
   trpc: {
@@ -44,7 +44,7 @@ describe("ResendInviteDialog", () => {
     const onClose = vi.fn();
     render(() => (
       <ResendInviteDialog
-        friend={makeFriend({ id: 9, name: "bob", enrollmentMode: "invite" })}
+        friend={makeRow({ id: 9, name: "bob", enrollmentMode: "invite" })}
         onClose={onClose}
       />
     ));
@@ -73,7 +73,7 @@ describe("ResendInviteDialog", () => {
     const onClose = vi.fn();
     render(() => (
       <ResendInviteDialog
-        friend={makeFriend({ id: 3, name: "carol", enrollmentMode: "invite" })}
+        friend={makeRow({ id: 3, name: "carol", enrollmentMode: "invite" })}
         onClose={onClose}
       />
     ));
@@ -96,7 +96,7 @@ describe("SuspendDialog", () => {
     const onClose = vi.fn();
     render(() => (
       <SuspendDialog
-        friend={makeFriend({ id: 9, name: "bob" })}
+        friend={makeRow({ id: 9, name: "bob" })}
         onClose={onClose}
       />
     ));
@@ -118,7 +118,7 @@ describe("SuspendDialog", () => {
     const create = vi.spyOn(toaster, "create");
     const onClose = vi.fn();
     render(() => (
-      <SuspendDialog friend={makeFriend({ name: "bob" })} onClose={onClose} />
+      <SuspendDialog friend={makeRow({ name: "bob" })} onClose={onClose} />
     ));
 
     fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
@@ -142,7 +142,7 @@ describe("HostnameMismatchDialog", () => {
   beforeEach(() => vi.clearAllMocks());
 
   const friend = () =>
-    makeFriend({
+    makeRow({
       id: 9,
       name: "bob",
       hostnameWarning: "p0rt1on-bob-1 is currently reachable at p0rt1on-bob",
@@ -241,7 +241,10 @@ describe("ResizeDialog", () => {
   it("submits the entered quota in bytes", async () => {
     mutateOf(trpc.friends.resize.mutate).mockResolvedValue(undefined);
     render(() => (
-      <ResizeDialog friend={makeFriend({ id: 3 })} onClose={vi.fn()} />
+      <ResizeDialog
+        friend={makeRow({ id: 3 })}
+        onClose={vi.fn()}
+      />
     ));
 
     fireEvent.input(screen.getByRole("spinbutton"), { target: { value: "5" } });
@@ -267,7 +270,7 @@ describe("RotateS3Dialog", () => {
     const onClose = vi.fn();
     render(() => (
       <RotateS3Dialog
-        friend={makeFriend({ id: 42 })}
+        friend={makeRow({ id: 42 })}
         onClose={onClose}
         onBundle={onBundle}
       />
@@ -294,7 +297,7 @@ describe("RotateTsDialog", () => {
     });
     render(() => (
       <RotateTsDialog
-        friend={makeFriend({ name: "alice" })}
+        friend={makeRow({ name: "alice" })}
         onClose={vi.fn()}
       />
     ));
@@ -311,7 +314,7 @@ describe("OffboardDialog", () => {
   it("enables Offboard only when the typed text equals the name verbatim", () => {
     render(() => (
       <OffboardDialog
-        friend={makeFriend({ name: "alice" })}
+        friend={makeRow({ name: "alice" })}
         onClose={vi.fn()}
       />
     ));
@@ -344,7 +347,7 @@ describe("OffboardDialog", () => {
     );
     render(() => (
       <OffboardDialog
-        friend={makeFriend({ id: 7, name: "alice" })}
+        friend={makeRow({ id: 7, name: "alice" })}
         onClose={vi.fn()}
       />
     ));
@@ -379,7 +382,7 @@ describe("OffboardDialog", () => {
     const onClose = vi.fn();
     render(() => (
       <OffboardDialog
-        friend={makeFriend({ id: 7, name: "alice" })}
+        friend={makeRow({ id: 7, name: "alice" })}
         onClose={onClose}
       />
     ));
@@ -419,7 +422,7 @@ describe("OffboardDialog", () => {
     const onClose = vi.fn();
     render(() => (
       <OffboardDialog
-        friend={makeFriend({ id: 7, name: "alice" })}
+        friend={makeRow({ id: 7, name: "alice" })}
         onClose={onClose}
       />
     ));

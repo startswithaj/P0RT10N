@@ -303,7 +303,15 @@ export type FriendListItem = {
   enrollmentMode: EnrollmentMode;
   /** Null for authKey friends, since only invite enrollment has an invite to track. */
   inviteStatus: InviteStatus | null;
-  hostnameWarning: string | null;
+};
+
+/**
+ * Served separately from FriendListItem because the check costs a Tailscale API
+ * round trip; only friends WITH a mismatch appear, so absent means healthy.
+ */
+export type HostnameWarning = {
+  friendId: number;
+  warning: string;
 };
 
 export type FriendDetail = {

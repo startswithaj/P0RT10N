@@ -8,6 +8,7 @@ import {
   createTestDatabase,
   TEST_REPO_CONFIG,
 } from "../test-helpers/testDb.ts";
+import { noopLogger } from "../test-helpers/mocks.ts";
 
 describe("AuditServiceImpl (real SQLite)", () => {
   let database: Database;
@@ -15,7 +16,11 @@ describe("AuditServiceImpl (real SQLite)", () => {
 
   beforeEach(() => {
     database = createTestDatabase();
-    const repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    const repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
     svc = new AuditServiceImpl(new FriendQueries(database.db), repo);
   });
   afterEach(() => database.driver.close());

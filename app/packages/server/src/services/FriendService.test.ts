@@ -19,8 +19,13 @@ import {
   mockMcFactory,
   mockTailscaleApi,
   noopLogger,
+  strictMock,
 } from "../test-helpers/mocks.ts";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
+import type {
+  HostnameHealthChecker,
+  HostnameTarget,
+} from "../provisioning/HostnameHealthChecker.ts";
 
 describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
   let database: Database;
@@ -28,7 +33,11 @@ describe("boot recovery → sweep (PRD 2.2, real SQLite)", () => {
 
   beforeEach(() => {
     database = createTestDatabase();
-    repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
   });
   afterEach(() => database.driver.close());
 
@@ -78,7 +87,11 @@ describe("FriendServiceImpl", () => {
 
   beforeEach(() => {
     database = createTestDatabase();
-    repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
     queries = new FriendQueries(database.db);
   });
   afterEach(() => database.driver.close());
@@ -109,6 +122,53 @@ describe("FriendServiceImpl", () => {
     await repo.activate(res.friendId, res.instanceId);
     return res;
   };
+
+  // The dashboard's list must stay a plain DB read; the Tailscale call that
+  // backs the warnings lives behind its own method.
+  it("list: returns rows without touching the hostname checker", async () => {
+    await seed("alice");
+    const checker = mockHostnameHealthChecker();
+    const service = new FriendServiceImpl(
+      queries,
+      repo,
+      mockMcFactory(mockMcClient([])),
+      mockTailscaleApi([], []),
+      "https",
+      checker,
+      noopLogger(),
+    );
+
+    const rows = await service.list();
+
+    expect(rows.map((r) => r.name)).toEqual(["alice"]);
+    expect(Object.hasOwn(rows[0], "hostnameWarning")).toBe(false);
+  });
+
+  it("hostnameWarnings: checks every friend's instance", async () => {
+    const alice = await seed("alice");
+    const seen: { friendId: number; tsHostname: string }[] = [];
+    const service = new FriendServiceImpl(
+      queries,
+      repo,
+      mockMcFactory(mockMcClient([])),
+      mockTailscaleApi([], []),
+      "https",
+      strictMock<HostnameHealthChecker>("HostnameHealthChecker", {
+        check: (targets: HostnameTarget[]) => {
+          seen.push(...targets);
+          return Promise.resolve([{ friendId: alice.friendId, warning: "w" }]);
+        },
+      }),
+      noopLogger(),
+    );
+
+    expect(await service.hostnameWarnings()).toEqual([
+      { friendId: alice.friendId, warning: "w" },
+    ]);
+    expect(seen).toEqual([
+      { friendId: alice.friendId, tsHostname: "alice", serveNodeId: null },
+    ]);
+  });
 
   it("get: builds detail with s3Endpoint + live nodeOnline", async () => {
     const res = await seed("alice");

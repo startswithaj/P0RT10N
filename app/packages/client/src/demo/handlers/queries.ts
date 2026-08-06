@@ -95,6 +95,9 @@ const diagnose = (
 export const queryHandlers: QueryHandlers = {
   "auth.status": () => ({ enabled: false, authenticated: true }),
   "friends.list": (_input, state) => state.friends.map(toListItem),
+  // Demo portions never hold a mismatched hostname, matching the no-op
+  // accept/retry mutations.
+  "friends.hostnameWarnings": () => [],
   "friends.get": (input, state) =>
     toDetail(requireFriend(state, input.friendId)),
   "friends.capabilities": () => ({ inviteApiConfigured: true }),

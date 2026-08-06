@@ -24,7 +24,11 @@ describe("app wiring (tRPC caller over a real DB)", () => {
 
   beforeEach(async () => {
     database = createTestDatabase();
-    const repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    const repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
     const res = await repo.reserveFriend(
       makeAddInput("alice", "dedicated"),
       namingFor("alice", "dedicated"),

@@ -219,7 +219,7 @@ export async function buildApp(
       env.runtimeKind === "docker" && config.instanceAddressing === "host"
         ? denoPortProbe()
         : undefined,
-  });
+  }, logger);
   const runner = new DenoCommandRunner();
   const tempFiles = new DenoTempFiles();
   // Built once, upfront, and shared by the runtime and the health probes below.

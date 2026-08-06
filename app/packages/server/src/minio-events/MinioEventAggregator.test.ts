@@ -25,7 +25,11 @@ describe("MinioEventAggregator", () => {
 
   beforeEach(() => {
     database = createTestDatabase();
-    repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
     queries = new FriendQueries(database.db);
   });
   afterEach(() => database.driver.close());

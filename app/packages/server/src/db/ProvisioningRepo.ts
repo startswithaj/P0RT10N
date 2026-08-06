@@ -1,4 +1,4 @@
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
 import type {
   AddFriendInput,
   AuditAction,
@@ -15,6 +15,7 @@ import {
 import { ConflictError, NotFoundError } from "../lib/ServiceError.ts";
 import { defer } from "../lib/defer.ts";
 import type { PortProbe } from "../lib/net.ts";
+import type { Logger } from "../services/types.ts";
 import type {
   FriendNaming,
   FriendProvisionContext,
@@ -23,6 +24,20 @@ import type {
 } from "../provisioning/deps.ts";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/** Audit actions that mean something went wrong, rather than routine admin activity. */
+const WARN_ACTIONS: ReadonlySet<AuditAction> = new Set<AuditAction>([
+  "instance_data_lost",
+  "instance_hostname_unclaimed",
+  "action_failed",
+]);
+
+/** The actions the hostname check writes and reads back as its own history. */
+const HOSTNAME_ACTIONS: AuditAction[] = [
+  "instance_hostname_unclaimed",
+  "instance_hostname_accepted",
+  "instance_recovered",
+];
 
 export interface RepoConfig {
   portRange: { min: number; max: number };
@@ -42,6 +57,7 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
   constructor(
     private readonly db: Db,
     private readonly config: RepoConfig,
+    private readonly logger: Logger,
   ) {}
 
   // Each method is a synchronous SQLite call wrapped in defer() so it returns
@@ -330,7 +346,33 @@ export class DrizzleProvisioningRepo implements ProvisioningRepo {
         detail,
       })
         .run();
+      // Mirrored to stdout after the insert, so an operator tailing logs sees the
+      // same history as the UI and no line claims a write that failed.
+      const level = WARN_ACTIONS.has(action) ? "warn" : "info";
+      this.logger[level]("audit", {
+        action,
+        friendId,
+        friend: friendName,
+        detail,
+      });
     });
+  }
+
+  lastHostnameEvent(
+    friendId: number,
+  ): Promise<{ action: AuditAction; detail: string | null } | undefined> {
+    return defer(() =>
+      this.db
+        .select({ action: auditTable.action, detail: auditTable.detail })
+        .from(auditTable)
+        .where(and(
+          eq(auditTable.friendId, friendId),
+          inArray(auditTable.action, HOSTNAME_ACTIONS),
+        ))
+        // id breaks ties within the same timestamp, which the check can produce.
+        .orderBy(desc(auditTable.createdAt), desc(auditTable.id))
+        .get()
+    );
   }
 
   private reserveTx(

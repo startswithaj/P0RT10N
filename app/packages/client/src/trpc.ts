@@ -1,6 +1,7 @@
 import {
   createTRPCClient,
   httpBatchLink,
+  httpLink,
   httpSubscriptionLink,
   splitLink,
 } from "@trpc/client";
@@ -11,6 +12,8 @@ import { demoLink } from "./demo/index.ts";
 // This is an inline literal so Vite folds it to a constant and tree-shakes the demo engine out of production.
 const DEMO = import.meta.env.VITE_DEMO_MODE === "1";
 
+const UNBATCHED = new Set<string>(["friends.hostnameWarnings"]);
+
 // splitLink routes subscriptions like jobs.progress over SSE and batches everything
 // else over HTTP POST; this is built lazily so demo builds can skip it entirely.
 const networkLinks = () => [
@@ -19,7 +22,11 @@ const networkLinks = () => [
     // Subscriptions are pure observers of a background job that only mutations start, so an
     // EventSource reconnect is safe: it re-attaches and replays instead of re-running the job.
     true: httpSubscriptionLink({ url: "/trpc" }),
-    false: httpBatchLink({ url: "/trpc" }),
+    false: splitLink({
+      condition: (op) => UNBATCHED.has(op.path),
+      true: httpLink({ url: "/trpc" }),
+      false: httpBatchLink({ url: "/trpc" }),
+    }),
   }),
 ];
 

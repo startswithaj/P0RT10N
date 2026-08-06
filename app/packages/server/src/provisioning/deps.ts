@@ -171,6 +171,13 @@ export interface ProvisioningRepo {
     action: AuditAction,
     detail?: string,
   ): Promise<void>;
+
+  /** Most recent hostname-related audit row for a friend, or undefined if it
+   * has none. The hostname check reads this instead of holding its own state,
+   * so a manager restart doesn't re-announce a mismatch it already recorded. */
+  lastHostnameEvent(
+    friendId: number,
+  ): Promise<{ action: AuditAction; detail: string | null } | undefined>;
 }
 
 /** Secrets are transient, never persisted to the DB. */

@@ -6,6 +6,7 @@ import type {
   FriendBundle,
   FriendDetail,
   FriendListItem,
+  HostnameWarning,
   InviteStatusView,
   OffboardResult,
   OffboardStepKey,
@@ -20,6 +21,8 @@ import type { ProgressEvent } from "../lib/progress.ts";
 
 export interface FriendService {
   list(): Promise<FriendListItem[]>;
+  /** Only friends with a mismatch; absent means healthy. */
+  hostnameWarnings(): Promise<HostnameWarning[]>;
   get(friendId: number): Promise<FriendDetail>;
   resize(friendId: number, quotaBytes: number): Promise<FriendDetail>;
   suspend(friendId: number): Promise<FriendDetail>;

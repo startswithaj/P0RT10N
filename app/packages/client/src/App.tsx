@@ -167,12 +167,35 @@ function createFriendsQuery(active: () => boolean) {
   }));
 }
 
+// Its own query because the check costs a Tailscale round trip: the table paints
+// from the friends list alone and warnings land when they land. The key sits under
+// ["friends"] so the existing invalidate() picks it up after accept/retry.
+function createHostnameWarningsQuery(active: () => boolean) {
+  return createQuery(() => ({
+    queryKey: ["friends", "hostnameWarnings"],
+    queryFn: () => trpc.friends.hostnameWarnings.query(),
+    refetchInterval: pollMs(60000),
+    retry: false,
+    enabled: active(),
+  }));
+}
+
 function createDashboardData(active: () => boolean) {
   const friends = createFriendsQuery(active);
   const capabilities = createCapabilitiesQuery(active);
   const status = createStatusQuery(active);
   const preflight = createSystemHealthQuery(active);
-  const rows = () => friends.data ?? [];
+  const warnings = createHostnameWarningsQuery(active);
+
+  const warningBy = () =>
+    new Map((warnings.data ?? []).map((w) => [w.friendId, w.warning]));
+
+  const rows = (): FriendRow[] =>
+    (friends.data ?? []).map((f) => ({
+      ...f,
+      hostnameWarning: warningBy().get(f.id) ?? null,
+    }));
+
   const canProvision = () => preflight.data?.canProvision ?? true;
 
   const addBlockReason = () =>

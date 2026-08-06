@@ -1,8 +1,12 @@
+import type { HostnameWarning } from "@p0rt1on/shared/domain";
 import type { ProvisioningRepo } from "./deps.ts";
 import type { TailnetNode, TailscaleApi } from "../tailscale/tailscale.ts";
 
-const DEFAULT_WARNING_TTL_MS = 5 * 60_000;
-const DEFAULT_NODES_TTL_MS = 60_000;
+export interface HostnameTarget {
+  friendId: number;
+  tsHostname: string;
+  serveNodeId: string | null;
+}
 
 function describeMismatch(tsHostname: string, actual: string | null): string {
   return `${tsHostname} is currently reachable at ${
@@ -10,73 +14,69 @@ function describeMismatch(tsHostname: string, actual: string | null): string {
   }, not its pinned hostname`;
 }
 
+/**
+ * Holds no state: the audit trail is the record of what was already announced,
+ * so a restart never re-announces a known mismatch, and the check is served off
+ * its own endpoint rather than the dashboard's hot path.
+ */
 export class HostnameHealthChecker {
-  private readonly cache = new Map<
-    number,
-    { warning: string | null; checkedAt: number }
-  >();
-  private nodesCache: { nodes: TailnetNode[]; fetchedAt: number } | null = null;
-  private nodesPromise: Promise<TailnetNode[]> | null = null;
-
   constructor(
-    private readonly repo: Pick<ProvisioningRepo, "audit">,
+    private readonly repo: Pick<
+      ProvisioningRepo,
+      "audit" | "lastHostnameEvent"
+    >,
     private readonly tailscale: Pick<TailscaleApi, "nodesByTag">,
     private readonly serveNodeTag: string,
-    private readonly warningTtlMs: number = DEFAULT_WARNING_TTL_MS,
-    private readonly nodesTtlMs: number = DEFAULT_NODES_TTL_MS,
   ) {}
 
-  // Never throws on a Tailscale failure — falls back to the last known
-  // warning (or null) instead, so a dashboard row can't break from this.
-  async checkHostname(
-    instanceId: number,
-    tsHostname: string,
-    serveNodeId: string | null,
-  ): Promise<string | null> {
-    const cached = this.cache.get(instanceId);
-    if (cached && Date.now() - cached.checkedAt < this.warningTtlMs) {
-      return cached.warning;
+  /** One Tailscale fetch covers every target. */
+  async check(targets: HostnameTarget[]): Promise<HostnameWarning[]> {
+    if (targets.length === 0) return [];
+    const nodes = await this.tailscale.nodesByTag(this.serveNodeTag)
+      .catch(() => null);
+    const checked = await Promise.all(
+      targets.map((t) => this.checkOne(t, nodes)),
+    );
+    return checked.filter((c): c is HostnameWarning => c !== null);
+  }
+
+  private async checkOne(
+    target: HostnameTarget,
+    nodes: TailnetNode[] | null,
+  ): Promise<HostnameWarning | null> {
+    const last = await this.repo.lastHostnameEvent(target.friendId);
+    // Only an unclaimed row means a warning is still outstanding; accepted and
+    // recovered both close one out.
+    const previous = last?.action === "instance_hostname_unclaimed"
+      ? last.detail
+      : null;
+
+    // Tailscale unreachable: keep reporting the last known mismatch rather than
+    // reporting healthy, which would hide a real one behind an outage.
+    if (nodes === null) {
+      return previous ? { friendId: target.friendId, warning: previous } : null;
     }
 
-    const nodes = await this.nodes().catch(() => null);
-    if (nodes === null) return cached?.warning ?? null;
-
-    const actual = nodes.find((n) => n.nodeId === serveNodeId)?.hostname ??
-      null;
-    const warning = actual === tsHostname
+    const actual = nodes.find((n) => n.nodeId === target.serveNodeId)
+      ?.hostname ?? null;
+    const warning = actual === target.tsHostname
       ? null
-      : describeMismatch(tsHostname, actual);
+      : describeMismatch(target.tsHostname, actual);
 
-    if (warning && cached?.warning !== warning) {
-      await this.repo.audit(null, "instance_hostname_unclaimed", warning);
-    } else if (!warning && cached?.warning) {
+    if (warning && previous !== warning) {
       await this.repo.audit(
-        null,
+        target.friendId,
+        "instance_hostname_unclaimed",
+        warning,
+      );
+    } else if (!warning && previous) {
+      await this.repo.audit(
+        target.friendId,
         "instance_recovered",
-        `${tsHostname} reclaimed its pinned hostname`,
+        `${target.tsHostname} reclaimed its pinned hostname`,
       );
     }
 
-    this.cache.set(instanceId, { warning, checkedAt: Date.now() });
-    return warning;
-  }
-
-  // Shared/deduped across calls; TTL shorter than warningTtlMs on purpose.
-  private async nodes(): Promise<TailnetNode[]> {
-    if (
-      this.nodesCache &&
-      Date.now() - this.nodesCache.fetchedAt < this.nodesTtlMs
-    ) {
-      return this.nodesCache.nodes;
-    }
-    if (!this.nodesPromise) {
-      this.nodesPromise = this.tailscale.nodesByTag(this.serveNodeTag)
-        .finally(() => {
-          this.nodesPromise = null;
-        });
-    }
-    const nodes = await this.nodesPromise;
-    this.nodesCache = { nodes, fetchedAt: Date.now() };
-    return nodes;
+    return warning ? { friendId: target.friendId, warning } : null;
   }
 }

@@ -3,6 +3,7 @@ import { css } from "styled-system/css";
 import { OFFBOARD_STEPS, type OffboardStepKey } from "@p0rt1on/shared/steps";
 import { queryClient, trpc } from "../trpc.ts";
 import { toaster } from "./ui/toast.tsx";
+import type { FriendRow } from "./types.ts";
 
 export const invalidate = () =>
   queryClient.invalidateQueries({ queryKey: ["friends"] });
@@ -43,7 +44,6 @@ export function createConfirmAction(opts: {
   return { busy, err, confirm };
 }
 
-type FriendRow = Awaited<ReturnType<typeof trpc.friends.list.query>>[number];
 export type AddBundle = Awaited<ReturnType<typeof trpc.friends.add.mutate>>;
 export type ActionKind =
   | "resize"

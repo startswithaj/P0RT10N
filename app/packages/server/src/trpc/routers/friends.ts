@@ -14,6 +14,11 @@ import { protectedProcedure, router } from "../trpc.ts";
 export const friendsRouter = router({
   list: protectedProcedure.query(({ ctx }) => ctx.friendService.list()),
 
+  /** Separate from list so the dashboard renders before this Tailscale call returns. */
+  hostnameWarnings: protectedProcedure.query(({ ctx }) =>
+    ctx.friendService.hostnameWarnings()
+  ),
+
   get: protectedProcedure
     .input(getFriendInput)
     .query(({ ctx, input }) => ctx.friendService.get(input.friendId)),

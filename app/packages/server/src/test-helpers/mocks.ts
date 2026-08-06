@@ -72,7 +72,7 @@ export function noopLogger(): Logger {
  * live in HostnameHealthChecker.test.ts. */
 export function mockHostnameHealthChecker(): HostnameHealthChecker {
   return strictMock<HostnameHealthChecker>("HostnameHealthChecker", {
-    checkHostname: () => Promise.resolve(null),
+    check: () => Promise.resolve([]),
   });
 }
 
@@ -547,6 +547,10 @@ export function mockProvisioningRepo(
     audit: (_friendId, action) => {
       calls.push(`repo:audit:${action}`);
       return Promise.resolve();
+    },
+    lastHostnameEvent: () => {
+      calls.push("repo:lastHostnameEvent");
+      return Promise.resolve(undefined);
     },
     ...overrides,
   };

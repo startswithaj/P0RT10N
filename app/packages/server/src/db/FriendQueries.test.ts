@@ -11,6 +11,7 @@ import {
   seedUsage,
   TEST_REPO_CONFIG,
 } from "../test-helpers/testDb.ts";
+import { noopLogger } from "../test-helpers/mocks.ts";
 import { hourKey } from "../minio-events/requestBuckets.ts";
 
 describe("FriendQueries", () => {
@@ -23,7 +24,11 @@ describe("FriendQueries", () => {
 
   beforeEach(() => {
     database = createTestDatabase();
-    repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
     queries = new FriendQueries(database.db, () => NOW);
   });
 

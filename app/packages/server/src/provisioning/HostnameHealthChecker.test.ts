@@ -1,11 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FakeTime } from "@std/testing/time";
+import type { AuditAction } from "@p0rt1on/shared/domain";
 import { HostnameHealthChecker } from "./HostnameHealthChecker.ts";
 import type { TailnetNode } from "../tailscale/tailscale.ts";
 
 describe("HostnameHealthChecker", () => {
-  function build(nodes: TailnetNode[]) {
+  const ALICE = { friendId: 1, tsHostname: "p0rt1on-alice", serveNodeId: "n1" };
+
+  /** `last` stands in for the friend's audit history, which is the only state
+   * the checker has — it holds none of its own. */
+  function build(
+    nodes: TailnetNode[],
+    last?: { action: AuditAction; detail: string | null },
+  ) {
     const auditCalls: [number | null, string, string | undefined][] = [];
     let nodesByTagCalls = 0;
     const checker = new HostnameHealthChecker(
@@ -14,6 +21,7 @@ describe("HostnameHealthChecker", () => {
           auditCalls.push([friendId, action, detail]);
           return Promise.resolve();
         },
+        lastHostnameEvent: () => Promise.resolve(last),
       },
       {
         nodesByTag: () => {
@@ -22,132 +30,145 @@ describe("HostnameHealthChecker", () => {
         },
       },
       "tag:p0rt1on-serve",
-      1000, // warningTtlMs
-      100, // nodesTtlMs
     );
     return { checker, auditCalls, nodesByTagCallCount: () => nodesByTagCalls };
   }
 
-  it("returns null when the live hostname matches the pinned one", async () => {
+  it("reports nothing when the live hostname matches the pinned one", async () => {
     const { checker } = build([
       { nodeId: "n1", hostname: "p0rt1on-alice", tags: [], online: true },
     ]);
 
-    const warning = await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(warning).toBeNull();
+    expect(await checker.check([ALICE])).toEqual([]);
   });
 
-  it("returns a warning when the live hostname differs", async () => {
+  it("reports a warning when the live hostname differs", async () => {
     const { checker } = build([
       { nodeId: "n1", hostname: "p0rt1on-alice-1", tags: [], online: true },
     ]);
 
-    const warning = await checker.checkHostname(1, "p0rt1on-alice", "n1");
+    const warnings = await checker.check([ALICE]);
 
-    expect(warning).toContain("p0rt1on-alice-1");
-  });
-
-  it("writes an audit row the first time a mismatch is found, not on repeats", async () => {
-    using time = new FakeTime();
-    const { checker, auditCalls } = build([
-      { nodeId: "n1", hostname: "p0rt1on-alice-1", tags: [], online: true },
-    ]);
-
-    await checker.checkHostname(1, "p0rt1on-alice", "n1");
-    time.tick(2000); // past both TTLs
-    await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(auditCalls.filter((c) => c[1] === "instance_hostname_unclaimed"))
-      .toHaveLength(1);
-  });
-
-  it("writes instance_recovered when a mismatch resolves", async () => {
-    using time = new FakeTime();
-    const nodes: TailnetNode[] = [
-      { nodeId: "n1", hostname: "p0rt1on-alice-1", tags: [], online: true },
-    ];
-    const { checker, auditCalls } = build(nodes);
-
-    await checker.checkHostname(1, "p0rt1on-alice", "n1");
-    nodes[0].hostname = "p0rt1on-alice";
-    time.tick(2000);
-    const warning = await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(warning).toBeNull();
-    expect(auditCalls.some((c) => c[1] === "instance_recovered")).toBe(true);
-  });
-
-  it("serves repeat checks within warningTtlMs from cache, no re-fetch", async () => {
-    using time = new FakeTime();
-    const { checker, nodesByTagCallCount } = build([
-      { nodeId: "n1", hostname: "p0rt1on-alice", tags: [], online: true },
-    ]);
-
-    await checker.checkHostname(1, "p0rt1on-alice", "n1");
-    time.tick(500); // inside warningTtlMs (1000)
-    await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(nodesByTagCallCount()).toBe(1);
-  });
-
-  it("shares one nodesByTag fetch across different instances within nodesTtlMs", async () => {
-    const { checker, nodesByTagCallCount } = build([
-      { nodeId: "n1", hostname: "p0rt1on-alice", tags: [], online: true },
-      { nodeId: "n2", hostname: "p0rt1on-bob", tags: [], online: true },
-    ]);
-
-    await checker.checkHostname(1, "p0rt1on-alice", "n1");
-    await checker.checkHostname(2, "p0rt1on-bob", "n2");
-
-    expect(nodesByTagCallCount()).toBe(1);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].friendId).toBe(1);
+    expect(warnings[0].warning).toContain("p0rt1on-alice-1");
   });
 
   it("treats a missing node as a mismatch", async () => {
     const { checker } = build([]);
 
-    const warning = await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(warning).toContain("no serve node");
+    expect((await checker.check([ALICE]))[0].warning).toContain(
+      "no serve node",
+    );
   });
 
-  it("returns null, not a throw, when Tailscale is unreachable and there's no prior check", async () => {
+  it("writes an audit row the first time a mismatch is found", async () => {
+    const { checker, auditCalls } = build([
+      { nodeId: "n1", hostname: "p0rt1on-alice-1", tags: [], online: true },
+    ]);
+
+    await checker.check([ALICE]);
+
+    expect(auditCalls.filter((c) => c[1] === "instance_hostname_unclaimed"))
+      .toHaveLength(1);
+  });
+
+  it("does not re-announce a mismatch the audit trail already records", async () => {
+    const nodes: TailnetNode[] = [
+      { nodeId: "n1", hostname: "p0rt1on-alice-1", tags: [], online: true },
+    ];
+    const detail =
+      "p0rt1on-alice is currently reachable at p0rt1on-alice-1, not its pinned hostname";
+    const { checker, auditCalls } = build(nodes, {
+      action: "instance_hostname_unclaimed",
+      detail,
+    });
+
+    const warnings = await checker.check([ALICE]);
+
+    expect(warnings[0].warning).toBe(detail);
+    expect(auditCalls).toHaveLength(0);
+  });
+
+  it("writes instance_recovered when a recorded mismatch resolves", async () => {
+    const { checker, auditCalls } = build(
+      [{ nodeId: "n1", hostname: "p0rt1on-alice", tags: [], online: true }],
+      {
+        action: "instance_hostname_unclaimed",
+        detail: "p0rt1on-alice is currently reachable at p0rt1on-alice-1, " +
+          "not its pinned hostname",
+      },
+    );
+
+    expect(await checker.check([ALICE])).toEqual([]);
+    expect(auditCalls.some((c) => c[1] === "instance_recovered")).toBe(true);
+  });
+
+  // Accepting repins tsHostname, so the next check matches. That is not a
+  // recovery, and claiming the instance "reclaimed" anything would be wrong.
+  it("stays silent after an accepted hostname, not claiming a recovery", async () => {
+    const { checker, auditCalls } = build(
+      [{ nodeId: "n1", hostname: "p0rt1on-alice", tags: [], online: true }],
+      { action: "instance_hostname_accepted", detail: "old -> p0rt1on-alice" },
+    );
+
+    expect(await checker.check([ALICE])).toEqual([]);
+    expect(auditCalls).toHaveLength(0);
+  });
+
+  it("fetches the node list once for the whole set", async () => {
+    const { checker, nodesByTagCallCount } = build([
+      { nodeId: "n1", hostname: "p0rt1on-alice", tags: [], online: true },
+      { nodeId: "n2", hostname: "p0rt1on-bob", tags: [], online: true },
+    ]);
+
+    await checker.check([
+      ALICE,
+      { friendId: 2, tsHostname: "p0rt1on-bob", serveNodeId: "n2" },
+    ]);
+
+    expect(nodesByTagCallCount()).toBe(1);
+  });
+
+  it("makes no Tailscale call when there is nothing to check", async () => {
+    const { checker, nodesByTagCallCount } = build([]);
+
+    expect(await checker.check([])).toEqual([]);
+    expect(nodesByTagCallCount()).toBe(0);
+  });
+
+  it("reports nothing, not a throw, when Tailscale is unreachable with no history", async () => {
     const checker = new HostnameHealthChecker(
-      { audit: () => Promise.resolve() },
+      {
+        audit: () => Promise.resolve(),
+        lastHostnameEvent: () => Promise.resolve(undefined),
+      },
       { nodesByTag: () => Promise.reject(new Error("tailscale down")) },
       "tag:p0rt1on-serve",
     );
 
-    const warning = await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(warning).toBeNull();
+    expect(await checker.check([ALICE])).toEqual([]);
   });
 
-  it("falls back to the last known warning when a re-check can't reach Tailscale", async () => {
-    using time = new FakeTime();
-    const nodes: TailnetNode[] = [
-      { nodeId: "n1", hostname: "p0rt1on-alice-1", tags: [], online: true },
-    ];
-    let reachable = true;
-
-    const fetchNodes = () =>
-      reachable
-        ? Promise.resolve(nodes)
-        : Promise.reject(new Error("tailscale down"));
-
+  // An outage must not read as "healthy" — that would hide a real mismatch.
+  it("keeps reporting the recorded warning when Tailscale is unreachable", async () => {
+    const detail =
+      "p0rt1on-alice is currently reachable at p0rt1on-alice-1, not its pinned hostname";
     const checker = new HostnameHealthChecker(
-      { audit: () => Promise.resolve() },
-      { nodesByTag: fetchNodes },
+      {
+        audit: () => Promise.resolve(),
+        lastHostnameEvent: () =>
+          Promise.resolve({
+            action: "instance_hostname_unclaimed" as AuditAction,
+            detail,
+          }),
+      },
+      { nodesByTag: () => Promise.reject(new Error("tailscale down")) },
       "tag:p0rt1on-serve",
-      1000,
-      100,
     );
 
-    const first = await checker.checkHostname(1, "p0rt1on-alice", "n1");
-    reachable = false;
-    time.tick(2000);
-    const second = await checker.checkHostname(1, "p0rt1on-alice", "n1");
-
-    expect(second).toBe(first);
+    expect(await checker.check([ALICE])).toEqual([
+      { friendId: 1, warning: detail },
+    ]);
   });
 });

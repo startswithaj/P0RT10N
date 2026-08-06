@@ -11,6 +11,7 @@ import { activity, audit, friends, instances, usage } from "./Schema.ts";
 import type { RequestBuckets } from "../minio-events/requestBuckets.ts";
 import { hourlySeries, sumLast24h } from "../minio-events/requestBuckets.ts";
 import { defer } from "../lib/defer.ts";
+import type { HostnameTarget } from "../provisioning/HostnameHealthChecker.ts";
 
 export type FriendDetailRow =
   & Omit<FriendDetail, "nodeOnline" | "s3Endpoint">
@@ -49,23 +50,25 @@ export class FriendQueries {
   // Each query is a synchronous SQLite read exposed as a Promise via defer(),
   // so a throw rejects instead of escaping synchronously.
 
-  // instanceId/tsHostname/serveNodeId ride along for FriendServiceImpl's
-  // hostname check — not part of the public FriendListItem type.
-  list(): Promise<
-    (FriendListItem & {
-      instanceId: number;
-      tsHostname: string;
-      serveNodeId: string | null;
-    })[]
-  > {
+  list(): Promise<FriendListItem[]> {
     return defer(() => this.listSync());
   }
 
-  private listSync(): (FriendListItem & {
-    instanceId: number;
-    tsHostname: string;
-    serveNodeId: string | null;
-  })[] {
+  /** Instance identity per friend, for the hostname check. Kept off list() so
+   * the dashboard's query stays a plain read with nothing remote behind it. */
+  hostnameTargets(): Promise<HostnameTarget[]> {
+    return defer(() =>
+      this.db.select({
+        friendId: friends.id,
+        tsHostname: instances.tsHostname,
+        serveNodeId: instances.serveNodeId,
+      }).from(friends)
+        .innerJoin(instances, eq(friends.instanceId, instances.id))
+        .all()
+    );
+  }
+
+  private listSync(): FriendListItem[] {
     const rows = this.db.select({
       id: friends.id,
       name: friends.name,
@@ -78,12 +81,8 @@ export class FriendQueries {
       inviteStatus: friends.inviteStatus,
       requestBuckets: activity.requestBuckets,
       lastRequestAt: activity.lastRequestAt,
-      instanceId: friends.instanceId,
-      tsHostname: instances.tsHostname,
-      serveNodeId: instances.serveNodeId,
     }).from(friends)
       .leftJoin(activity, eq(activity.friendId, friends.id))
-      .innerJoin(instances, eq(friends.instanceId, instances.id))
       // Stable creation order (id breaks same-timestamp ties).
       .orderBy(friends.createdAt, friends.id)
       .all();
@@ -102,10 +101,6 @@ export class FriendQueries {
       lastRequestAt: r.lastRequestAt ?? null,
       enrollmentMode: r.enrollmentMode,
       inviteStatus: r.inviteStatus as FriendListItem["inviteStatus"],
-      hostnameWarning: null,
-      instanceId: r.instanceId,
-      tsHostname: r.tsHostname,
-      serveNodeId: r.serveNodeId,
     }));
   }
 

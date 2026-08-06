@@ -1,4 +1,8 @@
-import type { FriendDetail, FriendListItem } from "@p0rt1on/shared/domain";
+import type {
+  FriendDetail,
+  FriendListItem,
+  HostnameWarning,
+} from "@p0rt1on/shared/domain";
 import type { FriendDetailRow, FriendQueries } from "../db/FriendQueries.ts";
 import type { McClientFactory } from "../minio/mc.ts";
 import type { TailscaleApi } from "../tailscale/tailscale.ts";
@@ -21,15 +25,14 @@ export class FriendServiceImpl implements FriendService {
   ) {}
 
   list(): Promise<FriendListItem[]> {
-    return this.queries.list().then((rows) =>
-      Promise.all(rows.map(async (r) => ({
-        ...r,
-        hostnameWarning: await this.hostnameChecker.checkHostname(
-          r.instanceId,
-          r.tsHostname,
-          r.serveNodeId,
-        ),
-      })))
+    return this.queries.list();
+  }
+
+  /** Split from list() because the check costs a Tailscale round trip, which
+   * the dashboard's first paint must not wait on. */
+  async hostnameWarnings(): Promise<HostnameWarning[]> {
+    return await this.hostnameChecker.check(
+      await this.queries.hostnameTargets(),
     );
   }
 

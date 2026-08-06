@@ -6,6 +6,7 @@ import type {
   ServiceStatus,
   StatusView,
 } from "@p0rt1on/shared/domain";
+import type { FriendRow } from "../components/types.ts";
 
 export function makeFriend(
   overrides: Partial<FriendListItem> = {},
@@ -28,9 +29,14 @@ export function makeFriend(
     lastRequestAt: null,
     enrollmentMode: "authKey",
     inviteStatus: null,
-    hostnameWarning: null,
     ...overrides,
   };
+}
+
+/** A friend as the dashboard renders it: the list item with its hostname
+ * warning already merged in from the separate query. */
+export function makeRow(overrides: Partial<FriendRow> = {}): FriendRow {
+  return { ...makeFriend(), hostnameWarning: null, ...overrides };
 }
 
 /**

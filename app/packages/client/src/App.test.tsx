@@ -12,6 +12,7 @@ vi.mock("./trpc.ts", async () => {
     trpc: {
       friends: {
         list: { query: vi.fn() },
+        hostnameWarnings: { query: vi.fn() },
         addStart: { mutate: vi.fn() },
         capabilities: { query: vi.fn() },
         inviteStatus: { query: vi.fn() },
@@ -64,6 +65,7 @@ describe("App dashboard", () => {
     asMock(trpc.friends.capabilities.query).mockResolvedValue({
       inviteApiConfigured: true,
     });
+    asMock(trpc.friends.hostnameWarnings.query).mockResolvedValue([]);
     asMock(trpc.friends.inviteStatus.query).mockResolvedValue({
       status: "pending",
       email: "friend@example.com",
@@ -118,6 +120,35 @@ describe("App dashboard", () => {
       expect(screen.getByText("suspended")).toBeInTheDocument();
       expect(screen.getAllByRole("progressbar")).toHaveLength(2);
       expect(screen.queryByText("No portions yet")).not.toBeInTheDocument();
+    });
+
+    // The warning rides its own query so the table can paint before the
+    // Tailscale check returns; the card must still light up when it lands.
+    it("merges hostname warnings from their own query onto the matching card", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([
+        makeFriend({ id: 4, name: "alice" }),
+        makeFriend({ id: 9, name: "bob" }),
+      ]);
+      asMock(trpc.friends.hostnameWarnings.query).mockResolvedValue([
+        { friendId: 9, warning: "p0rt1on-bob is reachable at p0rt1on-bob-1" },
+      ]);
+
+      renderApp();
+
+      expect(await screen.findByText("Hostname mismatch")).toBeInTheDocument();
+      // Only the friend named in the warning gets one.
+      expect(screen.getAllByText("Hostname mismatch")).toHaveLength(1);
+    });
+
+    it("renders no warning while the hostname query is still empty", async () => {
+      asMock(trpc.friends.list.query).mockResolvedValue([
+        makeFriend({ name: "alice" }),
+      ]);
+
+      renderApp();
+
+      expect(await screen.findByText("alice")).toBeInTheDocument();
+      expect(screen.queryByText("Hostname mismatch")).not.toBeInTheDocument();
     });
 
     it("renders the empty-state placeholder when the list loads empty", async () => {

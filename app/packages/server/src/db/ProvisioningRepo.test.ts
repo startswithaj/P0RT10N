@@ -10,6 +10,7 @@ import {
   seedUsage,
   TEST_REPO_CONFIG,
 } from "../test-helpers/testDb.ts";
+import { capturingLogger, noopLogger } from "../test-helpers/mocks.ts";
 
 describe("DrizzleProvisioningRepo", () => {
   let database: Database;
@@ -17,7 +18,11 @@ describe("DrizzleProvisioningRepo", () => {
 
   beforeEach(() => {
     database = createTestDatabase();
-    repo = new DrizzleProvisioningRepo(database.db, TEST_REPO_CONFIG);
+    repo = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      noopLogger(),
+    );
   });
 
   afterEach(() => {
@@ -57,7 +62,7 @@ describe("DrizzleProvisioningRepo", () => {
     const probed = new DrizzleProvisioningRepo(database.db, {
       ...TEST_REPO_CONFIG,
       probePort: (port) => port !== 9000,
-    });
+    }, noopLogger());
     const res = await probed.reserveFriend(
       makeAddInput("alice", "dedicated"),
       namingFor("alice", "dedicated"),
@@ -69,7 +74,7 @@ describe("DrizzleProvisioningRepo", () => {
     const probed = new DrizzleProvisioningRepo(database.db, {
       ...TEST_REPO_CONFIG,
       probePort: () => false,
-    });
+    }, noopLogger());
     await expect(
       probed.reserveFriend(
         makeAddInput("alice", "dedicated"),
@@ -327,6 +332,46 @@ describe("DrizzleProvisioningRepo", () => {
 
     const row = database.driver.prepare("SELECT COUNT(*) c FROM audit").get();
     expect(row?.c).toBe(2);
+  });
+
+  it("audit mirrors the row to the log, warning only on the bad outcomes", async () => {
+    const { logger, lines } = capturingLogger();
+    const logged = new DrizzleProvisioningRepo(
+      database.db,
+      TEST_REPO_CONFIG,
+      logger,
+    );
+    await logged.audit(null, "login");
+    await logged.audit(null, "instance_hostname_unclaimed", "held elsewhere");
+
+    expect(lines.map((l) => l.level)).toEqual(["info", "warn"]);
+    expect(lines[1].meta?.detail).toBe("held elsewhere");
+  });
+
+  it("lastHostnameEvent returns the newest hostname row, ignoring other actions", async () => {
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    await repo.audit(res.friendId, "instance_hostname_unclaimed", "mismatch");
+    await repo.audit(res.friendId, "instance_hostname_accepted", "a -> b");
+    // Written last but not a hostname action, so it must not mask the accept.
+    await repo.audit(res.friendId, "rotate_key");
+
+    expect(await repo.lastHostnameEvent(res.friendId)).toEqual({
+      action: "instance_hostname_accepted",
+      detail: "a -> b",
+    });
+  });
+
+  it("lastHostnameEvent is undefined for a friend with no hostname history", async () => {
+    const res = await repo.reserveFriend(
+      makeAddInput("alice", "dedicated"),
+      namingFor("alice", "dedicated"),
+    );
+    await repo.audit(res.friendId, "add_friend");
+
+    expect(await repo.lastHostnameEvent(res.friendId)).toBeUndefined();
   });
 
   it("setQuota updates the friend's quota (no int64 truncation)", async () => {
