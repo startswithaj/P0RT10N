@@ -3,6 +3,9 @@ import { css } from "styled-system/css";
 import { AlertTriangle, X } from "lucide-solid";
 import { IconButton } from "./ui/icon-button.tsx";
 
+// The demo has no backend to secure, so the warning would be noise.
+const DEMO = import.meta.env.VITE_DEMO_MODE === "1";
+
 const DISMISS_KEY = "p0rt1on-insecure-dismissed";
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "::1"];
 
@@ -35,7 +38,7 @@ export function InsecureBanner(props: { noPassword: () => boolean }) {
   };
 
   return (
-    <Show when={props.noPassword() && fromNetwork && !dismissed()}>
+    <Show when={!DEMO && props.noPassword() && fromNetwork && !dismissed()}>
       <div class={banner}>
         <AlertTriangle size={18} class={icon} />
         <span>
