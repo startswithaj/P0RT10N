@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/p0rt1on-social-card-2-rounded.png" alt="P0RT1ON — securely share some storage with friends" width="640">
+  <img src="assets/p0rt1on-social-card-2-rounded.png" alt="P0RT1ON — securely share some storage with friends" />
 </p>
 
 
