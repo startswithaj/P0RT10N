@@ -189,6 +189,27 @@ describe("Portion lifecycle over a REAL tailnet on docker (e2e)", () => {
         ]);
         if (backup.code !== 0) {
           console.error("friend backup log:\n", backup.stdout, backup.stderr);
+          // The serve URL's cert is issued on first TLS connect; dump the
+          // instance's serve/peer state to show what the client hit.
+          const instance = `p0rt1on-instance-p0rt1on-${portion}`;
+          const tsHost = new URL(bundle.s3Endpoint).hostname;
+          // entrypoint.sh runs tailscaled on a non-default socket.
+          const sock = "--socket=/var/lib/tailscale/state/tailscaled.sock";
+          const probes = [
+            ["logs", "--tail", "200", instance],
+            ["exec", instance, "cat", "/tmp/tailscaled.log"],
+            ["exec", instance, "tailscale", sock, "status"],
+            ["exec", instance, "tailscale", sock, "serve", "status"],
+            ["exec", instance, "tailscale", sock, "cert", tsHost],
+          ];
+          const outs = await Promise.all(probes.map((probe) => docker(probe)));
+          probes.forEach((probe, i) =>
+            console.error(
+              `\n--- docker ${probe.join(" ")} (code ${outs[i].code}) ---\n`,
+              outs[i].stdout,
+              outs[i].stderr,
+            )
+          );
         }
         // Exit 0 only means Kopia wrote a snapshot; whether it READS BACK is
         // proved below, not by the client grading its own work.

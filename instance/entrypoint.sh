@@ -108,6 +108,23 @@ if [ "$serve_rc" -ne 0 ]; then
     > "$SERVE_FAILED"
   log "ERROR: tailscale serve failed (rc=${serve_rc}): ${serve_out}"
 fi
+
+# serve --bg returns before any cert exists; the first friend would otherwise
+# pay ACME registration + DNS-01 inside its 10s TLS handshake timeout. Fetch now.
+if [ "$TAILSCALE_SERVE_MODE" != "http" ] && [ ! -f "$SERVE_FAILED" ]; then
+  fqdn=$(tailscale --socket="$TS_SOCKET" status --json |
+    sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -n 1)
+  log "fetching HTTPS cert for ${fqdn}"
+  cert_rc=0
+  cert_out=$(timeout 120 tailscale --socket="$TS_SOCKET" cert "$fqdn" 2>&1) || cert_rc=$?
+  if [ "$cert_rc" -ne 0 ]; then
+    printf '%s\n' \
+      "tailscale cert ${fqdn} failed (rc=${cert_rc}): ${cert_out}" \
+      "friends will hit TLS handshake timeouts until a cert is issued" \
+      > "$SERVE_FAILED"
+    log "ERROR: tailscale cert failed (rc=${cert_rc}): ${cert_out}"
+  fi
+fi
 fi
 
 log "starting minio on :${MINIO_PORT} (drives: ${MINIO_DRIVES})"
