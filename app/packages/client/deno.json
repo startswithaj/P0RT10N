@@ -25,8 +25,8 @@
     "dev": "deno run -A npm:vite@^6 dev",
     "dev:demo": "VITE_DEMO_MODE=1 deno run -A npm:vite@^6 dev",
     "build": "deno run -A npm:@pandacss/dev codegen && deno run -A npm:vite@^6 build",
-    "build:demo": "deno run -A npm:@pandacss/dev codegen && VITE_DEMO_MODE=1 deno run -A npm:vite@^6 build --base=/p0rt1on/",
-    "preview:demo": "deno task build:demo && deno run -A npm:vite@^6 preview --base=/p0rt1on/",
+    "build:demo": "deno run -A npm:@pandacss/dev codegen && VITE_DEMO_MODE=1 deno run -A npm:vite@^6 build --base=/P0RT10N/",
+    "preview:demo": "deno task build:demo && deno run -A npm:vite@^6 preview --base=/P0RT10N/",
     "test": "deno run -A npm:vitest@^3 run",
     "test:watch": "deno run -A npm:vitest@^3",
     "test:coverage": "deno run -A npm:vitest@^3 run --coverage"

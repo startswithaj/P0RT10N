@@ -54,7 +54,8 @@
     "coverage:check:client": "deno task test:client:coverage && deno run --allow-read --allow-env devtools/client-coverage-threshold.ts",
     "check:client": "deno run -A npm:typescript/bin/tsc --noEmit -p app/packages/client/tsconfig.json",
     "verify": "deno fmt --check && deno lint && deno task check && deno task check:client && deno task coverage:check && deno task coverage:check:client",
-    "check:all": "deno fmt && deno task verify"
+    "check:all": "deno fmt && deno task verify",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "lint": {
     "plugins": [

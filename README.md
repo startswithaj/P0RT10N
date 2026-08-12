@@ -2,10 +2,11 @@
   <img src="assets/p0rt1on-social-card-2-rounded.png" alt="P0RT1ON — securely share some storage with friends" />
 </p>
 
-
 **Lend your friends a slice of your disk as an offsite S3 backup target**
 
 Self-hosted · Simple Backups · Over Tailscale
+
+**[Try a demo here →](https://startswithaj.github.io/P0RT10N/)**
 
 ## What it is
 
@@ -43,9 +44,9 @@ ports, no port forwarding, no home IP out in the open. There's nothing public to
 scan or attack.
 
 **Two ways to get them on.** By default they redeem a single-use auth key with
-`tailscale up --authkey=…` and **don't need a Tailscale account** at all. Or, if you
-set a personal API token, P0RT1ON emails them a Tailscale invite and they join
-with their own account. Either way P0RT1ON creates, scopes and revokes the
+`tailscale up --authkey=…` and **don't need a Tailscale account** at all. Or, if
+you set a personal API token, P0RT1ON emails them a Tailscale invite and they
+join with their own account. Either way P0RT1ON creates, scopes and revokes the
 access for you.
 
 **Backups can't be wiped.** MinIO Object Lock (GOVERNANCE) keeps recent objects

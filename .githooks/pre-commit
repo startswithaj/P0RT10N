@@ -1,0 +1,8 @@
+#!/bin/sh
+# Static half of `deno task verify`. Tests and coverage stay in CI.
+set -e
+
+deno fmt --check
+deno lint
+deno task check
+deno task check:client
