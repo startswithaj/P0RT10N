@@ -31,6 +31,11 @@ jobs:
       - name: Install dependencies (frozen lockfile)
         run: deno install --frozen
 
+      # Panda's styled-system/ is generated and gitignored, so a clean checkout
+      # has none of the client types verify typechecks against.
+      - name: Generate Panda styled-system
+        run: deno task --cwd app/packages/client prepare
+
       # Read-only: fmt --check, lint, typecheck (server + client), unit tests,
       # coverage gates. Never mutates the tree (that's check:all, run locally).
       - name: Run verify
