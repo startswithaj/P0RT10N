@@ -1,14 +1,16 @@
-# P0RT1ON
+<p align="center">
+  <img src="assets/p0rt1on-social-card-2-rounded.png" alt="P0RT1ON — securely share some storage with friends" width="640">
+</p>
 
-**Lend your mates a slice of your disk as an offsite S3 backup target they can't
-wreck.**
 
-Self-hosted · Runs over Tailscale · Nothing on the public internet
+**Lend your friends a slice of your disk as an offsite S3 backup target**
+
+Self-hosted · Simple Backups · Over Tailscale
 
 ## What it is
 
 A web UI on top of [MinIO](https://min.io) and
-[Tailscale](https://tailscale.com). You add a friend in a form, and they get:
+[Tailscale](https://tailscale.com). You add a friend via the ui, and they get:
 
 - their own S3 bucket, with a size cap and their own access key
 - their own Tailscale endpoint — nobody else can reach it
@@ -19,9 +21,9 @@ You could do all of this by hand with `mc` and `tailscaled` — mint an auth key
 provision MinIO, set the quota and Object Lock, wire up `tailscale serve`.
 P0RT1ON turns that into a GUI.
 
-## Why it exists
+## Who is it for
 
-I wanted to run offsite backups for friends off a home server. Lend them some
+If you want to run offsite backups for friends on a home server. Lend them some
 disk, hand over a set of credentials, and let them get on with it.
 
 You never see what they store. Your server only holds the bytes their client
@@ -41,7 +43,7 @@ ports, no port forwarding, no home IP out in the open. There's nothing public to
 scan or attack.
 
 **Two ways to get them on.** By default they redeem a single-use auth key with
-`tailscale up --authkey=…` and don't need a Tailscale account at all. Or, if you
+`tailscale up --authkey=…` and **don't need a Tailscale account** at all. Or, if you
 set a personal API token, P0RT1ON emails them a Tailscale invite and they join
 with their own account. Either way P0RT1ON creates, scopes and revokes the
 access for you.
