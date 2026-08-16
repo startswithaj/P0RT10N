@@ -33,7 +33,7 @@ export function QuotaField(
       </div>
       <NumberInput.Root
         min={1}
-        value={String(props.quota())}
+        value={Number.isNaN(props.quota()) ? "" : String(props.quota())}
         formatOptions={{ maximumFractionDigits: 0 }}
         onValueChange={(d) => props.setQuota(d.valueAsNumber)}
       >
