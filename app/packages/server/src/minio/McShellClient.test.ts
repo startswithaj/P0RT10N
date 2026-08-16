@@ -178,6 +178,22 @@ describe("McShellClient arg-building", () => {
     expect(cmds.filter((c) => c.args[0] === "ready").length).toBe(3);
   });
 
+  it("setAuditWebhook distrusts `ready` until MinIO has gone down", async () => {
+    // Restart is async: the old process still answers `ready` for a while.
+    // The wait must see it go down before a passing `ready` means "back up".
+    const cmds: RecordedCommand[] = [];
+    const script = { calls: 0 };
+    await client(cmds, (args) => {
+      if (args[0] !== "ready") return { code: 0, stdout: "", stderr: "" };
+      script.calls += 1;
+      // old process alive (2 calls), then down (1 call), then back up
+      return script.calls === 3
+        ? { code: 1, stdout: "", stderr: "connection refused" }
+        : { code: 0, stdout: "", stderr: "" };
+    }).setAuditWebhook("http://m/audit", "tok");
+    expect(cmds.filter((c) => c.args[0] === "ready").length).toBe(4);
+  });
+
   it("setAuditWebhook fails loudly when MinIO never comes back", async () => {
     const failing = client(
       [],

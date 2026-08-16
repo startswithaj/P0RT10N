@@ -314,24 +314,47 @@ export class McShellClient implements McClient {
     ]);
     // The restart drops connections briefly; "webhook configured" must mean
     // "serving again" — the very next mc call lands in that window otherwise.
-    await this.awaitReady(30);
+    await this.awaitReady(120);
   }
 
+  // `mc admin service restart` returns before the old process exits, so an
+  // immediate `mc ready` can pass against the pre-restart process. Watch for
+  // MinIO to go down first (bounded — a fast restart can finish between
+  // polls), then poll until it answers again.
   private async awaitReady(attemptsLeft: number): Promise<void> {
-    const res = await this.runner.run(
-      this.mcBin,
-      ["ready", this.target.alias],
-      this.hostEnv(),
-    );
-    if (res.code === 0) return;
-    if (attemptsLeft <= 0) {
+    await this.awaitDown(6);
+    return this.awaitUp(attemptsLeft);
+  }
+
+  private async awaitDown(pollsLeft: number): Promise<void> {
+    if (pollsLeft <= 0 || !(await this.isReady())) return;
+    await this.readyDelay();
+    return this.awaitDown(pollsLeft - 1);
+  }
+
+  private async awaitUp(attemptsLeft: number): Promise<void> {
+    if (await this.isReady()) return;
+    if (attemptsLeft <= 1) {
       throw new ServiceError(
         "INTERNAL_SERVER_ERROR",
         `minio ${this.target.alias} did not come back after restart`,
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, this.readyDelayMs));
-    return this.awaitReady(attemptsLeft - 1);
+    await this.readyDelay();
+    return this.awaitUp(attemptsLeft - 1);
+  }
+
+  private async isReady(): Promise<boolean> {
+    const res = await this.runner.run(
+      this.mcBin,
+      ["ready", this.target.alias],
+      this.hostEnv(),
+    );
+    return res.code === 0;
+  }
+
+  private readyDelay(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, this.readyDelayMs));
   }
 }
 
