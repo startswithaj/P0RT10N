@@ -29,15 +29,7 @@ describe("ProvisioningService.addFriend", () => {
     expect(calls.indexOf("mc:makeBucketWithLock")).toBeLessThan(
       calls.indexOf("smoke:run"),
     );
-    // The audit webhook must be configured BEFORE the smoke test, so the
-    // smoke traffic is itself audited. Configured after, a portion records no
-    // activity until its first real backup, making a broken webhook
-    // indistinguishable from a friend who simply hasn't used it yet.
-    expect(calls.indexOf("mc:setAuditWebhook")).toBeLessThan(
-      calls.indexOf("smoke:run"),
-    );
     expect(calls).toContain("runtime:ensureInstance");
-    expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("repo:activate");
     // The friend key's ID is persisted at mint time so failure-reap and
     // offboard can revoke it; the secret itself stays request-scoped.

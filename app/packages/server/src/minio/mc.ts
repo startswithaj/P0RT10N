@@ -72,12 +72,6 @@ export interface McClient {
   removeUser(accessKeyId: string): Promise<void>;
 
   listUsers(): Promise<UserEntry[]>;
-
-  // ---- Observability ----
-
-  /** Set the audit_webhook config and restart MinIO. Idempotent per
-   * instance. */
-  setAuditWebhook(endpoint: string, authToken: string): Promise<void>;
 }
 
 export interface McClientFactory {

@@ -65,7 +65,11 @@ const FIELD_MANAGER = "p0rt1on";
  * means diagnostics stay safe even when the caller never had the value in
  * scope (an adopted instance, a boot reconcile, any future call site) — a
  * value-based mask can only be applied by whoever minted the secret. */
-const SECRET_ENV_NAMES = ["MINIO_ROOT_PASSWORD", "TAILSCALE_AUTHKEY"];
+const SECRET_ENV_NAMES = [
+  "MINIO_ROOT_PASSWORD",
+  "TAILSCALE_AUTHKEY",
+  "MINIO_AUDIT_WEBHOOK_AUTH_TOKEN_p0rt1on",
+];
 
 /** Resource names derived from the instance name, which is already a DNS label. */
 function resourceNames(instance: string) {
@@ -139,6 +143,10 @@ export class KubernetesRuntime implements InstanceRuntime {
           MINIO_ROOT_USER: spec.rootCred.accessKeyId,
           MINIO_ROOT_PASSWORD: spec.rootCred.secretKey,
           TAILSCALE_AUTHKEY: spec.tsAuthKey,
+          MINIO_AUDIT_WEBHOOK_ENABLE_p0rt1on: "on",
+          MINIO_AUDIT_WEBHOOK_ENDPOINT_p0rt1on: spec.auditWebhook.endpoint,
+          MINIO_AUDIT_WEBHOOK_AUTH_TOKEN_p0rt1on:
+            `Bearer ${spec.auditWebhook.authToken}`,
         },
       }, this.applyOpts)
     );

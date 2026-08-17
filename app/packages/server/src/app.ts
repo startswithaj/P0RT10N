@@ -70,7 +70,7 @@ export interface App {
   /** Aborted on SIGTERM, tearing down every event subscription. */
   consumersAbort: AbortController;
   /** Derived from the master key; the webhook listener authenticates with it.
-   * Same value handed to instances via setAuditWebhook. */
+   * Same value baked into each instance's audit-webhook env at creation. */
   auditWebhookToken: string;
 }
 

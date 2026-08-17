@@ -196,6 +196,10 @@ export const INSTANCE_SPEC: InstanceSpec = {
   minioPort: 9100,
   rootCred: TEST_CRED,
   tsAuthKey: "tskey-serve-secret",
+  auditWebhook: {
+    endpoint: "http://manager:8081/audit",
+    authToken: "audit-tok",
+  },
 };
 
 /** Docker-level run spec: what DockerInstanceRuntime derives from the spec above. */
@@ -268,7 +272,6 @@ export function buildMcShellClient(
   recorded: RecordedCommand[],
   respond?: (args: string[]) => CommandResult,
   written: string[] = [],
-  readyDelayMs = 1, // fast `mc ready` retries, avoiding real sleeps in tests
 ): McShellClient {
   return new McShellClient(
     { alias: "alice", minioPort: 9100 },
@@ -277,7 +280,6 @@ export function buildMcShellClient(
     fakeRunner(recorded, respond),
     fakeTempFiles(written),
     "mc",
-    readyDelayMs,
   );
 }
 
@@ -305,7 +307,6 @@ export function mockMcClient(calls: Calls): McClient {
       calls.push("mc:listUsers");
       return Promise.resolve([]);
     },
-    setAuditWebhook: note("setAuditWebhook"),
   };
 }
 
