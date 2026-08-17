@@ -423,6 +423,13 @@ describe("DockerInstanceRuntime", () => {
     expect(written[0]).toContain("MINIO_ROOT_USER=AKIATEST");
     expect(written[0]).toContain("MINIO_ROOT_PASSWORD=secret123");
     expect(written[0]).toContain("TAILSCALE_AUTHKEY=tskey-serve-secret");
+    expect(written[0]).toContain("MINIO_AUDIT_WEBHOOK_ENABLE_p0rt1on=on");
+    expect(written[0]).toContain(
+      "MINIO_AUDIT_WEBHOOK_ENDPOINT_p0rt1on=http://manager:8081/audit",
+    );
+    expect(written[0]).toContain(
+      "MINIO_AUDIT_WEBHOOK_AUTH_TOKEN_p0rt1on=Bearer audit-tok",
+    );
 
     // The finally must remove the file when the run throws too.
     const removed: string[] = [];

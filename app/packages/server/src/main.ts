@@ -101,8 +101,8 @@ await runBoot({
       port: EVENT_PORT,
       hostname: EVENT_BIND_HOST,
       sink: {
-        // The same value buildApp wires into setAuditWebhook, so instances and
-        // the listener always agree on it.
+        // The same value buildApp bakes into each instance's audit-webhook
+        // env, so instances and the listener always agree on it.
         token: app.auditWebhookToken,
         onEvent: (raw) => app.bus.publish(raw),
       },

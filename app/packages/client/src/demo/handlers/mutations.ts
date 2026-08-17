@@ -105,6 +105,7 @@ const bundleFor = (f: DemoFriend, includeEnrollment: boolean): FriendBundle => {
       retentionDays: f.lockRetentionDays,
       create: includeEnrollment,
       joinLines: joinLinesFor(includeEnrollment, isInvite, upCommand),
+      tsAuthKey: isInvite ? undefined : tsKey,
     }),
   };
   if (!includeEnrollment) return base;

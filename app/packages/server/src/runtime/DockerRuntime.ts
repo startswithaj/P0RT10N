@@ -329,6 +329,9 @@ export class DockerInstanceRuntime implements InstanceRuntime {
       `MINIO_ROOT_USER=${spec.rootCred.accessKeyId}\n` +
         `MINIO_ROOT_PASSWORD=${spec.rootCred.secretKey}\n` +
         `TAILSCALE_AUTHKEY=${spec.tsAuthKey}\n` +
+        `MINIO_AUDIT_WEBHOOK_ENABLE_p0rt1on=on\n` +
+        `MINIO_AUDIT_WEBHOOK_ENDPOINT_p0rt1on=${spec.auditWebhook.endpoint}\n` +
+        `MINIO_AUDIT_WEBHOOK_AUTH_TOKEN_p0rt1on=Bearer ${spec.auditWebhook.authToken}\n` +
         extraEnv,
     );
     try {

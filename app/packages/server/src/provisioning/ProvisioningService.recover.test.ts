@@ -46,7 +46,6 @@ describe("ProvisioningService boot recovery", () => {
     // Never re-creates the bucket; that data survives in the pantry.
     expect(calls).not.toContain("mc:makeBucketWithLock");
     expect(calls).toContain("repo:recordServeNodeId:old");
-    expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("ts:ensureFriendAcl");
     // Recorded in the audit trail so the recovery is visible after the fact.
     expect(calls).toContain("repo:audit:instance_recovered");
@@ -98,14 +97,13 @@ describe("ProvisioningService boot recovery", () => {
     expect(calls).not.toContain("ts:ensureFriendAcl");
   });
 
-  it("realign re-issues the webhook + ACLs without recreating or re-keying", async () => {
+  it("realign re-issues the ACLs without recreating or re-keying", async () => {
     const calls: Calls = [];
     await buildProvisioningService(calls, DEDICATED_RES, {
       nodes: staleNode(),
       repo: oneFriend,
     }).realignInstance(instance);
 
-    expect(calls).toContain("mc:setAuditWebhook");
     expect(calls).toContain("ts:ensureFriendAcl");
     expect(calls).not.toContain("runtime:ensureInstance");
     expect(calls).not.toContain("ts:mintAuthKey:tag:p0rt1on-serve");
