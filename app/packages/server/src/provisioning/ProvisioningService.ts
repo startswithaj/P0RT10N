@@ -366,23 +366,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
     return this.repo.recordInvite(friendId, { email, inviteId, status });
   }
 
-  /** Re-issue config living OUTSIDE instance data (audit webhook, friend ACL
-   * grants) on each boot reconcile. Idempotent — steady state is a cheap no-op. */
+  /** Re-issue config living OUTSIDE instance data (friend ACL grants) on each
+   * boot reconcile. Idempotent — steady state is a cheap no-op. */
   realignInstance(instance: InstanceRef): Promise<void> {
-    return this.mutex.run(() => this.realignInstanceLocked(instance));
-  }
-
-  private async realignInstanceLocked(instance: InstanceRef): Promise<void> {
-    // The token is master-key-derived, so re-issuing lets a rebuilt manager
-    // reconnect the instance with no manual step. Idempotent.
-    await this.mc.forInstance({
-      alias: instance.tsHostname,
-      minioPort: instance.minioPort,
-    }).setAuditWebhook(
-      this.config.auditWebhookUrl,
-      this.config.auditWebhookToken,
-    );
-    await this.reapplyFriendAcls(instance);
+    return this.mutex.run(() => this.reapplyFriendAcls(instance));
   }
 
   /** Recreate a missing container on top of its surviving data volume; buckets
@@ -420,7 +407,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
         log,
       ),
     };
-    await this.realignInstanceLocked(current);
+    await this.reapplyFriendAcls(current);
     // System audit row (friendId null): the event is instance-level and may
     // span several pooled friends.
     await this.repo.audit(
@@ -859,16 +846,6 @@ export class ProvisioningService implements ProvisioningServiceContract {
     log: Logger,
   ): AsyncGenerator<StepEvent<ProvisionStepKey>, string | undefined> {
     yield { type: "step", step: "smoke" };
-    // Before the smoke test, so its traffic is the first thing audited: a
-    // portion whose webhook is broken then shows no activity from the moment
-    // it exists, instead of looking identical to one nobody has used yet.
-    // Idempotent per instance; the shared pool already has it. Internally
-    // waits for MinIO to be serving again after the restart it triggers.
-    log.debug("configuring audit webhook");
-    await mc.setAuditWebhook(
-      this.config.auditWebhookUrl,
-      this.config.auditWebhookToken,
-    );
     // Smoke-test over the ADMIN endpoint (same MinIO) — the manager isn't on
     // the tailnet and can't reach the serve URL.
     const adminEndpoint = this.runtime.adminEndpoint(
@@ -935,7 +912,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
 
   /** Reads (and clears) the friend's activity, retrying briefly so a slow
    * webhook flush isn't mistaken for a broken one. Recursive rather than a
-   * loop, matching `pollHealth` and `McShellClient.awaitReady`. Re-reading is
+   * loop, matching `pollHealth`. Re-reading is
    * safe: takeActivity is read-then-delete, so a delete on an empty row is a
    * no-op and an event landing between attempts is caught by the next one. */
   private async readAuditActivity(
@@ -1433,6 +1410,10 @@ export class ProvisioningService implements ProvisioningServiceContract {
       minioPort,
       rootCred: this.keyGen.rootCredentialFor(tsHostname),
       tsAuthKey,
+      auditWebhook: {
+        endpoint: this.config.auditWebhookUrl,
+        authToken: this.config.auditWebhookToken,
+      },
     };
   }
 

@@ -144,68 +144,6 @@ describe("McShellClient arg-building", () => {
     expect(cmds[0].args).toEqual(["admin", "user", "disable", "alice", "AK"]);
   });
 
-  it("setAuditWebhook configures, restarts, then waits for ready", async () => {
-    const cmds: RecordedCommand[] = [];
-    await client(cmds).setAuditWebhook("http://m/audit", "tok");
-    expect(cmds[0].args.slice(0, 5)).toEqual([
-      "admin",
-      "config",
-      "set",
-      "alice",
-      "audit_webhook:p0rt1on",
-    ]);
-    // MinIO sends auth_token verbatim as the Authorization header, so the
-    // Bearer scheme must be baked in here, quoted for mc's KV parser.
-    expect(cmds[0].args[6]).toBe('auth_token="Bearer tok"');
-    expect(cmds[1].args).toEqual(
-      ["admin", "service", "restart", "--json", "alice"],
-    );
-    // The restart drops connections, so "configured" must mean "serving
-    // again"; the next mc call must not land in the restart window.
-    expect(cmds[2].args).toEqual(["ready", "alice"]);
-  });
-
-  it("setAuditWebhook retries `ready` until MinIO answers again", async () => {
-    const cmds: RecordedCommand[] = [];
-    const readyFailures = { left: 2 };
-    await client(cmds, (args) => {
-      if (args[0] === "ready" && readyFailures.left > 0) {
-        readyFailures.left -= 1;
-        return { code: 1, stdout: "", stderr: "connection refused" };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    }).setAuditWebhook("http://m/audit", "tok");
-    expect(cmds.filter((c) => c.args[0] === "ready").length).toBe(3);
-  });
-
-  it("setAuditWebhook distrusts `ready` until MinIO has gone down", async () => {
-    // Restart is async: the old process still answers `ready` for a while.
-    // The wait must see it go down before a passing `ready` means "back up".
-    const cmds: RecordedCommand[] = [];
-    const script = { calls: 0 };
-    await client(cmds, (args) => {
-      if (args[0] !== "ready") return { code: 0, stdout: "", stderr: "" };
-      script.calls += 1;
-      // old process alive (2 calls), then down (1 call), then back up
-      return script.calls === 3
-        ? { code: 1, stdout: "", stderr: "connection refused" }
-        : { code: 0, stdout: "", stderr: "" };
-    }).setAuditWebhook("http://m/audit", "tok");
-    expect(cmds.filter((c) => c.args[0] === "ready").length).toBe(4);
-  });
-
-  it("setAuditWebhook fails loudly when MinIO never comes back", async () => {
-    const failing = client(
-      [],
-      (args) =>
-        args[0] === "ready"
-          ? { code: 1, stdout: "", stderr: "connection refused" }
-          : { code: 0, stdout: "", stderr: "" },
-    );
-    await expect(failing.setAuditWebhook("http://m/audit", "tok"))
-      .rejects.toThrow("did not come back after restart");
-  });
-
   it("createUser failure never leaks the secret key in the error", async () => {
     // The secret sits after `--`, so argv is structurally omitted from
     // errors, and it is also declared for masking as a backup.
@@ -228,21 +166,6 @@ describe("McShellClient arg-building", () => {
       .then(() => null, (e: Error) => e.message);
     expect(err).toContain("…<3 args>");
     expect(err).not.toContain("AK-visible-id");
-  });
-
-  it("setAuditWebhook failure never leaks the token in the error", async () => {
-    const cmds: RecordedCommand[] = [];
-    // Fail with the token in BOTH places it can appear: the echoed argv and
-    // mc's own stderr.
-    const failing = client(cmds, () => ({
-      code: 1,
-      stdout: "",
-      stderr: "unable to set auth_token=Bearer s3cr3t-tok",
-    }));
-    const err = await failing.setAuditWebhook("http://m/audit", "s3cr3t-tok")
-      .then(() => null, (e: Error) => e.message);
-    expect(err).toContain("«redacted»");
-    expect(err).not.toContain("s3cr3t-tok");
   });
 });
 

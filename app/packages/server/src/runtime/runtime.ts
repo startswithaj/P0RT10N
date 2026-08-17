@@ -43,6 +43,7 @@ export interface InstanceSpec {
   rootCred: S3Credential;
   /** Single-use tailnet enrollment key for the instance's serve node. */
   tsAuthKey: string;
+  auditWebhook: { endpoint: string; authToken: string };
 }
 
 export interface InstanceTailscaleOptions {

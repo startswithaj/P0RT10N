@@ -127,6 +127,14 @@ describe("KubernetesRuntime", () => {
       "alice",
       "alice",
     ]);
+    const secret = reqs.find((r) => last(r.path) === "alice-creds");
+    expect(secret?.body).toMatchObject({
+      stringData: {
+        MINIO_AUDIT_WEBHOOK_ENABLE_p0rt1on: "on",
+        MINIO_AUDIT_WEBHOOK_ENDPOINT_p0rt1on: "http://manager:8081/audit",
+        MINIO_AUDIT_WEBHOOK_AUTH_TOKEN_p0rt1on: "Bearer audit-tok",
+      },
+    });
     reqs.forEach((r) => {
       expect(r.method).toBe("PATCH");
       expect(r.query).toContain("fieldManager=p0rt1on");
