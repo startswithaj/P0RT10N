@@ -1444,6 +1444,7 @@ export class ProvisioningService implements ProvisioningServiceContract {
         joinLines: enroll.mode === "authKey"
           ? kopiaJoinLines(`tailscale up --authkey=${enroll.tsAuthKey}`)
           : kopiaInviteJoinLines(),
+        tsAuthKey: enroll.mode === "authKey" ? enroll.tsAuthKey : undefined,
       }),
     };
     // Audit degradation isn't enrollment-specific, so it applies to both.

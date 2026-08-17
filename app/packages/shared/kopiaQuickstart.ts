@@ -33,6 +33,31 @@ export function kopiaCreateTail(retentionDays: number): string[] {
   ];
 }
 
+export function dockerAltLines(opts: {
+  endpoint: string;
+  bucket: string;
+  cred: KopiaCredential;
+  retentionDays: number;
+  tsAuthKey?: string;
+}): string[] {
+  return [
+    "",
+    "# --- Alternatively use the backup-client docker container ---",
+    "# No Kopia or Tailscale install needed — the container bundles both.",
+    "# Save this whole block as backup.env and run:",
+    "#   docker run --rm --env-file backup.env -v /my/data:/data:ro \\",
+    "#     ghcr.io/startswithaj/p0rt10n/p0rt1on-backup-client:latest",
+    `TAILSCALE_AUTHKEY=${opts.tsAuthKey ?? "<your-tailscale-auth-key>"}`,
+    `S3_ENDPOINT=${opts.endpoint}`,
+    `S3_BUCKET=${opts.bucket}`,
+    `S3_ACCESS_KEY_ID=${opts.cred.accessKeyId}`,
+    `S3_SECRET_ACCESS_KEY=${opts.cred.secretKey}`,
+    "KOPIA_PASSWORD=choose-a-strong-passphrase",
+    "BACKUP_PATH=/data",
+    `RETENTION_DAYS=${opts.retentionDays}`,
+  ];
+}
+
 export function buildKopiaQuickstart(opts: {
   endpoint: string;
   bucket: string;
@@ -40,6 +65,7 @@ export function buildKopiaQuickstart(opts: {
   retentionDays: number;
   create: boolean;
   joinLines?: string[];
+  tsAuthKey?: string;
 }): string {
   const host = opts.endpoint.replace(/^https?:\/\//, "");
   const create = opts.create;
@@ -50,7 +76,9 @@ export function buildKopiaQuickstart(opts: {
   const lastCredFlag = create
     ? `  --secret-access-key=${opts.cred.secretKey} \\`
     : `  --secret-access-key=${opts.cred.secretKey}`;
-  const tail = create ? kopiaCreateTail(opts.retentionDays) : [];
+  const tail = create
+    ? [...kopiaCreateTail(opts.retentionDays), ...dockerAltLines(opts)]
+    : [];
   return [
     ...join,
     password,
